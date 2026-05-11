@@ -1,0 +1,9 @@
+def message_to_dict(doc: dict) -> dict:
+    return {
+        "id": str(doc["_id"]),
+        "from_user_id": doc["from_user_id"],
+        "to_user_id": doc["to_user_id"],
+        "content": doc["content"],
+        "read": doc.get("read", False),
+        "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
+    }

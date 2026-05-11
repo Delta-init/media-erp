@@ -1,0 +1,50 @@
+from bson import ObjectId
+from bson.errors import InvalidId
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from app.database import get_db
+from app.utils.jwt import decode_access_token
+
+_bearer = HTTPBearer()
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+) -> dict:
+    """
+    FastAPI dependency — validates the Bearer JWT and returns the user document
+    with the role document attached as '_role'.
+    Raises 401 on any auth failure so callers never see a partial state.
+    """
+    unauth = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = decode_access_token(credentials.credentials)
+        user_id: str = payload.get("sub", "")
+        object_id = ObjectId(user_id)
+    except (JWTError, InvalidId, ValueError):
+        raise unauth
+
+    user = await db["users"].find_one({"_id": object_id})
+    if user is None or not user.get("is_active", True):
+        raise unauth
+
+    # Attach role document for permission checks (live fetch — always current)
+    role_id = user.get("role_id")
+    if role_id:
+        try:
+            role_doc = await db["roles"].find_one({"_id": ObjectId(role_id)})
+            user["_role"] = role_doc
+        except Exception:
+            user["_role"] = None
+    else:
+        user["_role"] = None
+
+    return user

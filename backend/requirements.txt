@@ -1,0 +1,38 @@
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+gunicorn==23.0.0
+
+# Database
+motor==3.6.0
+pymongo==4.9.2
+
+# Auth & security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.12
+cryptography==43.0.3
+
+# Config
+pydantic-settings==2.6.1
+pydantic[email]==2.10.3
+python-dotenv==1.0.1
+
+# Task queue
+celery==5.4.0
+redis==5.2.1
+
+# AI / Ollama (local — no rate limits, no API key needed)
+ollama>=0.4.0
+
+# OAuth / HTTP
+httpx==0.28.1
+aiohttp==3.11.10
+
+# Observability (Phase 8.7 — no-op when SENTRY_DSN is empty)
+sentry-sdk[fastapi]==2.19.2
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx==0.28.1

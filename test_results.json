@@ -1,0 +1,150 @@
+﻿[
+    {
+        "Feature":  "Auth - Login returns access+refresh token",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Auth - Duplicate email returns 4xx (got 409)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Auth - Refresh token",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Auth - /me returns user",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Auth - No token returns 401/403 (got 403)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Health - GET /health",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Connectors - Create connector",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Connectors - List connectors",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Connectors - Get by ID",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Connectors - Update name",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Connectors - Update sync_frequency",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "OAuth - google_ads auth URL",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "OAuth - facebook_ads auth URL",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "OAuth - linkedin_ads auth URL",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Sync - Trigger sync (400 - unauthenticated connector, endpoint OK)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Sync - Status endpoint",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Sync - History endpoint",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Overview KPIs (spend, roas, ctr present)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Overview platform filter",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Overview KPI has value+delta shape",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Campaigns list (campaigns+total+pages)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Campaigns search+sort returns 0",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Trend daily",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Trend weekly",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Trend invalid metric defaults to spend",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Custom report (data+chart_type)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Save report (201 + created_at)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - List saved reports",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Get saved by ID",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Non-existent saved returns 404",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Delete saved (204)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - Deleted report returns 404",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Reports - CSV export (200 + text/csv + header)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Connectors - Delete connector (204)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Frontend - /dashboard loads (200)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Frontend - /connectors loads (200)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "Frontend - /reports loads (200)",
+        "Status":  "PASS"
+    }
+]

@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import json,sys; d=json.load(sys.stdin); fp=d.get('tool_input',{}).get('file_path',''); exit(0 if 'PROJECT_STATUS' in fp else 1)\" && cd \"C:/Users/MSI-PC/Delta/mediaERP\" && python scripts/sync_to_sheets.py 2>/dev/null || true",
+            "statusMessage": "Syncing PROJECT_STATUS.md → Google Sheets...",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

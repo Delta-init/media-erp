@@ -1,0 +1,106 @@
+﻿[
+    {
+        "Feature":  "5.1/5.3 Frontend - /dashboard loads (200)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.1/5.3 Frontend - /connectors loads (200)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.1/5.3 Frontend - /reports loads (200)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.1/5.3 Frontend - /campaigns loads (200)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.5 Frontend - /reports/[id] loads (200)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.2 Overview KPIs contain spend/roas/ctr/impressions",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.2 Overview KPI has value+delta shape",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.3 Campaigns list returns campaigns+total+pages",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.3 Campaigns search+sort (no match â†’ total=0)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.4 Custom report (bar) returns data+chart_type",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.4 Custom report (donut) chart_type",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.5 Save report â†’ 201 with _id+created_at",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.5 List saved reports (â‰¥1 item)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.5 Get saved report by ID",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.5 Non-existent saved report â†’ 404",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.5 Delete saved report â†’ 204",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "5.5 CSV export (200 + text/csv)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "6.3 AI /history requires auth (got 403)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "6.3 AI /history returns items+total+limit+offset",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "6.3 AI /history respects limit+offset params",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "6.3 AI /query requires auth (got 403)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "6.3 AI /query rejects short question â†’ 422",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "6.3 AI /query rejects missing question â†’ 422",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "6.1/6.2 AI /query no API key â†’ 503 (endpoint works, key unconfigured)",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "6.3 AI /history/invalid-id â†’ 422",
+        "Status":  "PASS"
+    },
+    {
+        "Feature":  "6.3 AI /history/nonexistent â†’ 404",
+        "Status":  "PASS"
+    }
+]
