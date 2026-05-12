@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel, Field
 
-PLATFORMS = {"google_ads", "ga4", "facebook_ads", "linkedin_ads", "tiktok_ads"}
+PLATFORMS = {"google_ads", "ga4", "facebook_ads", "facebook_pages", "instagram", "linkedin_ads", "tiktok_ads"}
 # linkedin_ads: Phase 3.8 | tiktok_ads: Phase 3.9
 SYNC_FREQUENCIES = {"hourly", "daily", "manual"}
 STATUSES = {"disconnected", "connected", "syncing", "error"}

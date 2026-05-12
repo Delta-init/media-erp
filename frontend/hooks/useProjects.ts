@@ -1,0 +1,91 @@
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import api from "@/lib/axios";
+import type {
+  CreateTaskPayload,
+  ProjectFilters,
+  Task,
+  UpdateTaskPayload,
+} from "@/types/project";
+
+const QK = {
+  tasks: (filters: Partial<ProjectFilters>) => ["projects", "tasks", filters] as const,
+};
+
+export function useTasks(filters: Partial<ProjectFilters> = {}) {
+  return useQuery({
+    queryKey: QK.tasks(filters),
+    queryFn: async () => {
+      const params: Record<string, string> = {};
+      if (filters.search)      params.search      = filters.search;
+      if (filters.status)      params.status      = filters.status;
+      if (filters.priority)    params.priority    = filters.priority;
+      if (filters.date_filter) params.date_filter = filters.date_filter;
+      if (filters.date_from)   params.date_from   = filters.date_from;
+      if (filters.date_to)     params.date_to     = filters.date_to;
+      const { data } = await api.get<{ success: boolean; data: Task[] }>(
+        "/projects",
+        { params }
+      );
+      return data.data;
+    },
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: CreateTaskPayload) => {
+      const { data } = await api.post<{ success: boolean; data: Task }>(
+        "/projects",
+        payload
+      );
+      return data.data;
+    },
+    onSuccess() {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      toast.success("Task created!");
+    },
+    onError() {
+      toast.error("Failed to create task");
+    },
+  });
+}
+
+export function useUpdateTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: UpdateTaskPayload }) => {
+      const { data } = await api.put<{ success: boolean; data: Task }>(
+        `/projects/${id}`,
+        payload
+      );
+      return data.data;
+    },
+    onSuccess() {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError() {
+      toast.error("Failed to update task");
+    },
+  });
+}
+
+export function useDeleteTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/projects/${id}`);
+    },
+    onSuccess() {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      toast.success("Task deleted");
+    },
+    onError() {
+      toast.error("Failed to delete task");
+    },
+  });
+}

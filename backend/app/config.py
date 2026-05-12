@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     facebook_redirect_uri: str = (
         "http://localhost:8000/api/v1/connectors/facebook_ads/callback"
     )
+    facebook_pages_redirect_uri: str = (
+        "http://localhost:8000/api/v1/connectors/facebook_pages/callback"
+    )
+
+    # Instagram
+    instagram_redirect_uri: str = (
+        "http://localhost:8000/api/v1/connectors/instagram/callback"
+    )
 
     # LinkedIn Ads
     linkedin_client_id: str = ""

@@ -1,0 +1,164 @@
+"use client";
+
+import { useState } from "react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Calendar, GripVertical, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
+import type { Task, TaskStatus } from "@/types/project";
+import { COLUMNS, PRIORITY_META } from "@/types/project";
+
+interface Props {
+  task: Task;
+  overlay?: boolean;
+}
+
+export function KanbanCard({ task, overlay = false }: Props) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    // Suppress transition while actively dragging — prevents rubber-band jitter
+    transition: isDragging ? "none" : transition,
+    touchAction: "none",
+    willChange: "transform",
+  };
+
+  const deleteTask = useDeleteTask();
+  const updateTask = useUpdateTask();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const meta = PRIORITY_META[task.priority];
+  const isOverdue =
+    task.due_date &&
+    new Date(task.due_date) < new Date() &&
+    task.status !== "currently_working";
+
+  function handleStatusChange(s: TaskStatus) {
+    updateTask.mutate({ id: task.id, payload: { status: s } });
+  }
+
+  // ── Dragging: render a clean placeholder slot so the column keeps its shape ──
+  // The actual card travels with the cursor via DragOverlay in KanbanBoard.
+  if (isDragging && !overlay) {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className="min-h-[104px] rounded-xl border-2 border-dashed border-primary/25 bg-primary/[0.04] dark:bg-primary/[0.06]"
+        aria-hidden="true"
+      />
+    );
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      // Entire card surface is the drag handle — much more ergonomic than grip-only
+      {...attributes}
+      {...listeners}
+      className={cn(
+        "group relative rounded-xl border bg-card p-3.5 shadow-sm select-none",
+        "cursor-grab active:cursor-grabbing transition-shadow duration-150",
+        overlay
+          ? "shadow-2xl rotate-[1.5deg] scale-[1.04] ring-2 ring-primary/30 cursor-grabbing"
+          : "hover:shadow-md hover:border-primary/20"
+      )}
+    >
+      {/* Priority badge + grip icon (visual only — listeners are on the outer div) */}
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <GripVertical className="mt-0.5 size-4 shrink-0 text-muted-foreground/25 pointer-events-none" />
+        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", meta.color)}>
+          {meta.label}
+        </span>
+      </div>
+
+      {/* Title */}
+      <p className="text-sm font-medium leading-snug text-foreground mb-1.5 pl-6">
+        {task.title}
+      </p>
+
+      {/* Description */}
+      {task.description && (
+        <p className="text-[11px] text-muted-foreground line-clamp-2 pl-6 mb-2">
+          {task.description}
+        </p>
+      )}
+
+      {/* Meta row */}
+      <div className="flex items-center justify-between pl-6 mt-2 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {/* Assignee avatar */}
+          {task.assigned_to && (
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <div className="flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[9px]">
+                {task.assigned_to[0]?.toUpperCase()}
+              </div>
+              <span className="truncate max-w-[60px]">{task.assigned_to}</span>
+            </div>
+          )}
+
+          {/* Due date */}
+          {task.due_date && (
+            <div className={cn(
+              "flex items-center gap-0.5 text-[10px]",
+              isOverdue ? "text-red-500" : "text-muted-foreground"
+            )}>
+              <Calendar className="size-3" />
+              {new Date(task.due_date).toLocaleDateString("en-GB", {
+                day: "numeric",
+                month: "short",
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Status quick-switch — stopPropagation so pointer-down doesn't start drag */}
+        <select
+          value={task.status}
+          onChange={e => handleStatusChange(e.target.value as TaskStatus)}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
+          className="rounded-md border-0 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium outline-none cursor-pointer hover:bg-muted transition-colors max-w-[110px]"
+        >
+          {COLUMNS.map(c => (
+            <option key={c.id} value={c.id}>{c.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Delete button — stopPropagation so it doesn't trigger a drag */}
+      <button
+        onPointerDown={e => e.stopPropagation()}
+        onClick={e => {
+          e.stopPropagation();
+          if (confirmDelete) {
+            deleteTask.mutate(task.id);
+            setConfirmDelete(false);
+          } else {
+            setConfirmDelete(true);
+            setTimeout(() => setConfirmDelete(false), 2500);
+          }
+        }}
+        className={cn(
+          "absolute top-2 right-2 rounded-md p-1 opacity-0 group-hover:opacity-100 transition-all",
+          confirmDelete
+            ? "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400 opacity-100"
+            : "text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10"
+        )}
+        title={confirmDelete ? "Click again to confirm" : "Delete task"}
+      >
+        <Trash2 className="size-3" />
+      </button>
+    </div>
+  );
+}

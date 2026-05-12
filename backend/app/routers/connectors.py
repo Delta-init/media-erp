@@ -155,6 +155,128 @@ async def facebook_ads_callback(
     )
 
 
+@router.get("/facebook_pages/auth")
+async def facebook_pages_auth(
+    connector_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Return a Facebook OAuth URL scoped for Pages + Messenger."""
+    user_id = str(current_user["_id"])
+    doc = await get_connector(connector_id, user_id, db)
+    if not doc:
+        return error_response("Connector not found", status_code=404)
+    if doc["platform"] != "facebook_pages":
+        return error_response("Connector platform is not facebook_pages", status_code=400)
+
+    from app.platforms.facebook_pages import get_auth_url
+    url = get_auth_url(connector_id, user_id)
+    return success_response({"auth_url": url}, "Facebook Pages OAuth URL generated")
+
+
+@router.get("/facebook_pages/callback")
+async def facebook_pages_callback(
+    state: str,
+    code: Optional[str] = Query(default=None),
+    error: Optional[str] = Query(default=None),
+    error_description: Optional[str] = Query(default=None),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Facebook redirects here after Pages consent. PUBLIC."""
+    if error:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error={quote_plus(error)}&platform=facebook_pages",
+            status_code=302,
+        )
+    if not code:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=missing_code&platform=facebook_pages",
+            status_code=302,
+        )
+    from app.platforms.facebook_pages import exchange_code
+    try:
+        token_data = await exchange_code(code, state)
+    except ValueError as exc:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error={str(exc)}&platform=facebook_pages",
+            status_code=302,
+        )
+    await save_tokens(
+        connector_id=token_data["connector_id"],
+        user_id=token_data["user_id"],
+        access_token=token_data["access_token"],
+        refresh_token=token_data.get("refresh_token"),
+        expires_at=token_data["expires_at"],
+        platform_account_id=None,
+        db=db,
+    )
+    return RedirectResponse(
+        f"{settings.frontend_url}/connectors?connected=facebook_pages",
+        status_code=302,
+    )
+
+
+@router.get("/instagram/auth")
+async def instagram_auth(
+    connector_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Return a Facebook OAuth URL scoped for Instagram."""
+    user_id = str(current_user["_id"])
+    doc = await get_connector(connector_id, user_id, db)
+    if not doc:
+        return error_response("Connector not found", status_code=404)
+    if doc["platform"] != "instagram":
+        return error_response("Connector platform is not instagram", status_code=400)
+
+    from app.platforms.instagram import get_auth_url
+    url = get_auth_url(connector_id, user_id)
+    return success_response({"auth_url": url}, "Instagram OAuth URL generated")
+
+
+@router.get("/instagram/callback")
+async def instagram_callback(
+    state: str,
+    code: Optional[str] = Query(default=None),
+    error: Optional[str] = Query(default=None),
+    error_description: Optional[str] = Query(default=None),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Facebook redirects here after Instagram consent. PUBLIC."""
+    if error:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error={quote_plus(error)}&platform=instagram",
+            status_code=302,
+        )
+    if not code:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=missing_code&platform=instagram",
+            status_code=302,
+        )
+    from app.platforms.instagram import exchange_code
+    try:
+        token_data = await exchange_code(code, state)
+    except ValueError as exc:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error={str(exc)}&platform=instagram",
+            status_code=302,
+        )
+    await save_tokens(
+        connector_id=token_data["connector_id"],
+        user_id=token_data["user_id"],
+        access_token=token_data["access_token"],
+        refresh_token=token_data.get("refresh_token"),
+        expires_at=token_data["expires_at"],
+        platform_account_id=None,
+        db=db,
+    )
+    return RedirectResponse(
+        f"{settings.frontend_url}/connectors?connected=instagram",
+        status_code=302,
+    )
+
+
 @router.get("/tiktok_ads/auth")
 async def tiktok_ads_auth(
     connector_id: str,

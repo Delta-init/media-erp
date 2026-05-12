@@ -1,6 +1,6 @@
 """
 Facebook Ads OAuth2 + token management.
-Scopes: ads_read, ads_management, read_insights
+Scopes: ads_read, ads_management
 
 Facebook does not support PKCE — the state nonce provides CSRF protection.
 Token exchange is two-step:
@@ -20,7 +20,7 @@ from app.utils.oauth import generate_state, store_state, consume_state
 _GRAPH_VERSION = "v21.0"
 _AUTH_URL = f"https://www.facebook.com/{_GRAPH_VERSION}/dialog/oauth"
 _TOKEN_URL = f"https://graph.facebook.com/{_GRAPH_VERSION}/oauth/access_token"
-_SCOPES = "ads_read,ads_management,read_insights"
+_SCOPES = "ads_read,ads_management"
 _LONG_LIVED_EXPIRE_DAYS = 60
 
 

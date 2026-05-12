@@ -10,12 +10,13 @@ pymongo==4.9.2
 # Auth & security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
 python-multipart==0.0.12
 cryptography==43.0.3
 
 # Config
-pydantic-settings==2.6.1
-pydantic[email]==2.10.3
+pydantic-settings==2.8.1
+pydantic[email]==2.11.4
 python-dotenv==1.0.1
 
 # Task queue
@@ -23,7 +24,7 @@ celery==5.4.0
 redis==5.2.1
 
 # AI / Ollama (local — no rate limits, no API key needed)
-ollama>=0.4.0
+ollama>=0.6.0
 
 # OAuth / HTTP
 httpx==0.28.1

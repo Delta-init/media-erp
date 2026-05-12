@@ -33,6 +33,7 @@ from app.routers import projects as projects_router
 from app.routers import roles as roles_router
 from app.routers import users as users_router
 from app.routers import chat as chat_router
+from app.routers import social as social_router
 from app.utils.response import success_response
 
 
@@ -71,6 +72,7 @@ app.include_router(projects_router.router)
 app.include_router(roles_router.router)
 app.include_router(users_router.router)
 app.include_router(chat_router.router)
+app.include_router(social_router.router)
 
 
 @app.get("/api/v1/health", tags=["health"])
