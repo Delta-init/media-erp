@@ -2,17 +2,17 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Share2, Camera, ImageIcon, Link2, FileText, Send } from "lucide-react";
+import { Share2, Camera, ImageIcon, Link2, FileText, Send, User } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Field, FieldLabel, FieldError } from "@/components/ui/field";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { useConnectors } from "@/hooks/useConnectors";
 import {
   useFacebookPages,
-  useInstagramAccounts,
+  useInstagramLoginAccount,
   usePublishFacebookPost,
-  usePublishInstagramPost,
+  usePublishInstagramLoginPost,
 } from "@/hooks/useSocial";
 
 type Platform = "facebook" | "instagram";
@@ -21,47 +21,34 @@ export default function SocialPostPage() {
   const [platform, setPlatform] = useState<Platform>("facebook");
   const [connectorId, setConnectorId] = useState("");
   const [pageId, setPageId] = useState("");
-  const [igId, setIgId] = useState("");
-  const [pageToken, setPageToken] = useState("");
   const [message, setMessage] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [link, setLink] = useState("");
 
   const { data: allConnectors = [] } = useConnectors();
   const fbConnectors = allConnectors.filter((c) => c.platform === "facebook_pages" && c.status === "connected");
-  const igConnectors = allConnectors.filter((c) => c.platform === "instagram" && c.status === "connected");
+  // Instagram Login connector (direct OAuth — no Facebook Page required)
+  const igConnectors = allConnectors.filter((c) => c.platform === "instagram_login" && c.status === "connected");
 
   const activeConnectors = platform === "facebook" ? fbConnectors : igConnectors;
 
   const { data: fbPages = [], isLoading: pagesLoading } = useFacebookPages(
     platform === "facebook" ? connectorId : ""
   );
-  const { data: igAccounts = [], isLoading: accountsLoading } = useInstagramAccounts(
+
+  // For Instagram Login, we fetch the single account linked to the connector
+  const { data: igAccount, isLoading: igLoading } = useInstagramLoginAccount(
     platform === "instagram" ? connectorId : ""
   );
 
   const publishFb = usePublishFacebookPost();
-  const publishIg = usePublishInstagramPost();
+  const publishIg = usePublishInstagramLoginPost();
 
   const isPending = publishFb.isPending || publishIg.isPending;
 
   function handleConnectorChange(id: string) {
     setConnectorId(id);
     setPageId("");
-    setIgId("");
-    setPageToken("");
-  }
-
-  function handlePageChange(id: string) {
-    setPageId(id);
-  }
-
-  function handleIgAccountChange(igid: string) {
-    const account = igAccounts.find((a) => a.ig_id === igid);
-    if (account) {
-      setIgId(account.ig_id);
-      setPageToken(account.page_token);
-    }
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -83,8 +70,6 @@ export default function SocialPostPage() {
     } else {
       publishIg.mutate({
         connector_id: connectorId,
-        ig_id: igId,
-        page_token: pageToken,
         caption: message,
         image_url: imageUrl || undefined,
       }, {
@@ -99,7 +84,7 @@ export default function SocialPostPage() {
   const canSubmit =
     !!connectorId &&
     !!message &&
-    (platform === "facebook" ? !!pageId : !!igId) &&
+    (platform === "facebook" ? !!pageId : true) &&
     (platform === "instagram" ? !!imageUrl : true);
 
   return (
@@ -114,7 +99,7 @@ export default function SocialPostPage() {
         {(["facebook", "instagram"] as Platform[]).map((p) => (
           <button
             key={p}
-            onClick={() => { setPlatform(p); setConnectorId(""); setPageId(""); setIgId(""); setPageToken(""); }}
+            onClick={() => { setPlatform(p); setConnectorId(""); setPageId(""); }}
             className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
               platform === p
                 ? "bg-primary text-primary-foreground"
@@ -165,7 +150,7 @@ export default function SocialPostPage() {
               </select>
             </Field>
 
-            {/* Page / IG account selector */}
+            {/* Facebook: page picker */}
             {connectorId && platform === "facebook" && (
               <Field>
                 <FieldLabel>Facebook Page</FieldLabel>
@@ -174,7 +159,7 @@ export default function SocialPostPage() {
                 ) : (
                   <select
                     value={pageId}
-                    onChange={(e) => handlePageChange(e.target.value)}
+                    onChange={(e) => setPageId(e.target.value)}
                     className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   >
                     <option value="">Select page…</option>
@@ -186,26 +171,27 @@ export default function SocialPostPage() {
               </Field>
             )}
 
+            {/* Instagram: show connected account info */}
             {connectorId && platform === "instagram" && (
-              <Field>
-                <FieldLabel>Instagram Account</FieldLabel>
-                {accountsLoading ? (
-                  <p className="text-sm text-muted-foreground">Loading accounts…</p>
+              <div className="rounded-lg border bg-muted/30 px-4 py-3">
+                {igLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading account…</p>
+                ) : igAccount ? (
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500 to-pink-500 text-white">
+                      <User className="size-4" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">@{igAccount.username || igAccount.name}</p>
+                      {igAccount.followers_count !== undefined && (
+                        <p className="text-xs text-muted-foreground">{igAccount.followers_count.toLocaleString()} followers</p>
+                      )}
+                    </div>
+                  </div>
                 ) : (
-                  <select
-                    value={igId}
-                    onChange={(e) => handleIgAccountChange(e.target.value)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">Select account…</option>
-                    {igAccounts.map((a) => (
-                      <option key={a.ig_id} value={a.ig_id}>
-                        @{a.ig_username || a.ig_name}
-                      </option>
-                    ))}
-                  </select>
+                  <p className="text-sm text-muted-foreground">Could not load account info.</p>
                 )}
-              </Field>
+              </div>
             )}
 
             {/* Post content */}

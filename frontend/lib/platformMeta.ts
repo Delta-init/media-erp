@@ -45,10 +45,16 @@ export const PLATFORM_META: Record<ConnectorPlatform, PlatformMeta> = {
     bgClass: "bg-blue-600",
   },
   instagram: {
-    label: "Instagram",
-    description: "Publish posts & send Instagram DMs",
+    label: "Instagram (via Facebook)",
+    description: "Publish posts & send Instagram DMs via Facebook Pages",
     initials: "IG",
     bgClass: "bg-gradient-to-br from-purple-500 to-pink-500",
+  },
+  instagram_login: {
+    label: "Instagram",
+    description: "Connect Instagram directly — no Facebook Page required",
+    initials: "IG",
+    bgClass: "bg-gradient-to-br from-fuchsia-500 to-pink-500",
   },
 };
 
@@ -57,6 +63,7 @@ export const CONNECTABLE_PLATFORMS: ConnectorPlatform[] = [
   "ga4",
   "facebook_ads",
   "facebook_pages",
+  "instagram_login",
   "instagram",
   "linkedin_ads",
   "tiktok_ads",

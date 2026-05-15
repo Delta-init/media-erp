@@ -111,6 +111,36 @@ async def publish_post(
         return resp.json()
 
 
+async def get_conversations(page_id: str, page_token: str) -> list[dict]:
+    """List Messenger conversations for a Facebook Page."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://graph.facebook.com/{_GRAPH_VERSION}/{page_id}/conversations",
+            params={
+                "access_token": page_token,
+                "fields": "id,participants,snippet,updated_time,unread_count",
+                "platform": "messenger",
+            },
+        )
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+
+
+async def get_conversation_messages(conversation_id: str, page_token: str) -> list[dict]:
+    """Get messages inside a Messenger conversation."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://graph.facebook.com/{_GRAPH_VERSION}/{conversation_id}/messages",
+            params={
+                "access_token": page_token,
+                "fields": "id,message,from,created_time",
+            },
+        )
+        resp.raise_for_status()
+        # API returns newest first — reverse so oldest is at top
+        return list(reversed(resp.json().get("data", [])))
+
+
 async def send_dm(
     page_id: str,
     page_token: str,

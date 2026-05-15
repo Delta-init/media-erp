@@ -4,6 +4,7 @@ export type ConnectorPlatform =
   | "facebook_ads"
   | "facebook_pages"
   | "instagram"
+  | "instagram_login"
   | "linkedin_ads"
   | "tiktok_ads";
 

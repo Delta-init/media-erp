@@ -1,101 +1,230 @@
 "use client";
 
-import { useState } from "react";
-import { motion } from "framer-motion";
-import { Share2, Camera, MessageCircle, User, Send } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Share2, Camera, MessageCircle, Send, RefreshCw,
+  User, ChevronRight, Inbox,
+} from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { useConnectors } from "@/hooks/useConnectors";
 import {
   useFacebookPages,
-  useInstagramAccounts,
+  useFacebookConversations,
+  useFacebookMessages,
+  useInstagramLoginConversations,
+  useInstagramLoginMessages,
   useSendFacebookDM,
-  useSendInstagramDM,
+  useSendInstagramLoginDM,
+  type Conversation,
+  type FacebookPage,
 } from "@/hooks/useSocial";
 
 type Platform = "facebook" | "instagram";
+
+// ── Helper ────────────────────────────────────────────────────────────────────
+
+function getOtherParticipant(conv: Conversation, selfId: string) {
+  return conv.participants?.data?.find((p) => p.id !== selfId) ?? conv.participants?.data?.[0];
+}
+
+function timeAgo(iso: string) {
+  try {
+    const diff = Date.now() - new Date(iso).getTime();
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return "just now";
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    return `${d}d ago`;
+  } catch {
+    return "";
+  }
+}
+
+// ── Conversation list item ────────────────────────────────────────────────────
+
+function ConvItem({
+  conv,
+  selfId,
+  selected,
+  onClick,
+}: {
+  conv: Conversation;
+  selfId: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const other = getOtherParticipant(conv, selfId);
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left flex items-start gap-3 px-4 py-3 border-b transition-colors ${
+        selected
+          ? "bg-primary/10 border-l-2 border-l-primary"
+          : "hover:bg-muted/50 border-l-2 border-l-transparent"
+      }`}
+    >
+      <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        <User className="size-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-1">
+          <p className="truncate text-sm font-medium">{other?.name ?? "Unknown"}</p>
+          {(conv.unread_count ?? 0) > 0 && (
+            <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+              {conv.unread_count}
+            </span>
+          )}
+        </div>
+        <p className="truncate text-xs text-muted-foreground">{conv.snippet || "—"}</p>
+        <p className="mt-0.5 text-[10px] text-muted-foreground/60">{timeAgo(conv.updated_time)}</p>
+      </div>
+      <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40 mt-1" />
+    </button>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function SocialDMPage() {
   const [platform, setPlatform] = useState<Platform>("facebook");
   const [connectorId, setConnectorId] = useState("");
   const [pageId, setPageId] = useState("");
-  const [igId, setIgId] = useState("");
-  const [pageToken, setPageToken] = useState("");
-  const [recipientId, setRecipientId] = useState("");
-  const [message, setMessage] = useState("");
+  const [selectedPage, setSelectedPage] = useState<FacebookPage | null>(null);
+  const [selectedConvId, setSelectedConvId] = useState("");
+  const [reply, setReply] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { data: allConnectors = [] } = useConnectors();
-  const fbConnectors = allConnectors.filter((c) => c.platform === "facebook_pages" && c.status === "connected");
-  const igConnectors = allConnectors.filter((c) => c.platform === "instagram" && c.status === "connected");
+  const fbConnectors = allConnectors.filter(
+    (c) => c.platform === "facebook_pages" && c.status === "connected"
+  );
+  const igConnectors = allConnectors.filter(
+    (c) => c.platform === "instagram_login" && c.status === "connected"
+  );
   const activeConnectors = platform === "facebook" ? fbConnectors : igConnectors;
 
+  // ── Facebook data ──────────────────────────────────────────────────────────
   const { data: fbPages = [], isLoading: pagesLoading } = useFacebookPages(
     platform === "facebook" ? connectorId : ""
   );
-  const { data: igAccounts = [], isLoading: accountsLoading } = useInstagramAccounts(
-    platform === "instagram" ? connectorId : ""
+  const {
+    data: fbConversations = [],
+    isLoading: fbConvLoading,
+    refetch: refetchFbConvs,
+  } = useFacebookConversations(connectorId, pageId);
+
+  const selectedFbConv = fbConversations.find((c) => c.id === selectedConvId) ?? null;
+
+  const {
+    data: fbMessages = [],
+    isLoading: fbMsgLoading,
+    refetch: refetchFbMsgs,
+  } = useFacebookMessages(connectorId, pageId, selectedConvId);
+
+  // ── Instagram Login data ───────────────────────────────────────────────────
+  const {
+    data: igConversations = [],
+    isLoading: igConvLoading,
+    refetch: refetchIgConvs,
+  } = useInstagramLoginConversations(platform === "instagram" ? connectorId : "");
+
+  const igConnector = allConnectors.find((c) => c.id === connectorId);
+  const igSelfId = igConnector?.platform_account_id ?? "";
+
+  const selectedIgConv = igConversations.find((c) => c.id === selectedConvId) ?? null;
+
+  const {
+    data: igMessages = [],
+    isLoading: igMsgLoading,
+    refetch: refetchIgMsgs,
+  } = useInstagramLoginMessages(
+    platform === "instagram" ? connectorId : "",
+    selectedConvId
   );
 
+  // ── Unified state ──────────────────────────────────────────────────────────
+  const conversations = platform === "facebook" ? fbConversations : igConversations;
+  const convLoading = platform === "facebook" ? fbConvLoading : igConvLoading;
+  const messages = platform === "facebook" ? fbMessages : igMessages;
+  const msgLoading = platform === "facebook" ? fbMsgLoading : igMsgLoading;
+  const selectedConv = platform === "facebook" ? selectedFbConv : selectedIgConv;
+  const selfId = platform === "facebook" ? pageId : igSelfId;
+
+  function refetchAll() {
+    if (platform === "facebook") { refetchFbConvs(); refetchFbMsgs(); }
+    else { refetchIgConvs(); refetchIgMsgs(); }
+  }
+
+  // ── Send reply ─────────────────────────────────────────────────────────────
   const sendFbDM = useSendFacebookDM();
-  const sendIgDM = useSendInstagramDM();
+  const sendIgDM = useSendInstagramLoginDM();
   const isPending = sendFbDM.isPending || sendIgDM.isPending;
 
-  function handleConnectorChange(id: string) {
-    setConnectorId(id);
-    setPageId("");
-    setIgId("");
-    setPageToken("");
+  function getRecipientId() {
+    if (!selectedConv) return "";
+    return getOtherParticipant(selectedConv, selfId)?.id ?? "";
   }
 
-  function handleIgAccountChange(igid: string) {
-    const account = igAccounts.find((a) => a.ig_id === igid);
-    if (account) {
-      setIgId(account.ig_id);
-      setPageToken(account.page_token);
-    }
-  }
-
-  function handleSubmit(e: React.FormEvent) {
+  function handleSend(e: React.FormEvent) {
     e.preventDefault();
+    if (!reply.trim() || !selectedConvId) return;
+    const recipientId = getRecipientId();
+    if (!recipientId) return;
+
     if (platform === "facebook") {
       sendFbDM.mutate(
-        { connector_id: connectorId, page_id: pageId, recipient_id: recipientId, message },
-        { onSuccess: () => { setMessage(""); setRecipientId(""); } }
+        { connector_id: connectorId, page_id: pageId, recipient_id: recipientId, message: reply },
+        { onSuccess: () => { setReply(""); setTimeout(refetchAll, 1000); } }
       );
     } else {
       sendIgDM.mutate(
-        { connector_id: connectorId, ig_id: igId, page_token: pageToken, recipient_id: recipientId, message },
-        { onSuccess: () => { setMessage(""); setRecipientId(""); } }
+        { connector_id: connectorId, recipient_id: recipientId, message: reply },
+        { onSuccess: () => { setReply(""); setTimeout(refetchAll, 1000); } }
       );
     }
   }
 
-  const canSubmit =
-    !!connectorId &&
-    !!recipientId &&
-    !!message &&
-    (platform === "facebook" ? !!pageId : !!igId);
+  // Auto-scroll to latest message
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Reset conversation when platform/connector/page changes
+  useEffect(() => {
+    setSelectedConvId("");
+    setReply("");
+  }, [platform, connectorId, pageId]);
+
+  // Auto-select page token when page changes
+  useEffect(() => {
+    const p = fbPages.find((p) => p.id === pageId) ?? null;
+    setSelectedPage(p);
+  }, [pageId, fbPages]);
 
   return (
-    <div className="space-y-6">
+    <div className="flex h-full flex-col space-y-4">
       <PageHeader
-        title="Send Direct Message"
-        subtitle="Send a DM via Facebook Messenger or Instagram Direct."
+        title="Messages"
+        subtitle="View and reply to conversations on Facebook Messenger and Instagram Direct."
       />
-
-      {/* Info banner */}
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/40 dark:bg-amber-900/20 dark:text-amber-300">
-        <strong>Note:</strong> Recipients must have messaged your page or account first within the last 24 hours (Meta policy).
-      </div>
 
       {/* Platform tabs */}
       <div className="flex gap-2">
         {(["facebook", "instagram"] as Platform[]).map((p) => (
           <button
             key={p}
-            onClick={() => { setPlatform(p); setConnectorId(""); setPageId(""); setIgId(""); setPageToken(""); }}
+            onClick={() => {
+              setPlatform(p);
+              setConnectorId("");
+              setPageId("");
+              setSelectedConvId("");
+            }}
             className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
               platform === p
                 ? "bg-primary text-primary-foreground"
@@ -108,122 +237,231 @@ export default function SocialDMPage() {
         ))}
       </div>
 
-      <motion.div
-        key={platform}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
-        className="rounded-2xl border bg-card p-6 shadow-sm"
-      >
-        {activeConnectors.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-12 text-center">
-            <MessageCircle className="size-10 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">
-              No connected {platform === "facebook" ? "Facebook Pages" : "Instagram"} connector found.
-            </p>
-            <Button variant="outline" size="sm" onClick={() => window.location.href = "/connectors"}>
+      {/* Selectors row */}
+      <div className="flex flex-wrap gap-3">
+        <div className="min-w-[200px] flex-1">
+          <Field>
+            <FieldLabel>Connector</FieldLabel>
+            <select
+              value={connectorId}
+              onChange={(e) => { setConnectorId(e.target.value); setPageId(""); }}
+              className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">Select connector…</option>
+              {activeConnectors.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        {platform === "facebook" && connectorId && (
+          <div className="min-w-[200px] flex-1">
+            <Field>
+              <FieldLabel>Facebook Page</FieldLabel>
+              {pagesLoading ? (
+                <p className="text-sm text-muted-foreground py-2">Loading pages…</p>
+              ) : (
+                <select
+                  value={pageId}
+                  onChange={(e) => setPageId(e.target.value)}
+                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Select page…</option>
+                  {fbPages.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          </div>
+        )}
+      </div>
+
+      {/* Inbox area */}
+      {(!connectorId || (platform === "facebook" && !pageId)) ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border bg-card py-20 text-center">
+          <Inbox className="size-10 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">
+            {activeConnectors.length === 0
+              ? `No connected ${platform === "facebook" ? "Facebook Pages" : "Instagram"} connector.`
+              : platform === "facebook" && !pageId
+              ? "Select a Facebook Page to view conversations."
+              : "Select a connector to view conversations."}
+          </p>
+          {activeConnectors.length === 0 && (
+            <Button variant="outline" size="sm" onClick={() => (window.location.href = "/connectors")}>
               Go to Connectors
             </Button>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Connector */}
-            <Field>
-              <FieldLabel>Account</FieldLabel>
-              <select
-                value={connectorId}
-                onChange={(e) => handleConnectorChange(e.target.value)}
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          )}
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border bg-card shadow-sm" style={{ height: "calc(100vh - 340px)", minHeight: 440 }}>
+          {/* Left: conversation list */}
+          <div className="flex w-72 shrink-0 flex-col border-r">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <span className="text-sm font-semibold">
+                Conversations
+                {conversations.length > 0 && (
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                    ({conversations.length})
+                  </span>
+                )}
+              </span>
+              <button
+                onClick={refetchAll}
+                className="rounded-md p-1 text-muted-foreground hover:bg-muted transition-colors"
+                title="Refresh"
               >
-                <option value="">Select connector…</option>
-                {activeConnectors.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </Field>
+                <RefreshCw className="size-3.5" />
+              </button>
+            </div>
 
-            {/* Page selector (FB) */}
-            {connectorId && platform === "facebook" && (
-              <Field>
-                <FieldLabel>Facebook Page</FieldLabel>
-                {pagesLoading ? (
-                  <p className="text-sm text-muted-foreground">Loading pages…</p>
-                ) : (
-                  <select
-                    value={pageId}
-                    onChange={(e) => setPageId(e.target.value)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">Select page…</option>
-                    {fbPages.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
+            {/* List */}
+            <div className="flex-1 overflow-y-auto">
+              {convLoading ? (
+                <div className="flex flex-col gap-2 p-4">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-14 rounded-lg bg-muted animate-pulse" />
+                  ))}
+                </div>
+              ) : conversations.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-12 px-4 text-center">
+                  <MessageCircle className="size-8 text-muted-foreground/30" />
+                  <p className="text-xs text-muted-foreground">No conversations yet.</p>
+                  <p className="text-[11px] text-muted-foreground/60">
+                    Conversations appear once someone messages your page.
+                  </p>
+                </div>
+              ) : (
+                conversations.map((conv) => (
+                  <ConvItem
+                    key={conv.id}
+                    conv={conv}
+                    selfId={selfId}
+                    selected={conv.id === selectedConvId}
+                    onClick={() => setSelectedConvId(conv.id)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Right: message thread */}
+          <div className="flex flex-1 flex-col min-w-0">
+            {!selectedConvId ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center px-6">
+                <MessageCircle className="size-10 text-muted-foreground/20" />
+                <p className="text-sm text-muted-foreground">Select a conversation to view messages</p>
+              </div>
+            ) : (
+              <>
+                {/* Chat header */}
+                {selectedConv && (
+                  <div className="flex items-center gap-3 border-b px-5 py-3">
+                    <div className="flex size-8 items-center justify-center rounded-full bg-muted">
+                      <User className="size-4 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold">
+                        {getOtherParticipant(selectedConv, selfId)?.name ?? "Unknown"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Last active {timeAgo(selectedConv.updated_time)}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { refetchFbMsgs(); refetchIgMsgs(); }}
+                      className="ml-auto rounded-md p-1.5 text-muted-foreground hover:bg-muted transition-colors"
+                      title="Refresh messages"
+                    >
+                      <RefreshCw className="size-3.5" />
+                    </button>
+                  </div>
                 )}
-              </Field>
-            )}
 
-            {/* IG account selector */}
-            {connectorId && platform === "instagram" && (
-              <Field>
-                <FieldLabel>Instagram Account</FieldLabel>
-                {accountsLoading ? (
-                  <p className="text-sm text-muted-foreground">Loading accounts…</p>
-                ) : (
-                  <select
-                    value={igId}
-                    onChange={(e) => handleIgAccountChange(e.target.value)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                {/* Messages */}
+                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+                  {msgLoading ? (
+                    <div className="flex flex-col gap-3">
+                      {[1, 2, 3, 4].map((i) => (
+                        <div
+                          key={i}
+                          className={`h-10 w-48 rounded-2xl bg-muted animate-pulse ${i % 2 === 0 ? "ml-auto" : ""}`}
+                        />
+                      ))}
+                    </div>
+                  ) : messages.length === 0 ? (
+                    <p className="text-center text-xs text-muted-foreground">No messages in this conversation.</p>
+                  ) : (
+                    <AnimatePresence initial={false}>
+                      {messages.map((msg) => {
+                        const isFromSelf = msg.from?.id === selfId || msg.from?.id === pageId;
+                        return (
+                          <motion.div
+                            key={msg.id}
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className={`flex ${isFromSelf ? "justify-end" : "justify-start"}`}
+                          >
+                            <div className={`flex flex-col max-w-[70%] gap-0.5 ${isFromSelf ? "items-end" : "items-start"}`}>
+                              <div
+                                className={`rounded-2xl px-4 py-2 text-sm ${
+                                  isFromSelf
+                                    ? "bg-primary text-primary-foreground rounded-br-sm"
+                                    : "bg-muted text-foreground rounded-bl-sm"
+                                }`}
+                              >
+                                {msg.message}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground/60 px-1">
+                                {timeAgo(msg.created_time)}
+                              </span>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Reply box */}
+                <form onSubmit={handleSend} className="border-t px-4 py-3 flex gap-2 items-end">
+                  <textarea
+                    value={reply}
+                    onChange={(e) => setReply(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSend(e as unknown as React.FormEvent);
+                      }
+                    }}
+                    rows={2}
+                    placeholder="Type a reply… (Enter to send, Shift+Enter for new line)"
+                    className="flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={!reply.trim() || isPending}
+                    className="shrink-0 h-10"
                   >
-                    <option value="">Select account…</option>
-                    {igAccounts.map((a) => (
-                      <option key={a.ig_id} value={a.ig_id}>
-                        @{a.ig_username || a.ig_name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </Field>
+                    <Send className="size-4" />
+                  </Button>
+                </form>
+
+                {/* Meta policy note */}
+                <p className="px-4 pb-2 text-[11px] text-muted-foreground/50 text-center">
+                  Meta policy: you can only reply within 24 hours of the user&apos;s last message.
+                </p>
+              </>
             )}
-
-            {/* Recipient */}
-            <Field>
-              <FieldLabel className="flex items-center gap-1.5">
-                <User className="size-3.5" />
-                Recipient User ID
-              </FieldLabel>
-              <Input
-                value={recipientId}
-                onChange={(e) => setRecipientId(e.target.value)}
-                placeholder="Facebook/Instagram user ID"
-              />
-              <p className="text-xs text-muted-foreground">
-                The Page-scoped user ID of the recipient who messaged you.
-              </p>
-            </Field>
-
-            {/* Message */}
-            <Field>
-              <FieldLabel className="flex items-center gap-1.5">
-                <MessageCircle className="size-3.5" />
-                Message
-              </FieldLabel>
-              <textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                rows={4}
-                placeholder="Type your message…"
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-              />
-            </Field>
-
-            <Button type="submit" disabled={!canSubmit || isPending} className="w-full">
-              <Send className="mr-2 size-4" />
-              {isPending ? "Sending…" : `Send via ${platform === "facebook" ? "Messenger" : "Instagram Direct"}`}
-            </Button>
-          </form>
-        )}
-      </motion.div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

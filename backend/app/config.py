@@ -59,9 +59,16 @@ class Settings(BaseSettings):
         "http://localhost:8000/api/v1/connectors/facebook_pages/callback"
     )
 
-    # Instagram
+    # Instagram (Graph API via Facebook Login)
     instagram_redirect_uri: str = (
         "http://localhost:8000/api/v1/connectors/instagram/callback"
+    )
+
+    # Instagram Login (direct IG OAuth — separate Instagram app, no Facebook Page required)
+    instagram_app_id: str = ""
+    instagram_app_secret: str = ""
+    instagram_login_redirect_uri: str = (
+        "http://localhost:8000/api/v1/connectors/instagram_login/callback"
     )
 
     # LinkedIn Ads
