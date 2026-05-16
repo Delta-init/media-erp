@@ -45,16 +45,16 @@ export const PLATFORM_META: Record<ConnectorPlatform, PlatformMeta> = {
     bgClass: "bg-blue-600",
   },
   instagram: {
-    label: "Instagram",
-    description: "Publish posts & send Instagram DMs via Facebook Pages",
+    label: "Instagram (via Facebook)",
+    description: "Requires a Facebook Page linked to an Instagram Business account",
     initials: "IG",
     bgClass: "bg-gradient-to-br from-purple-500 to-pink-500",
   },
   instagram_login: {
-    label: "Instagram Login",
-    description: "Connect Instagram directly — no Facebook Page required",
-    initials: "IG",
-    bgClass: "bg-gradient-to-br from-fuchsia-500 to-pink-500",
+    label: "Instagram Direct",
+    description: "Log in with Instagram directly — no Facebook Page required",
+    initials: "IG✦",
+    bgClass: "bg-gradient-to-br from-fuchsia-600 to-rose-500",
   },
 };
 
@@ -63,8 +63,8 @@ export const CONNECTABLE_PLATFORMS: ConnectorPlatform[] = [
   "ga4",
   "facebook_ads",
   "facebook_pages",
-  "instagram",       // ← Business app via Facebook OAuth (works with this app)
+  "instagram",          // via Facebook OAuth — requires linked Facebook Page
+  "instagram_login",    // direct Instagram Business Login — no Facebook Page needed
   "linkedin_ads",
   "tiktok_ads",
-  // "instagram_login" — requires Consumer app type on Meta, disabled for now
 ];

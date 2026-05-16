@@ -28,6 +28,13 @@ export function ConnectorCard({ connector }: Props) {
 
   const isAuthenticated = connector.status !== "disconnected";
 
+  // Social connectors exist for posting/DMs only — they have no marketing
+  // analytics data to sync, so the "Sync now" button is hidden for them.
+  const SYNCABLE_PLATFORMS = new Set([
+    "google_ads", "ga4", "facebook_ads", "linkedin_ads", "tiktok_ads",
+  ]);
+  const isSyncable = SYNCABLE_PLATFORMS.has(connector.platform);
+
   // Poll sync status while this connector is actively syncing
   const { data: syncStatusData } = useSyncStatus(
     connector.id,
@@ -116,8 +123,8 @@ export function ConnectorCard({ connector }: Props) {
             </motion.div>
           )}
 
-          {/* Sync Now — only when connected and idle */}
-          {isConnected && (
+          {/* Sync Now — only for analytics platforms that have data to fetch */}
+          {isConnected && isSyncable && (
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}>
               <Button
                 size="sm"
@@ -137,7 +144,7 @@ export function ConnectorCard({ connector }: Props) {
           )}
 
           {/* Syncing spinner (when status arrives as syncing) */}
-          {isSyncing && !isConnected && (
+          {isSyncing && !isConnected && isSyncable && (
             <Button size="sm" variant="secondary" disabled>
               <RefreshCw className="mr-1.5 size-3 animate-spin" />
               Syncing…

@@ -122,6 +122,38 @@ export function useSendInstagramDM() {
   });
 }
 
+// ── Instagram Conversations (via instagram platform / Facebook OAuth) ─────────
+
+export function useInstagramConversations(connectorId: string, igId: string) {
+  return useQuery({
+    queryKey: ["instagram-conversations", connectorId, igId],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: Conversation[] }>(
+        `/social/instagram/conversations?connector_id=${connectorId}&ig_id=${igId}`
+      );
+      return data.data;
+    },
+    enabled: !!connectorId && !!igId,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+}
+
+export function useInstagramMessages(connectorId: string, igId: string, conversationId: string) {
+  return useQuery({
+    queryKey: ["instagram-messages", connectorId, igId, conversationId],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: ChatMessage[] }>(
+        `/social/instagram/conversations/${conversationId}/messages?connector_id=${connectorId}&ig_id=${igId}`
+      );
+      return data.data;
+    },
+    enabled: !!connectorId && !!igId && !!conversationId,
+    refetchInterval: 10_000,
+    retry: 1,
+  });
+}
+
 // ── Facebook Conversations (Inbox) ───────────────────────────────────────────
 
 export function useFacebookConversations(connectorId: string, pageId: string) {
@@ -135,6 +167,7 @@ export function useFacebookConversations(connectorId: string, pageId: string) {
     },
     enabled: !!connectorId && !!pageId,
     refetchInterval: 30_000,
+    retry: 1,
   });
 }
 
@@ -149,6 +182,7 @@ export function useFacebookMessages(connectorId: string, pageId: string, convers
     },
     enabled: !!connectorId && !!pageId && !!conversationId,
     refetchInterval: 10_000,
+    retry: 1,
   });
 }
 

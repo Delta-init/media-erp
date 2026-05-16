@@ -163,9 +163,26 @@ def run_sync(connector_id: str) -> dict:
     connector_id_str = str(connector["_id"])
 
     # ── 2. Check platform is supported ──────────────────────────────────────
+    # Social connectors (instagram, facebook_pages, instagram_login) don't sync
+    # marketing analytics data — they exist purely for posting and DMs.
+    # Skip them silently rather than marking them as "error".
+    _SOCIAL_ONLY_PLATFORMS = {"instagram", "instagram_login", "facebook_pages"}
     fetch_fn = PLATFORM_FETCH_REGISTRY.get(platform)
     if fetch_fn is None:
-        err = f"No fetch_data registered for platform '{platform}' (Phase 3.4-3.6)"
+        if platform in _SOCIAL_ONLY_PLATFORMS:
+            logger.info(
+                "Skipping sync for social-only platform '%s' connector=%s — no marketing data to fetch",
+                platform, connector_id_str,
+            )
+            return {
+                "connector_id": connector_id_str,
+                "platform": platform,
+                "status": "skipped",
+                "records_synced": 0,
+                "error": None,
+                "message": "Social connectors do not sync marketing data.",
+            }
+        err = f"No fetch_data registered for platform '{platform}'"
         logger.warning(err)
         _set_connector_status(db, connector_id_str, "error", error=err)
         return {"connector_id": connector_id_str, "platform": platform, "status": "error", "error": err}

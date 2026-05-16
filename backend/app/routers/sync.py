@@ -17,17 +17,49 @@ All endpoints require a valid JWT (get_current_user).
 The connector must belong to the authenticated user.
 """
 
+import logging
+import socket
+import threading
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlparse
 
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.config import settings
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+
+logger = logging.getLogger(__name__)
+
+
+def _broker_reachable(timeout: float = 1.0) -> bool:
+    """
+    Quick TCP probe: returns True only if the Celery broker (Redis) accepts
+    a connection within `timeout` seconds.  Avoids hanging on sync_connector.delay()
+    when Redis is down — kombu's default socket timeout can be infinite.
+    """
+    try:
+        parsed = urlparse(settings.redis_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 6379
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _run_sync_in_thread(connector_id: str) -> None:
+    """Run sync in an isolated daemon thread so it never blocks the ASGI server."""
+    try:
+        from app.services.sync_service import run_sync
+        run_sync(connector_id)
+    except Exception as exc:
+        logger.error("Background sync thread error for connector=%s: %s", connector_id, exc)
 
 router = APIRouter(prefix="/api/v1/sync", tags=["sync"])
 
@@ -96,6 +128,9 @@ async def trigger_sync(
     """
     Enqueue an immediate sync for the given connector.
 
+    Tries Celery first; falls back to FastAPI BackgroundTasks when
+    Celery/Redis is not running (dev environments without a broker).
+
     Validates:
       - connector exists and belongs to the authenticated user
       - connector has been authenticated (has an access token)
@@ -114,17 +149,44 @@ async def trigger_sync(
             status_code=400,
         )
 
-    # Celery task import here to avoid importing celery app at module level
-    # (keeps FastAPI startup fast even when Celery broker isn't running)
-    from app.tasks.sync_tasks import sync_connector
-    task = sync_connector.delay(connector_id)
+    # Probe the broker first (1-second TCP timeout) so we never block on
+    # sync_connector.delay() when Redis is down — kombu's default socket
+    # timeout is infinite and will freeze the endpoint for minutes.
+    task_id: str
+    mode: str
+    if _broker_reachable(timeout=0.5):
+        try:
+            from app.tasks.sync_tasks import sync_connector
+            task = sync_connector.delay(connector_id)
+            task_id = task.id
+            mode = "celery"
+            logger.info("Sync queued via Celery: connector=%s task=%s", connector_id, task_id)
+        except Exception as celery_exc:
+            logger.warning("Celery enqueue failed (%s) — falling back to thread", celery_exc)
+            mode = "background"
+            task_id = ""
+    else:
+        logger.info("Broker not reachable — using daemon thread for connector=%s", connector_id)
+        mode = "background"
+        task_id = ""
+
+    if mode == "background":
+        t = threading.Thread(
+            target=_run_sync_in_thread,
+            args=(connector_id,),
+            daemon=True,   # exits with process; won't block server shutdown
+            name=f"sync-{connector_id[:8]}",
+        )
+        t.start()
+        task_id = f"thread-{t.name}"
 
     return success_response(
         data={
-            "task_id":      task.id,
+            "task_id":      task_id,
             "connector_id": connector_id,
             "platform":     connector.get("platform"),
             "status":       "queued",
+            "mode":         mode,
         },
         message="Sync queued successfully",
     )

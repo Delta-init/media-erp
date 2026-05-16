@@ -314,6 +314,69 @@ async def get_facebook_conversation_messages(
     return success_response(messages, "Messages retrieved")
 
 
+# ── Instagram Conversations (via instagram platform / Facebook OAuth) ─────────
+
+@router.get("/instagram/conversations")
+async def list_instagram_conversations(
+    connector_id: str,
+    ig_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """List Instagram Direct conversations for a Business account."""
+    user_id = str(current_user["_id"])
+    connector = await get_connector(connector_id, user_id, db)
+    if not connector:
+        return error_response("Connector not found", status_code=404)
+    if connector["platform"] != "instagram":
+        return error_response("Connector is not an instagram connector", status_code=400)
+    if connector.get("status") != "connected":
+        return error_response("Connector is not connected", status_code=400)
+
+    tokens = get_decrypted_tokens(connector)
+    from app.platforms.instagram import get_instagram_accounts, get_conversations
+    try:
+        accounts = await get_instagram_accounts(tokens["access_token"])
+        account = next((a for a in accounts if a["ig_id"] == ig_id), None)
+        if not account:
+            return error_response("Instagram account not found for this connector", status_code=404)
+        conversations = await get_conversations(ig_id, account["page_token"])
+    except Exception as exc:
+        return error_response(f"Failed to fetch conversations: {exc}", status_code=502)
+    return success_response(conversations, "Instagram conversations retrieved")
+
+
+@router.get("/instagram/conversations/{conversation_id}/messages")
+async def get_instagram_conversation_messages(
+    conversation_id: str,
+    connector_id: str,
+    ig_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Get messages inside an Instagram Direct conversation."""
+    user_id = str(current_user["_id"])
+    connector = await get_connector(connector_id, user_id, db)
+    if not connector:
+        return error_response("Connector not found", status_code=404)
+    if connector["platform"] != "instagram":
+        return error_response("Connector is not an instagram connector", status_code=400)
+    if connector.get("status") != "connected":
+        return error_response("Connector is not connected", status_code=400)
+
+    tokens = get_decrypted_tokens(connector)
+    from app.platforms.instagram import get_instagram_accounts, get_conversation_messages
+    try:
+        accounts = await get_instagram_accounts(tokens["access_token"])
+        account = next((a for a in accounts if a["ig_id"] == ig_id), None)
+        if not account:
+            return error_response("Instagram account not found for this connector", status_code=404)
+        messages = await get_conversation_messages(conversation_id, account["page_token"])
+    except Exception as exc:
+        return error_response(f"Failed to fetch messages: {exc}", status_code=502)
+    return success_response(messages, "Messages retrieved")
+
+
 # ── Instagram Login ───────────────────────────────────────────────────────────
 
 @router.get("/instagram_login/account")

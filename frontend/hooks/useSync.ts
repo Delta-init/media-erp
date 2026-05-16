@@ -34,8 +34,10 @@ export function useTriggerSync() {
       // Prime the status query for this connector
       qc.invalidateQueries({ queryKey: syncKeys.status(connectorId) });
     },
-    onError() {
-      toast.error("Failed to trigger sync");
+    onError(err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? "Failed to trigger sync");
     },
   });
 }

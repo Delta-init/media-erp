@@ -164,3 +164,38 @@ async def send_dm(
         )
         resp.raise_for_status()
         return resp.json()
+
+
+async def get_conversations(ig_id: str, page_token: str) -> list[dict]:
+    """
+    List Instagram Direct conversations for a Business account.
+    Uses platform=instagram to distinguish from Messenger threads.
+    """
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"https://graph.facebook.com/{_GRAPH_VERSION}/{ig_id}/conversations",
+            params={
+                "platform": "instagram",
+                "fields": "id,participants,snippet,updated_time,unread_count",
+                "access_token": page_token,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+
+
+async def get_conversation_messages(conversation_id: str, page_token: str) -> list[dict]:
+    """
+    Get messages inside an Instagram Direct conversation, oldest-first.
+    """
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"https://graph.facebook.com/{_GRAPH_VERSION}/{conversation_id}/messages",
+            params={
+                "fields": "id,from,message,created_time",
+                "access_token": page_token,
+            },
+        )
+        resp.raise_for_status()
+        # API returns newest-first — reverse so oldest appears at the top
+        return list(reversed(resp.json().get("data", [])))
