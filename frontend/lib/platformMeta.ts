@@ -45,13 +45,13 @@ export const PLATFORM_META: Record<ConnectorPlatform, PlatformMeta> = {
     bgClass: "bg-blue-600",
   },
   instagram: {
-    label: "Instagram (via Facebook)",
+    label: "Instagram",
     description: "Publish posts & send Instagram DMs via Facebook Pages",
     initials: "IG",
     bgClass: "bg-gradient-to-br from-purple-500 to-pink-500",
   },
   instagram_login: {
-    label: "Instagram",
+    label: "Instagram Login",
     description: "Connect Instagram directly — no Facebook Page required",
     initials: "IG",
     bgClass: "bg-gradient-to-br from-fuchsia-500 to-pink-500",
@@ -63,8 +63,8 @@ export const CONNECTABLE_PLATFORMS: ConnectorPlatform[] = [
   "ga4",
   "facebook_ads",
   "facebook_pages",
-  "instagram_login",
-  "instagram",
+  "instagram",       // ← Business app via Facebook OAuth (works with this app)
   "linkedin_ads",
   "tiktok_ads",
+  // "instagram_login" — requires Consumer app type on Meta, disabled for now
 ];

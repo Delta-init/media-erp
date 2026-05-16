@@ -1,23 +1,33 @@
+import logging
+
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from jose import JWTError
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+logger = logging.getLogger(__name__)
+
 from app.database import get_db
 from app.middleware.auth import get_current_user
+from app.config import settings
 from app.schemas.auth import (
+    ForgotPasswordRequest,
     LoginRequest,
     RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     UpdatePasswordRequest,
     UpdateProfileRequest,
 )
 from app.services.auth_service import (
     authenticate_user,
+    create_password_reset_otp,
     register_user,
+    reset_password_with_otp,
     update_password,
     update_profile,
 )
+from app.utils.email import send_otp_email
 from app.utils.jwt import create_access_token, create_refresh_token, decode_refresh_token
 from app.utils.response import error_response, success_response
 
@@ -145,6 +155,47 @@ async def update_me(
         },
         "Profile updated successfully",
     )
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Send a 6-digit OTP to the user's email address.
+    Always returns 200 — never reveals whether the email is registered.
+    """
+    otp = await create_password_reset_otp(body.email, db)
+    if otp:
+        try:
+            await send_otp_email(body.email, otp)
+            logger.info("OTP email dispatched to %s", body.email)
+        except Exception as exc:
+            logger.error("Failed to send OTP email to %s: %s", body.email, exc)
+            # Return a generic error so the user knows something went wrong
+            return error_response(
+                "Could not send the OTP email. Please try again later.",
+                status_code=503,
+            )
+
+    return success_response(
+        {"message": "If that email is registered, a reset code has been sent."},
+        "OTP sent",
+    )
+
+
+@router.post("/reset-password")
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Validate the OTP and set a new password."""
+    try:
+        await reset_password_with_otp(body.email, body.otp, body.new_password, db)
+    except ValueError as exc:
+        return error_response(str(exc), status_code=400)
+    return success_response(None, "Password reset successfully. You can now log in.")
 
 
 @router.put("/password")

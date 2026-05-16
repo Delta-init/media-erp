@@ -18,7 +18,7 @@ from app.utils.oauth import generate_state, store_state, consume_state
 _GRAPH_VERSION = "v21.0"
 _AUTH_URL = f"https://www.facebook.com/{_GRAPH_VERSION}/dialog/oauth"
 _TOKEN_URL = f"https://graph.facebook.com/{_GRAPH_VERSION}/oauth/access_token"
-_SCOPES = "pages_show_list,instagram_content_publish,instagram_manage_messages"
+_SCOPES = "instagram_basic,pages_show_list,instagram_content_publish,instagram_manage_messages"
 _LONG_LIVED_EXPIRE_DAYS = 60
 
 

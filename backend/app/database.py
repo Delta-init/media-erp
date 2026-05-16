@@ -79,3 +79,14 @@ async def create_indexes() -> None:
     # chat messages
     await db["messages"].create_index([("from_user_id", ASCENDING), ("to_user_id", ASCENDING), ("created_at", DESCENDING)])
     await db["messages"].create_index([("to_user_id", ASCENDING), ("read", ASCENDING)])
+    # password_resets — OTP-based (migrated from token-based)
+    # Drop old token unique index if it exists from a previous schema
+    try:
+        await db["password_resets"].drop_index("token_1")
+    except Exception:
+        pass  # Index didn't exist — that's fine
+    await db["password_resets"].create_index("user_id")   # one reset doc per user (upsert key)
+    await db["password_resets"].create_index("email")     # lookup by email + otp
+    await db["password_resets"].create_index(
+        "expires_at", expireAfterSeconds=0  # TTL: MongoDB auto-deletes expired docs
+    )

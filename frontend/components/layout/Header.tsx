@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Menu, Search } from "lucide-react";
 import { usePathname } from "next/navigation";
@@ -8,6 +9,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useLogout } from "@/hooks/useAuth";
 import { headerVariants } from "@/lib/animations";
 import { NotificationBell } from "@/components/layout/NotificationBell";
+import { GlobalSearch } from "@/components/layout/GlobalSearch";
 
 const ROUTE_LABELS: Record<string, string> = {
   "/dashboard":  "Overview",
@@ -37,12 +39,26 @@ export function Header() {
   const logout = useLogout();
   const pathname = usePathname();
   const pageLabel = getPageLabel(pathname);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Global Ctrl+K / Cmd+K shortcut
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const initials = user?.name
     ? user.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
     : user?.email?.[0]?.toUpperCase() ?? "U";
 
   return (
+    <>
     <motion.header
       variants={headerVariants}
       initial="initial"
@@ -76,8 +92,9 @@ export function Header() {
         <motion.button
           whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.92 }}
+          onClick={() => setSearchOpen(true)}
           className="flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          title="Search"
+          title="Search (Ctrl+K)"
         >
           <Search className="size-4" />
         </motion.button>
@@ -97,5 +114,8 @@ export function Header() {
         </motion.button>
       </div>
     </motion.header>
+
+    <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+    </>
   );
 }

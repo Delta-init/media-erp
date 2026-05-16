@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model:    str = "llama3.2:3b"
 
+    # Email (SMTP)
+    mail_username: str = ""
+    mail_password: str = ""
+    mail_from: str = ""
+    mail_port: int = 587
+    mail_server: str = "smtp.gmail.com"
+    mail_from_name: str = "mediaERP"
+
     # Sentry (optional — leave empty to disable)
     sentry_dsn: str = ""
 

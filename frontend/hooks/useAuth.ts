@@ -121,6 +121,44 @@ export function useUpdateProfile() {
   });
 }
 
+export function useForgotPassword() {
+  return useMutation({
+    mutationFn: async (payload: { email: string }) => {
+      const { data } = await api.post<{ success: boolean; data: { message: string } }>(
+        "/auth/forgot-password",
+        payload
+      );
+      return data.data;
+    },
+    onSuccess() {
+      toast.success("Reset code sent! Check your inbox (and spam folder).", { duration: 5000 });
+    },
+    onError(err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? "Could not send the reset code. Please try again.");
+    },
+  });
+}
+
+export function useResetPassword() {
+  return useMutation({
+    mutationFn: async (payload: { email: string; otp: string; new_password: string }) => {
+      const { data } = await api.post<{ success: boolean; message: string }>(
+        "/auth/reset-password",
+        payload
+      );
+      return data;
+    },
+    onSuccess() {
+      toast.success("Password reset successfully!");
+    },
+    onError(err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? "Invalid or expired code. Please try again.");
+    },
+  });
+}
+
 export function useUpdatePassword() {
   return useMutation({
     mutationFn: async (payload: { current_password: string; new_password: string }) => {

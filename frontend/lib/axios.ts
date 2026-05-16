@@ -4,25 +4,21 @@ const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1",
   headers: { "Content-Type": "application/json" },
   withCredentials: false,
+  timeout: 30_000, // 30 s — prevents hanging forever if backend is slow
 });
-
 
 // Attach bearer token from localStorage on every request
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (typeof window !== "undefined") {
-    console.log("api calling")
     const token = localStorage.getItem("access_token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    console.log("api calling", config)
   }
   return config;
 });
 
-// 401 → clear tokens and redirect to login, but only when a session token exists
-// AND the 401 did not come from an auth endpoint (login/register 401s are expected
-// wrong-credentials responses that the mutation's onError should handle).
+// 401 → clear tokens and redirect to login (only for non-auth endpoints)
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
@@ -39,7 +35,6 @@ api.interceptors.response.use(
       document.cookie = "access_token=; path=/; max-age=0";
       window.location.href = "/login";
     }
-    console.log("api calling", error)
     return Promise.reject(error);
   }
 );

@@ -1,4 +1,6 @@
-from datetime import datetime, timezone
+import logging
+import random
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from bson import ObjectId
@@ -6,6 +8,10 @@ from passlib.context import CryptContext
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.models.user import user_doc_to_dict
+
+logger = logging.getLogger(__name__)
+
+OTP_EXPIRE_MINUTES = 10  # OTP valid for 10 minutes
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -118,4 +124,87 @@ async def update_password(
                 "updated_at": datetime.now(timezone.utc),
             }
         },
+    )
+
+
+async def create_password_reset_otp(
+    email: str,
+    db: AsyncIOMotorDatabase,
+) -> str | None:
+    """
+    Generate a 6-digit OTP for the given email address, persist it in
+    ``password_resets`` (one active OTP per user via upsert), and return it.
+    Returns None silently when the email isn't registered — prevents enumeration.
+    """
+    user = await db["users"].find_one({"email": email})
+    if not user:
+        return None
+
+    otp = f"{random.SystemRandom().randint(100000, 999999)}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRE_MINUTES)
+
+    # One active OTP per user — overwrite any previous pending reset
+    await db["password_resets"].update_one(
+        {"user_id": str(user["_id"])},
+        {
+            "$set": {
+                "otp": otp,
+                "email": email,
+                "user_id": str(user["_id"]),
+                "expires_at": expires_at,
+                "used": False,
+                "created_at": datetime.now(timezone.utc),
+            }
+        },
+        upsert=True,
+    )
+
+    logger.info("Password reset OTP created for %s (expires in %d min)", email, OTP_EXPIRE_MINUTES)
+    return otp
+
+
+async def reset_password_with_otp(
+    email: str,
+    otp: str,
+    new_password: str,
+    db: AsyncIOMotorDatabase,
+) -> None:
+    """
+    Validate the OTP for ``email`` and set a new password.
+    Raises ValueError on invalid/expired/used OTP.
+    """
+    now = datetime.now(timezone.utc)
+    record = await db["password_resets"].find_one({
+        "email": email,
+        "otp": otp,
+        "used": False,
+        "expires_at": {"$gt": now},
+    })
+    if not record:
+        raise ValueError("The code is invalid or has expired. Please request a new one.")
+
+    oid = ObjectId(record["user_id"])
+    user = await db["users"].find_one({"_id": oid})
+    if not user:
+        raise ValueError("User not found.")
+
+    if verify_password(new_password, user["hashed_password"]):
+        raise ValueError("New password must differ from your current password.")
+
+    new_version = user.get("token_version", 0) + 1
+    await db["users"].update_one(
+        {"_id": oid},
+        {
+            "$set": {
+                "hashed_password": hash_password(new_password),
+                "token_version": new_version,
+                "updated_at": now,
+            }
+        },
+    )
+
+    # Mark OTP as used — prevents replay
+    await db["password_resets"].update_one(
+        {"email": email, "otp": otp},
+        {"$set": {"used": True}},
     )
