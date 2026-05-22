@@ -78,7 +78,17 @@ async def exchange_code(code: str, state: str) -> dict:
                 "code": code,
             },
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            try:
+                err = resp.json().get("error", {})
+                msg = err.get("error_user_msg") or err.get("message") or f"HTTP {resp.status_code}"
+                code_val = err.get("code", "")
+                raise ValueError(f"Instagram auth failed (code {code_val}): {msg}")
+            except ValueError:
+                raise
+            except Exception:
+                raise ValueError(f"Instagram auth failed with HTTP {resp.status_code}. "
+                                 "Ensure the account is a Business or Creator account.")
         short_data = resp.json()
         short_token = short_data["access_token"]
 
@@ -91,7 +101,18 @@ async def exchange_code(code: str, state: str) -> dict:
                 "access_token": short_token,
             },
         )
-        resp2.raise_for_status()
+        if not resp2.is_success:
+            try:
+                err = resp2.json().get("error", {})
+                msg = err.get("error_user_msg") or err.get("message") or f"HTTP {resp2.status_code}"
+                code_val = err.get("code", "")
+                raise ValueError(f"Instagram token exchange failed (code {code_val}): {msg}. "
+                                 "Make sure the account is a Business or Creator account.")
+            except ValueError:
+                raise
+            except Exception:
+                raise ValueError(f"Instagram long-lived token exchange failed with HTTP {resp2.status_code}. "
+                                 "Make sure the account is a Business or Creator account.")
         long_data = resp2.json()
         long_token = long_data["access_token"]
         expires_in = long_data.get("expires_in", _LONG_LIVED_EXPIRE_DAYS * 86400)
