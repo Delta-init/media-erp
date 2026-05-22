@@ -319,7 +319,9 @@ async def instagram_login_callback(
     from app.platforms.instagram_login import exchange_code
     try:
         token_data = await exchange_code(code, state)
-    except ValueError as exc:
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("Instagram Login callback error: %s", exc, exc_info=True)
         return RedirectResponse(
             f"{settings.frontend_url}/connectors?oauth_error={quote_plus(str(exc))}&platform=instagram_login",
             status_code=302,
