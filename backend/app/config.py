@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 # Resolve .env relative to this file so it works regardless of where uvicorn is launched from
@@ -46,57 +47,43 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000,http://localhost:3001"
     frontend_url: str = "http://localhost:3000"
 
-    # Google OAuth2 (shared by Google Ads + GA4)
+    # ── Base URL ──────────────────────────────────────────────────────────────
+    # Single source of truth for all redirect URIs and public file URLs.
+    # Set PUBLIC_BASE_URL in .env to your domain (e.g. https://api.example.com).
+    # All redirect URIs below are auto-derived from this value if left empty.
+    public_base_url: str = "http://localhost:8000"
+
+    # ── Google OAuth2 (Google Ads + GA4) ──────────────────────────────────────
     google_client_id: str = ""
     google_client_secret: str = ""
     google_ads_developer_token: str = ""
-    google_ads_redirect_uri: str = (
-        "http://localhost:8000/api/v1/connectors/google_ads/callback"
-    )
-    ga4_redirect_uri: str = (
-        "http://localhost:8000/api/v1/connectors/ga4/callback"
-    )
+    google_ads_redirect_uri: str = ""   # auto-derived if empty
+    ga4_redirect_uri: str = ""          # auto-derived if empty
 
-    # Facebook / Meta Webhook
+    # ── Facebook / Meta ───────────────────────────────────────────────────────
     facebook_webhook_verify_token: str = "mediaerp_webhook_verify"
-
-    # Facebook Ads
     facebook_app_id: str = ""
     facebook_app_secret: str = ""
-    facebook_redirect_uri: str = (
-        "http://localhost:8000/api/v1/connectors/facebook_ads/callback"
-    )
-    facebook_pages_redirect_uri: str = (
-        "http://localhost:8000/api/v1/connectors/facebook_pages/callback"
-    )
+    facebook_redirect_uri: str = ""         # auto-derived if empty
+    facebook_pages_redirect_uri: str = ""   # auto-derived if empty
 
-    # Instagram (Graph API via Facebook Login)
-    instagram_redirect_uri: str = (
-        "http://localhost:8000/api/v1/connectors/instagram/callback"
-    )
-
-    # Instagram Login (direct IG OAuth — separate Instagram app, no Facebook Page required)
+    # ── Instagram ─────────────────────────────────────────────────────────────
+    instagram_redirect_uri: str = ""        # auto-derived if empty
     instagram_app_id: str = ""
     instagram_app_secret: str = ""
-    instagram_login_redirect_uri: str = (
-        "http://localhost:8000/api/v1/connectors/instagram_login/callback"
-    )
+    instagram_login_redirect_uri: str = ""  # auto-derived if empty
 
-    # LinkedIn Ads
+    # ── LinkedIn Ads ──────────────────────────────────────────────────────────
     linkedin_client_id: str = ""
     linkedin_client_secret: str = ""
-    linkedin_redirect_uri: str = (
-        "http://localhost:8000/api/v1/connectors/linkedin_ads/callback"
-    )
+    linkedin_redirect_uri: str = ""         # auto-derived if empty
 
-    # TikTok Ads
+    # ── TikTok Ads ────────────────────────────────────────────────────────────
     tiktok_app_id: str = ""
     tiktok_app_secret: str = ""
-    tiktok_redirect_uri: str = (
-        "http://localhost:8000/api/v1/connectors/tiktok_ads/callback"
-    )
+    tiktok_redirect_uri: str = ""           # auto-derived if empty
 
-    # Stripe (leave empty to run in demo mode — no live payments)
+    # ── Stripe ────────────────────────────────────────────────────────────────
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_price_free_monthly: str = ""
@@ -106,12 +93,36 @@ class Settings(BaseSettings):
     stripe_price_enterprise_monthly: str = ""
     stripe_price_enterprise_yearly: str = ""
 
-    # Public base URL (used to build publicly-accessible file URLs for image uploads)
-    # In development set to your ngrok static domain so Instagram can fetch images.
-    # In production set to your actual domain.
-    public_base_url: str = "http://localhost:8000"
-
     model_config = {"env_file": str(_ENV_FILE), "case_sensitive": False, "extra": "ignore"}
+
+    @model_validator(mode="after")
+    def _build_redirect_uris(self) -> "Settings":
+        """
+        Auto-derive any empty redirect URI from public_base_url.
+        Override a specific URI in .env to bypass auto-derivation, e.g.:
+            GOOGLE_ADS_REDIRECT_URI=https://custom.domain/callback
+        """
+        base = self.public_base_url.rstrip("/")
+        cb = f"{base}/api/v1/connectors"
+
+        if not self.google_ads_redirect_uri:
+            self.google_ads_redirect_uri = f"{cb}/google_ads/callback"
+        if not self.ga4_redirect_uri:
+            self.ga4_redirect_uri = f"{cb}/ga4/callback"
+        if not self.facebook_redirect_uri:
+            self.facebook_redirect_uri = f"{cb}/facebook_ads/callback"
+        if not self.facebook_pages_redirect_uri:
+            self.facebook_pages_redirect_uri = f"{cb}/facebook_pages/callback"
+        if not self.instagram_redirect_uri:
+            self.instagram_redirect_uri = f"{cb}/instagram/callback"
+        if not self.instagram_login_redirect_uri:
+            self.instagram_login_redirect_uri = f"{cb}/instagram_login/callback"
+        if not self.linkedin_redirect_uri:
+            self.linkedin_redirect_uri = f"{cb}/linkedin_ads/callback"
+        if not self.tiktok_redirect_uri:
+            self.tiktok_redirect_uri = f"{cb}/tiktok_ads/callback"
+
+        return self
 
 
 @lru_cache
