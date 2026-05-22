@@ -36,5 +36,9 @@ celery_app.conf.update(
             "task": "app.tasks.sync_tasks.run_scheduled_syncs",
             "schedule": crontab(minute=0),  # top of every hour
         },
+        "scan-anomalies-daily": {
+            "task": "app.tasks.sync_tasks.scan_anomalies_all_users",
+            "schedule": crontab(hour=2, minute=0),  # 02:00 UTC daily
+        },
     },
 )

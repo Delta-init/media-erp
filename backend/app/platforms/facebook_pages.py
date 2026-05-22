@@ -9,6 +9,22 @@ from urllib.parse import urlencode
 import httpx
 
 from app.config import settings
+
+
+def _raise_meta_error(resp: httpx.Response) -> None:
+    """Extract the human-readable error from a Meta API error response and raise it."""
+    try:
+        body = resp.json()
+        err  = body.get("error", {})
+        msg  = err.get("error_user_msg") or err.get("message") or f"HTTP {resp.status_code}"
+        code = err.get("code", "")
+        sub  = err.get("error_subcode", "")
+        label = f"(code {code}" + (f"/{sub}" if sub else "") + ")"
+        raise ValueError(f"Meta API error {label}: {msg}")
+    except ValueError:
+        raise
+    except Exception:
+        resp.raise_for_status()
 from app.utils.oauth import generate_state, store_state, consume_state
 
 _GRAPH_VERSION = "v21.0"
@@ -93,6 +109,20 @@ async def publish_post(
     image_url: str | None = None,
 ) -> dict:
     """Publish a post to a Facebook Page. Returns {id: post_id}."""
+    # Reject base64 data URLs — Facebook requires a publicly accessible HTTPS URL
+    if image_url:
+        if image_url.startswith("data:"):
+            raise ValueError(
+                "The image_url is a base64 data URL which Facebook cannot access. "
+                "Please upload the file first using the upload button and use the "
+                "returned public HTTPS URL instead."
+            )
+        if not image_url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"image_url must be a publicly accessible http:// or https:// URL. "
+                f"Received: {image_url[:80]}"
+            )
+
     async with httpx.AsyncClient() as client:
         if image_url:
             resp = await client.post(
@@ -111,6 +141,38 @@ async def publish_post(
         return resp.json()
 
 
+async def get_page_posts(page_id: str, page_token: str, limit: int = 20) -> list[dict]:
+    """Fetch posts published to a Facebook Page."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://graph.facebook.com/{_GRAPH_VERSION}/{page_id}/posts",
+            params={
+                "access_token": page_token,
+                "fields": "id,message,story,created_time,full_picture,likes.summary(true),comments.summary(true),shares",
+                "limit": limit,
+            },
+        )
+        if not resp.is_success:
+            _raise_meta_error(resp)
+        return resp.json().get("data", [])
+
+
+async def get_post_comments(post_id: str, page_token: str) -> list[dict]:
+    """Fetch comments on a specific Facebook Page post."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://graph.facebook.com/{_GRAPH_VERSION}/{post_id}/comments",
+            params={
+                "access_token": page_token,
+                "fields": "id,message,from,created_time,like_count",
+                "limit": 50,
+            },
+        )
+        if not resp.is_success:
+            _raise_meta_error(resp)
+        return resp.json().get("data", [])
+
+
 async def get_conversations(page_id: str, page_token: str) -> list[dict]:
     """List Messenger conversations for a Facebook Page."""
     async with httpx.AsyncClient() as client:
@@ -122,7 +184,8 @@ async def get_conversations(page_id: str, page_token: str) -> list[dict]:
                 "platform": "messenger",
             },
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            _raise_meta_error(resp)
         return resp.json().get("data", [])
 
 
@@ -136,7 +199,8 @@ async def get_conversation_messages(conversation_id: str, page_token: str) -> li
                 "fields": "id,message,from,created_time",
             },
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            _raise_meta_error(resp)
         # API returns newest first — reverse so oldest is at top
         return list(reversed(resp.json().get("data", [])))
 
@@ -161,5 +225,6 @@ async def send_dm(
                 "messaging_type": "RESPONSE",
             },
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            _raise_meta_error(resp)
         return resp.json()

@@ -194,6 +194,101 @@ export function useDeleteSavedReport() {
   });
 }
 
+// ── Data blend ────────────────────────────────────────────────────────────────
+
+export interface BlendSource {
+  platform: string;
+  metrics: string[];
+}
+
+export interface BlendSeries {
+  key: string;      // "google_ads.spend"
+  platform: string;
+  metric: string;
+  data: number[];   // value per date (index-aligned to dates array)
+}
+
+export interface BlendData {
+  dates: string[];
+  series: BlendSeries[];
+  date_from: string;
+  date_to: string;
+}
+
+export function useBlendReport() {
+  return useMutation({
+    mutationFn: async (body: {
+      sources: BlendSource[];
+      date_from?: string;
+      date_to?: string;
+    }) => {
+      const { data } = await api.post<{ success: boolean; data: BlendData }>(
+        "/reports/blend",
+        body
+      );
+      return data.data;
+    },
+    onError() {
+      toast.error("Failed to generate blend report");
+    },
+  });
+}
+
+// ── Report sharing ─────────────────────────────────────────────────────────────
+
+export function useShareReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (reportId: string) => {
+      const { data } = await api.post<{
+        success: boolean;
+        data: { share_token: string; share_url: string };
+      }>(`/reports/saved/${reportId}/share`);
+      return data.data;
+    },
+    onSuccess() {
+      qc.invalidateQueries({ queryKey: QK.saved() });
+      toast.success("Share link created");
+    },
+    onError() {
+      toast.error("Failed to create share link");
+    },
+  });
+}
+
+export function useRevokeShare() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (reportId: string) => {
+      await api.delete(`/reports/saved/${reportId}/share`);
+    },
+    onSuccess() {
+      qc.invalidateQueries({ queryKey: QK.saved() });
+      toast.success("Share link revoked");
+    },
+    onError() {
+      toast.error("Failed to revoke share link");
+    },
+  });
+}
+
+export function useSharedReport(token: string) {
+  return useQuery({
+    queryKey: ["reports", "shared", token],
+    queryFn: async () => {
+      // Public endpoint — no auth header needed
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1$/, "") ?? "http://localhost:8000"}/api/v1/reports/shared/${token}`
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message ?? "Report not found");
+      return json.data as { report: SavedReport; data: { data: Record<string, unknown>[]; metrics: string[]; dimensions: string[]; chart_type: string } };
+    },
+    enabled: !!token,
+    retry: false,
+  });
+}
+
 // ── 4.6 CSV Export ───────────────────────────────────────────────────────────
 export function useExportCsv() {
   return useMutation({

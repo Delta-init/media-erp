@@ -117,6 +117,11 @@ export interface SavedReport {
   chart_type: ChartType;
   created_at: string;
   updated_at: string;
+  // Sharing
+  share_token?: string | null;
+  share_enabled?: boolean;
+  share_url?: string | null;
+  shared_at?: string | null;
 }
 
 export interface SaveReportRequest extends CustomReportRequest {

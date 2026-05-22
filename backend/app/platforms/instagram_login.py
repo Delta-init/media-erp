@@ -27,8 +27,25 @@ _SHORT_TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 _LONG_TOKEN_URL = "https://graph.instagram.com/access_token"
 _REFRESH_URL = "https://graph.instagram.com/refresh_access_token"
 _API_BASE = f"https://graph.instagram.com/{_GRAPH_VERSION}"
-_SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages"
+_SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages,instagram_business_manage_comments"
 _LONG_LIVED_EXPIRE_DAYS = 60
+
+
+def _raise_meta_error(resp: "httpx.Response") -> None:
+    """Extract the human-readable error from a Meta/Instagram API error response and raise it."""
+    import httpx as _httpx
+    try:
+        body = resp.json()
+        err  = body.get("error", {})
+        msg  = err.get("error_user_msg") or err.get("message") or f"HTTP {resp.status_code}"
+        code = err.get("code", "")
+        sub  = err.get("error_subcode", "")
+        label = f"(code {code}" + (f"/{sub}" if sub else "") + ")"
+        raise ValueError(f"Instagram API error {label}: {msg}")
+    except ValueError:
+        raise
+    except Exception:
+        resp.raise_for_status()
 
 
 def get_auth_url(connector_id: str, user_id: str) -> str:
@@ -132,6 +149,21 @@ async def publish_post(
     if not image_url and not video_url:
         raise ValueError("image_url or video_url is required for Instagram posts")
 
+    # Instagram Graph API requires a publicly accessible HTTPS URL — reject data: URIs
+    # which are base64-encoded blobs that Instagram's servers cannot fetch.
+    for url, label in ((image_url, "image_url"), (video_url, "video_url")):
+        if url and url.startswith("data:"):
+            raise ValueError(
+                f"The {label} is a base64 data URL which Instagram cannot access. "
+                "Please upload the file first using the upload button and use the "
+                "returned public HTTPS URL instead."
+            )
+        if url and not url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"The {label} must be a publicly accessible http:// or https:// URL. "
+                f"Received: {url[:80]}"
+            )
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         params: dict = {"access_token": access_token, "caption": caption}
         if video_url:
@@ -155,19 +187,132 @@ async def publish_post(
         return resp2.json()
 
 
-async def get_conversations(ig_user_id: str, access_token: str) -> list[dict]:
-    """List Instagram Direct conversations for the connected account."""
+async def get_media(ig_user_id: str, access_token: str, limit: int = 20) -> list[dict]:
+    """Fetch the user's Instagram posts/media."""
     async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{_API_BASE}/{ig_user_id}/media",
+            params={
+                "access_token": access_token,
+                "fields": "id,caption,media_type,media_url,thumbnail_url,timestamp,like_count,comments_count,permalink",
+                "limit": limit,
+            },
+        )
+        if not resp.is_success:
+            _raise_meta_error(resp)
+        return resp.json().get("data", [])
+
+
+async def get_media_comments(media_id: str, access_token: str) -> list[dict]:
+    """
+    Fetch comments on a specific Instagram post.
+    Requires instagram_business_manage_comments scope.
+    """
+    async with httpx.AsyncClient() as client:
+        # Primary approach: dedicated comments edge
+        resp = await client.get(
+            f"{_API_BASE}/{media_id}/comments",
+            params={
+                "access_token": access_token,
+                "fields": "id,text,timestamp,username,like_count,replies{id,text,timestamp,username,like_count}",
+                "limit": 100,
+            },
+        )
+        if not resp.is_success:
+            _raise_meta_error(resp)
+        comments = resp.json().get("data", [])
+
+        # Fallback: if the edge returned nothing, try fetching comments
+        # embedded in the media object itself (works on some account types)
+        if not comments:
+            resp2 = await client.get(
+                f"{_API_BASE}/{media_id}",
+                params={
+                    "access_token": access_token,
+                    "fields": "comments{id,text,timestamp,username,like_count}",
+                },
+            )
+            if resp2.is_success:
+                comments = resp2.json().get("comments", {}).get("data", [])
+
+        return comments
+
+
+async def get_conversations(ig_user_id: str, access_token: str) -> list[dict]:
+    """
+    List Instagram Direct conversations for the connected account.
+
+    IGSID vs IGBID mismatch: Instagram conversations return participant IDs
+    in IGSID format, but /me returns the account's IGBID.  They are different
+    numbers for the same user.  External enrichment calls (GET /{igsid}) also
+    echo back the connected account's own data for ANY igsid — so they cannot
+    distinguish self from other.
+
+    Solution: request participants{id,name,username} directly in the
+    conversations query.  Compare each participant's username against
+    self_username (from /me).  This avoids separate per-user lookups entirely.
+    """
+    async with httpx.AsyncClient() as client:
+        # ── 1. Get self identity from /me ──────────────────────────────────────
+        self_ids: set[str] = {str(ig_user_id)}
+        self_username: str = ""
+        self_name: str = ""
+        try:
+            me_resp = await client.get(
+                f"{_API_BASE}/me",
+                params={"access_token": access_token, "fields": "id,username,name"},
+            )
+            if me_resp.is_success:
+                me_data = me_resp.json()
+                self_ids.add(str(me_data.get("id", "")))
+                self_username = me_data.get("username", "")
+                self_name = me_data.get("name", "")
+        except Exception:
+            pass
+
+        # ── 2. Fetch conversations — explicitly request username in participants ─
         resp = await client.get(
             f"{_API_BASE}/{ig_user_id}/conversations",
             params={
                 "access_token": access_token,
-                "fields": "id,participants,snippet,updated_time,unread_count",
+                "fields": "id,participants{id,name,username},snippet,updated_time,unread_count",
                 "platform": "instagram",
             },
         )
-        resp.raise_for_status()
-        return resp.json().get("data", [])
+        if not resp.is_success:
+            _raise_meta_error(resp)
+        conversations = resp.json().get("data", [])
+
+        # ── 3. Mark is_self by username/ID comparison ──────────────────────────
+        # Pass 1: detect self-IGSIDs from participant username field
+        for conv in conversations:
+            for p in conv.get("participants", {}).get("data", []):
+                pid = str(p.get("id", ""))
+                p_username = (p.get("username") or "").strip()
+                p_name = (p.get("name") or "").strip()
+                is_self = (
+                    pid in self_ids
+                    or (self_username and p_username == self_username)
+                    or (self_name and p_name == self_name and not p_username)
+                )
+                if is_self:
+                    self_ids.add(pid)   # record this IGSID for message alignment
+
+        # Pass 2: stamp is_self flag + format display name for other participants
+        for conv in conversations:
+            for p in conv.get("participants", {}).get("data", []):
+                pid = str(p.get("id", ""))
+                is_self = pid in self_ids
+                p["is_self"] = is_self
+
+                # For "other" participants: prefer @username, fall back to name
+                if not is_self:
+                    p_username = (p.get("username") or "").strip()
+                    p_name = (p.get("name") or "").strip()
+                    if p_username and not p.get("name"):
+                        p["name"] = f"@{p_username}"
+
+        return conversations
 
 
 async def get_conversation_messages(conversation_id: str, access_token: str) -> list[dict]:
@@ -180,7 +325,8 @@ async def get_conversation_messages(conversation_id: str, access_token: str) -> 
                 "fields": "id,message,from,created_time",
             },
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            _raise_meta_error(resp)
         # API returns newest first — reverse so oldest is at top
         return list(reversed(resp.json().get("data", [])))
 
@@ -193,7 +339,10 @@ async def send_dm(
 ) -> dict:
     """
     Send an Instagram DM via Instagram Login.
-    Recipient must have messaged your account first (Meta policy).
+
+    recipient_id must be the other user's IGSID (from conversations participants).
+    Meta policy: the recipient must have messaged your account within the last
+    24 hours. In Development mode your Meta app must list them as a test user.
     """
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -204,5 +353,6 @@ async def send_dm(
                 "message": {"text": message},
             },
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            _raise_meta_error(resp)
         return resp.json()

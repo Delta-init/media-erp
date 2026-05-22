@@ -1,3 +1,4 @@
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from urllib.parse import quote_plus
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -320,7 +321,7 @@ async def instagram_login_callback(
         token_data = await exchange_code(code, state)
     except ValueError as exc:
         return RedirectResponse(
-            f"{settings.frontend_url}/connectors?oauth_error={str(exc)}&platform=instagram_login",
+            f"{settings.frontend_url}/connectors?oauth_error={quote_plus(str(exc))}&platform=instagram_login",
             status_code=302,
         )
     await save_tokens(
@@ -352,6 +353,11 @@ async def tiktok_ads_auth(
     if doc["platform"] != "tiktok_ads":
         return error_response("Connector platform is not tiktok_ads", status_code=400)
 
+    if not settings.tiktok_app_id:
+        return error_response(
+            "TikTok Ads is not configured. Add TIKTOK_APP_ID and TIKTOK_APP_SECRET to the backend .env file.",
+            status_code=400,
+        )
     from app.platforms.tiktok_ads import get_auth_url
     url = get_auth_url(connector_id, user_id)
     return success_response({"auth_url": url}, "TikTok Ads OAuth URL generated")
@@ -541,6 +547,214 @@ async def ga4_callback(
     )
     return RedirectResponse(
         f"{settings.frontend_url}/connectors?connected=ga4",
+        status_code=302,
+    )
+
+
+@router.get("/mailchimp/auth")
+async def mailchimp_auth(
+    connector_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    user_id = str(current_user["_id"])
+    doc = await get_connector(connector_id, user_id, db)
+    if not doc:
+        return error_response("Connector not found", status_code=404)
+    if doc["platform"] != "mailchimp":
+        return error_response("Connector platform is not mailchimp", status_code=400)
+    from app.platforms.mailchimp import get_auth_url
+    url = get_auth_url(connector_id, user_id)
+    return success_response({"auth_url": url}, "Mailchimp auth URL generated")
+
+
+@router.get("/mailchimp/callback")
+async def mailchimp_callback(
+    connector_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    try:
+        oid = ObjectId(connector_id)
+    except InvalidId:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=invalid_connector_id&platform=mailchimp",
+            status_code=302,
+        )
+    doc = await db["connectors"].find_one({"_id": oid})
+    if not doc:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=connector_not_found&platform=mailchimp",
+            status_code=302,
+        )
+    await save_tokens(
+        connector_id=connector_id,
+        user_id=str(doc["user_id"]),
+        access_token="demo_token_placeholder",
+        refresh_token=None,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=3650),
+        platform_account_id="mc_demo_account",
+        db=db,
+    )
+    return RedirectResponse(
+        f"{settings.frontend_url}/connectors?connected=mailchimp",
+        status_code=302,
+    )
+
+
+@router.get("/search_console/auth")
+async def search_console_auth(
+    connector_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    user_id = str(current_user["_id"])
+    doc = await get_connector(connector_id, user_id, db)
+    if not doc:
+        return error_response("Connector not found", status_code=404)
+    if doc["platform"] != "search_console":
+        return error_response("Connector platform is not search_console", status_code=400)
+    from app.platforms.search_console import get_auth_url
+    url = get_auth_url(connector_id, user_id)
+    return success_response({"auth_url": url}, "Search Console auth URL generated")
+
+
+@router.get("/search_console/callback")
+async def search_console_callback(
+    connector_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    try:
+        oid = ObjectId(connector_id)
+    except InvalidId:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=invalid_connector_id&platform=search_console",
+            status_code=302,
+        )
+    doc = await db["connectors"].find_one({"_id": oid})
+    if not doc:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=connector_not_found&platform=search_console",
+            status_code=302,
+        )
+    await save_tokens(
+        connector_id=connector_id,
+        user_id=str(doc["user_id"]),
+        access_token="demo_token_placeholder",
+        refresh_token=None,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=3650),
+        platform_account_id="sc_demo_site",
+        db=db,
+    )
+    return RedirectResponse(
+        f"{settings.frontend_url}/connectors?connected=search_console",
+        status_code=302,
+    )
+
+
+@router.get("/hubspot/auth")
+async def hubspot_auth(
+    connector_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    user_id = str(current_user["_id"])
+    doc = await get_connector(connector_id, user_id, db)
+    if not doc:
+        return error_response("Connector not found", status_code=404)
+    if doc["platform"] != "hubspot":
+        return error_response("Connector platform is not hubspot", status_code=400)
+    from app.platforms.hubspot import get_auth_url
+    url = get_auth_url(connector_id, user_id)
+    return success_response({"auth_url": url}, "HubSpot auth URL generated")
+
+
+@router.get("/hubspot/callback")
+async def hubspot_callback(
+    connector_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    try:
+        oid = ObjectId(connector_id)
+    except InvalidId:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=invalid_connector_id&platform=hubspot",
+            status_code=302,
+        )
+    doc = await db["connectors"].find_one({"_id": oid})
+    if not doc:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=connector_not_found&platform=hubspot",
+            status_code=302,
+        )
+    await save_tokens(
+        connector_id=connector_id,
+        user_id=str(doc["user_id"]),
+        access_token="demo_token_placeholder",
+        refresh_token=None,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=3650),
+        platform_account_id="hs_demo_portal",
+        db=db,
+    )
+    return RedirectResponse(
+        f"{settings.frontend_url}/connectors?connected=hubspot",
+        status_code=302,
+    )
+
+
+@router.get("/shopify/auth")
+async def shopify_auth(
+    connector_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    user_id = str(current_user["_id"])
+    doc = await get_connector(connector_id, user_id, db)
+    if not doc:
+        return error_response("Connector not found", status_code=404)
+    if doc["platform"] != "shopify":
+        return error_response("Connector platform is not shopify", status_code=400)
+    from app.platforms.shopify import get_auth_url
+    url = get_auth_url(connector_id, user_id)
+    return success_response({"auth_url": url}, "Shopify auth URL generated")
+
+
+@router.get("/shopify/callback")
+async def shopify_callback(
+    connector_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    try:
+        oid = ObjectId(connector_id)
+    except InvalidId:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=invalid_connector_id&platform=shopify",
+            status_code=302,
+        )
+    doc = await db["connectors"].find_one({"_id": oid})
+    if not doc:
+        return RedirectResponse(
+            f"{settings.frontend_url}/connectors?oauth_error=connector_not_found&platform=shopify",
+            status_code=302,
+        )
+    await save_tokens(
+        connector_id=connector_id,
+        user_id=str(doc["user_id"]),
+        access_token="demo_token_placeholder",
+        refresh_token=None,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=3650),
+        platform_account_id="shopify_demo_store",
+        db=db,
+    )
+    return RedirectResponse(
+        f"{settings.frontend_url}/connectors?connected=shopify",
         status_code=302,
     )
 

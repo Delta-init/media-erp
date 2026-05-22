@@ -1,11 +1,65 @@
+import base64
+import hmac as _hmac
+import hashlib
 import logging
+import secrets
+import struct
+import time
+import urllib.parse
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from jose import JWTError
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+# ── TOTP helpers (stdlib only — no pyotp dependency) ─────────────────────────
+
+def _totp_secret() -> str:
+    """Generate a random base32 TOTP secret (160-bit)."""
+    return base64.b32encode(secrets.token_bytes(20)).decode()
+
+
+def _totp_code(secret: str, ts: int | None = None) -> str:
+    """Return the 6-digit TOTP code for a given 30-second counter."""
+    if ts is None:
+        ts = int(time.time()) // 30
+    key = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
+    counter = struct.pack(">Q", ts)
+    mac = _hmac.new(key, counter, hashlib.sha1).digest()
+    offset = mac[-1] & 0x0F
+    code = struct.unpack(">I", mac[offset: offset + 4])[0] & 0x7FFFFFFF
+    return str(code % 1_000_000).zfill(6)
+
+
+def _verify_totp(secret: str, code: str, window: int = 1) -> bool:
+    """Verify a TOTP code with ±window interval tolerance."""
+    ts = int(time.time()) // 30
+    for offset in range(-window, window + 1):
+        if _hmac.compare_digest(_totp_code(secret, ts + offset), str(code).strip()):
+            return True
+    return False
+
+
+def _totp_uri(secret: str, email: str, issuer: str = "mediaERP") -> str:
+    q = urllib.parse.quote
+    return (
+        f"otpauth://totp/{q(issuer)}:{q(email)}"
+        f"?secret={secret}&issuer={q(issuer)}&algorithm=SHA1&digits=6&period=30"
+    )
+
+
+# ── 2FA schemas ───────────────────────────────────────────────────────────────
+
+class TwoFaVerifyBody(BaseModel):
+    code: str
+
+
+class OnboardingCompleteBody(BaseModel):
+    pass
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
@@ -212,4 +266,91 @@ async def change_password(
     return success_response(
         None,
         "Password changed successfully. Please log in again with your new password.",
+    )
+
+
+# ── 2FA endpoints ─────────────────────────────────────────────────────────────
+
+@router.post("/2fa/setup")
+async def setup_2fa(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Generate a TOTP secret and return QR code URI. Does NOT enable 2FA yet."""
+    user_id = str(current_user["_id"])
+    # Reuse existing secret if already set up (but not yet enabled), so QR stays stable
+    secret = current_user.get("totp_secret") or _totp_secret()
+    await db["users"].update_one({"_id": current_user["_id"]}, {"$set": {"totp_secret": secret}})
+    uri = _totp_uri(secret, current_user["email"])
+    return success_response({"secret": secret, "uri": uri}, "2FA setup initiated")
+
+
+@router.post("/2fa/enable")
+async def enable_2fa(
+    body: TwoFaVerifyBody,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Verify the TOTP code and enable 2FA on the account."""
+    secret = current_user.get("totp_secret")
+    if not secret:
+        return error_response("Run /2fa/setup first", status_code=400)
+    if not _verify_totp(secret, body.code):
+        return error_response("Invalid or expired code", status_code=400)
+    await db["users"].update_one(
+        {"_id": current_user["_id"]},
+        {"$set": {"two_fa_enabled": True}},
+    )
+    return success_response({"two_fa_enabled": True}, "Two-factor authentication enabled")
+
+
+@router.post("/2fa/disable")
+async def disable_2fa(
+    body: TwoFaVerifyBody,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Verify the TOTP code and disable 2FA."""
+    secret = current_user.get("totp_secret")
+    if not secret or not current_user.get("two_fa_enabled"):
+        return error_response("2FA is not enabled", status_code=400)
+    if not _verify_totp(secret, body.code):
+        return error_response("Invalid or expired code", status_code=400)
+    await db["users"].update_one(
+        {"_id": current_user["_id"]},
+        {"$set": {"two_fa_enabled": False, "totp_secret": None}},
+    )
+    return success_response({"two_fa_enabled": False}, "Two-factor authentication disabled")
+
+
+@router.get("/2fa/status")
+async def get_2fa_status(current_user: dict = Depends(get_current_user)):
+    """Return whether 2FA is enabled for the current user."""
+    return success_response(
+        {"two_fa_enabled": bool(current_user.get("two_fa_enabled", False))},
+        "2FA status retrieved",
+    )
+
+
+# ── Onboarding endpoint ───────────────────────────────────────────────────────
+
+@router.post("/onboarding/complete")
+async def complete_onboarding(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Mark onboarding as complete for the current user."""
+    await db["users"].update_one(
+        {"_id": current_user["_id"]},
+        {"$set": {"onboarding_complete": True}},
+    )
+    return success_response({"onboarding_complete": True}, "Onboarding complete")
+
+
+@router.get("/onboarding/status")
+async def onboarding_status(current_user: dict = Depends(get_current_user)):
+    """Return onboarding completion status."""
+    return success_response(
+        {"onboarding_complete": bool(current_user.get("onboarding_complete", False))},
+        "Onboarding status retrieved",
     )

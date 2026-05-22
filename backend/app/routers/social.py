@@ -396,6 +396,14 @@ async def get_instagram_login_account(
         return error_response("Connector is not connected", status_code=400)
 
     tokens = get_decrypted_tokens(connector)
+    if tokens.get("access_token") == "demo_token_placeholder":
+        return success_response({
+            "id": connector.get("platform_account_id", "ig_demo_account"),
+            "name": "Demo Instagram Account",
+            "username": "demo_account",
+            "followers_count": 12400,
+            "media_count": 48,
+        }, "Instagram account retrieved")
     from app.platforms.instagram_login import get_user_info
     try:
         info = await get_user_info(tokens["access_token"])
@@ -465,6 +473,8 @@ async def list_instagram_login_conversations(
         return error_response("Instagram user ID not found — please reconnect the connector", status_code=400)
 
     tokens = get_decrypted_tokens(connector)
+    if tokens.get("access_token") == "demo_token_placeholder":
+        return success_response([], "Conversations retrieved")
     from app.platforms.instagram_login import get_conversations
     try:
         conversations = await get_conversations(ig_user_id, tokens["access_token"])
@@ -531,3 +541,174 @@ async def send_instagram_login_dm(
     except Exception as exc:
         return error_response(f"Failed to send DM: {exc}", status_code=502)
     return success_response(result, "Instagram DM sent", status_code=201)
+
+
+# ── Posts / Media ─────────────────────────────────────────────────────────────
+
+@router.get("/instagram_login/posts")
+async def get_instagram_login_posts(
+    connector_id: str,
+    limit: int = 20,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Return media posts for an Instagram Login connector."""
+    user_id = str(current_user["_id"])
+    connector = await get_connector(connector_id, user_id, db)
+    if not connector:
+        return error_response("Connector not found", status_code=404)
+    if connector["platform"] != "instagram_login":
+        return error_response("Not an instagram_login connector", status_code=400)
+    if connector.get("status") != "connected":
+        return error_response("Connector is not connected", status_code=400)
+    ig_user_id = connector.get("platform_account_id")
+    if not ig_user_id:
+        return error_response("Instagram user ID not found — please reconnect", status_code=400)
+    tokens = get_decrypted_tokens(connector)
+    if tokens.get("access_token") == "demo_token_placeholder":
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        demo_posts = [
+            {
+                "id": f"demo_post_{i}",
+                "caption": cap,
+                "media_type": "IMAGE",
+                "media_url": f"https://picsum.photos/seed/ig{i}/800/800",
+                "thumbnail_url": None,
+                "timestamp": (now - timedelta(days=i * 3)).isoformat(),
+                "like_count": likes,
+                "comments_count": comments,
+                "permalink": f"https://www.instagram.com/p/demo{i}/",
+            }
+            for i, (cap, likes, comments) in enumerate([
+                ("Excited to share our latest product launch! 🚀 #marketing #growth", 847, 43),
+                ("Behind the scenes at our team offsite 🌟 #teamwork #culture", 623, 28),
+                ("New blog post: 5 strategies that tripled our engagement 📈", 512, 67),
+                ("Thank you for 10K followers! Your support means everything ❤️", 1204, 91),
+                ("Q3 results are in — and we're blown away 🎉 #milestones", 389, 22),
+                ("Meet the team powering our growth 💪 #peoplefirst", 445, 35),
+            ], 1)
+        ]
+        return success_response(demo_posts[:limit], "Posts retrieved")
+    from app.platforms.instagram_login import get_media
+    try:
+        posts = await get_media(ig_user_id, tokens["access_token"], limit=limit)
+    except Exception as exc:
+        return error_response(f"Failed to fetch posts: {exc}", status_code=502)
+    return success_response(posts, "Posts retrieved")
+
+
+@router.get("/instagram_login/posts/{post_id}/comments")
+async def get_instagram_login_post_comments(
+    post_id: str,
+    connector_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Return comments for a specific Instagram post."""
+    user_id = str(current_user["_id"])
+    connector = await get_connector(connector_id, user_id, db)
+    if not connector:
+        return error_response("Connector not found", status_code=404)
+    if connector["platform"] != "instagram_login":
+        return error_response("Not an instagram_login connector", status_code=400)
+    if connector.get("status") != "connected":
+        return error_response("Connector is not connected", status_code=400)
+    tokens = get_decrypted_tokens(connector)
+    from app.platforms.instagram_login import get_media_comments
+    try:
+        comments = await get_media_comments(post_id, tokens["access_token"])
+    except Exception as exc:
+        return error_response(f"Failed to fetch comments: {exc}", status_code=502)
+    return success_response(comments, "Comments retrieved")
+
+
+@router.get("/facebook/posts")
+async def get_facebook_page_posts(
+    connector_id: str,
+    page_id: str,
+    limit: int = 20,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Return posts for a Facebook Page."""
+    user_id = str(current_user["_id"])
+    connector = await get_connector(connector_id, user_id, db)
+    if not connector:
+        return error_response("Connector not found", status_code=404)
+    if connector["platform"] != "facebook_pages":
+        return error_response("Not a facebook_pages connector", status_code=400)
+    if connector.get("status") != "connected":
+        return error_response("Connector is not connected", status_code=400)
+    tokens = get_decrypted_tokens(connector)
+    from app.platforms.facebook_pages import get_pages, get_page_posts
+    try:
+        pages = await get_pages(tokens["access_token"])
+        page = next((p for p in pages if p["id"] == page_id), None)
+        if not page:
+            return error_response("Page not found", status_code=404)
+        posts = await get_page_posts(page_id, page["access_token"], limit=limit)
+    except Exception as exc:
+        return error_response(f"Failed to fetch posts: {exc}", status_code=502)
+    return success_response(posts, "Posts retrieved")
+
+
+@router.get("/webhook-messages")
+async def get_webhook_messages(
+    page_id: str | None = None,
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Return DM messages that arrived via Meta webhook and were persisted locally.
+    Useful for surfacing real-time inbound messages even before the API is polled.
+    """
+    user_id = str(current_user["_id"])
+    query: dict = {"user_id": user_id}
+    if page_id:
+        query["page_id"] = page_id
+    cursor = db["social_messages"].find(query).sort("created_at", -1).limit(limit)
+    docs = await cursor.to_list(limit)
+    messages = []
+    for d in docs:
+        messages.append({
+            "id":           str(d["_id"]),
+            "mid":          d.get("mid"),
+            "platform":     d.get("platform"),
+            "page_id":      d.get("page_id"),
+            "sender_id":    d.get("sender_id"),
+            "recipient_id": d.get("recipient_id"),
+            "text":         d.get("text"),
+            "direction":    d.get("direction", "inbound"),
+            "created_at":   d["created_at"].isoformat() if d.get("created_at") else None,
+        })
+    return success_response(messages, "Webhook messages retrieved")
+
+
+@router.get("/facebook/posts/{post_id}/comments")
+async def get_facebook_post_comments(
+    post_id: str,
+    connector_id: str,
+    page_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Return comments for a specific Facebook Page post."""
+    user_id = str(current_user["_id"])
+    connector = await get_connector(connector_id, user_id, db)
+    if not connector:
+        return error_response("Connector not found", status_code=404)
+    if connector.get("status") != "connected":
+        return error_response("Connector is not connected", status_code=400)
+    tokens = get_decrypted_tokens(connector)
+    from app.platforms.facebook_pages import get_pages, get_post_comments
+    try:
+        pages = await get_pages(tokens["access_token"])
+        page = next((p for p in pages if p["id"] == page_id), None)
+        if not page:
+            return error_response("Page not found", status_code=404)
+        comments = await get_post_comments(post_id, page["access_token"])
+    except Exception as exc:
+        return error_response(f"Failed to fetch comments: {exc}", status_code=502)
+    return success_response(comments, "Comments retrieved")

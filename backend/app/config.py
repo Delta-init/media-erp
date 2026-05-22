@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     web_concurrency: int = 2
     celery_concurrency: int = 2
 
-    allowed_origins: str = "http://localhost:3000"
+    allowed_origins: str = "http://localhost:3000,http://localhost:3001"
     frontend_url: str = "http://localhost:3000"
 
     # Google OAuth2 (shared by Google Ads + GA4)
@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     ga4_redirect_uri: str = (
         "http://localhost:8000/api/v1/connectors/ga4/callback"
     )
+
+    # Facebook / Meta Webhook
+    facebook_webhook_verify_token: str = "mediaerp_webhook_verify"
 
     # Facebook Ads
     facebook_app_id: str = ""
@@ -92,6 +95,21 @@ class Settings(BaseSettings):
     tiktok_redirect_uri: str = (
         "http://localhost:8000/api/v1/connectors/tiktok_ads/callback"
     )
+
+    # Stripe (leave empty to run in demo mode — no live payments)
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_free_monthly: str = ""
+    stripe_price_free_yearly: str = ""
+    stripe_price_pro_monthly: str = ""
+    stripe_price_pro_yearly: str = ""
+    stripe_price_enterprise_monthly: str = ""
+    stripe_price_enterprise_yearly: str = ""
+
+    # Public base URL (used to build publicly-accessible file URLs for image uploads)
+    # In development set to your ngrok static domain so Instagram can fetch images.
+    # In production set to your actual domain.
+    public_base_url: str = "http://localhost:8000"
 
     model_config = {"env_file": str(_ENV_FILE), "case_sensitive": False, "extra": "ignore"}
 

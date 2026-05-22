@@ -166,7 +166,7 @@ def run_sync(connector_id: str) -> dict:
     # Social connectors (instagram, facebook_pages, instagram_login) don't sync
     # marketing analytics data — they exist purely for posting and DMs.
     # Skip them silently rather than marking them as "error".
-    _SOCIAL_ONLY_PLATFORMS = {"instagram", "instagram_login", "facebook_pages"}
+    _SOCIAL_ONLY_PLATFORMS = {"instagram", "facebook_pages"}
     fetch_fn = PLATFORM_FETCH_REGISTRY.get(platform)
     if fetch_fn is None:
         if platform in _SOCIAL_ONLY_PLATFORMS:
@@ -316,6 +316,41 @@ def _register_platforms() -> None:
         logger.info("Registered platform fetch: tiktok_ads")
     except Exception as exc:  # pragma: no cover
         logger.warning("tiktok_ads_fetch not available: %s", exc)
+
+    try:
+        from app.services.instagram_insights_fetch import fetch_data as _ig_insights
+        PLATFORM_FETCH_REGISTRY["instagram_login"] = _ig_insights
+        logger.info("Registered platform fetch: instagram_login")
+    except Exception as exc:
+        logger.warning("instagram_insights_fetch not available: %s", exc)
+
+    try:
+        from app.services.mailchimp_fetch import fetch_data as _mc
+        PLATFORM_FETCH_REGISTRY["mailchimp"] = _mc
+        logger.info("Registered platform fetch: mailchimp")
+    except Exception as exc:
+        logger.warning("mailchimp_fetch not available: %s", exc)
+
+    try:
+        from app.services.search_console_fetch import fetch_data as _sc
+        PLATFORM_FETCH_REGISTRY["search_console"] = _sc
+        logger.info("Registered platform fetch: search_console")
+    except Exception as exc:
+        logger.warning("search_console_fetch not available: %s", exc)
+
+    try:
+        from app.services.hubspot_fetch import fetch_data as _hs
+        PLATFORM_FETCH_REGISTRY["hubspot"] = _hs
+        logger.info("Registered platform fetch: hubspot")
+    except Exception as exc:
+        logger.warning("hubspot_fetch not available: %s", exc)
+
+    try:
+        from app.services.shopify_fetch import fetch_data as _shopify
+        PLATFORM_FETCH_REGISTRY["shopify"] = _shopify
+        logger.info("Registered platform fetch: shopify")
+    except Exception as exc:
+        logger.warning("shopify_fetch not available: %s", exc)
 
 
 _register_platforms()

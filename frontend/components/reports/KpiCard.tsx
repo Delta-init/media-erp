@@ -43,14 +43,21 @@ interface KpiCardProps {
   bg: string;      // Tailwind bg colour,   e.g. "bg-blue-500/10"
   data: KpiValue | undefined;
   loading?: boolean;
+  target?: number; // optional KPI target value
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export function KpiCard({ metric, label, icon: Icon, color, bg, data, loading }: KpiCardProps) {
+export function KpiCard({ metric, label, icon: Icon, color, bg, data, loading, target }: KpiCardProps) {
   const value  = data?.value  ?? null;
   const delta  = data?.delta  ?? null;
   const isUp   = delta !== null && delta > 0;
   const isDown = delta !== null && delta < 0;
+
+  // Target progress (capped at 100% for display)
+  const targetPct = (target != null && value != null && target > 0)
+    ? Math.min(100, (value / target) * 100)
+    : null;
+  const targetMet = targetPct !== null && targetPct >= 100;
 
   return (
     <motion.div
@@ -94,6 +101,22 @@ export function KpiCard({ metric, label, icon: Icon, color, bg, data, loading }:
               ? `${isUp ? "+" : ""}${delta.toFixed(1)}% vs prev period`
               : "No prior data"}
           </p>
+
+          {/* KPI target progress bar */}
+          {targetPct !== null && (
+            <div className="mt-3 space-y-1">
+              <div className="flex justify-between text-[10px] text-muted-foreground">
+                <span>{targetMet ? "✓ Target met" : `${targetPct.toFixed(0)}% of target`}</span>
+                <span>{formatValue(metric, target!)}</span>
+              </div>
+              <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn("h-full rounded-full transition-all", targetMet ? "bg-emerald-500" : "bg-primary")}
+                  style={{ width: `${targetPct}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </motion.div>

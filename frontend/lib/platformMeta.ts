@@ -56,6 +56,30 @@ export const PLATFORM_META: Record<ConnectorPlatform, PlatformMeta> = {
     initials: "IG✦",
     bgClass: "bg-gradient-to-br from-fuchsia-600 to-rose-500",
   },
+  mailchimp: {
+    label: "Mailchimp",
+    description: "Email marketing campaign analytics",
+    initials: "MC",
+    bgClass: "bg-yellow-500",
+  },
+  search_console: {
+    label: "Search Console",
+    description: "Organic search performance & queries",
+    initials: "SC",
+    bgClass: "bg-green-600",
+  },
+  hubspot: {
+    label: "HubSpot CRM",
+    description: "Deal pipeline & revenue tracking",
+    initials: "HS",
+    bgClass: "bg-orange-600",
+  },
+  shopify: {
+    label: "Shopify",
+    description: "E-commerce orders, revenue & conversions",
+    initials: "SH",
+    bgClass: "bg-emerald-600",
+  },
 };
 
 export const CONNECTABLE_PLATFORMS: ConnectorPlatform[] = [
@@ -67,4 +91,5 @@ export const CONNECTABLE_PLATFORMS: ConnectorPlatform[] = [
   "instagram_login",    // direct Instagram Business Login — no Facebook Page needed
   "linkedin_ads",
   "tiktok_ads",
+  "mailchimp",
 ];

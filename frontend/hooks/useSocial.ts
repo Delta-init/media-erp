@@ -4,6 +4,27 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import api from "@/lib/axios";
 
+// ── Media Upload ──────────────────────────────────────────────────────────────
+
+export function useUploadMedia() {
+  return useMutation({
+    mutationFn: async (file: File): Promise<{ url: string; filename: string; size: number }> => {
+      const form = new FormData();
+      form.append("file", file);
+      const { data } = await api.post<{ success: boolean; data: { url: string; filename: string; size: number } }>(
+        "/media/upload",
+        form,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+      return data.data;
+    },
+    onError(err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? "Failed to upload file");
+    },
+  });
+}
+
 // ── Facebook Pages ────────────────────────────────────────────────────────────
 
 export function useFacebookPages(connectorId: string) {
@@ -116,8 +137,15 @@ export function useSendInstagramDM() {
       toast.success("Instagram DM sent!");
     },
     onError(err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? "Failed to send Instagram DM");
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "";
+      if (msg.includes("2534014") || msg.toLowerCase().includes("cannot be found")) {
+        toast.error(
+          "Instagram couldn't find this user. They must have messaged your account within the last 24 hours, and your Meta app must be live (not in Development mode).",
+          { duration: 8000 }
+        );
+      } else {
+        toast.error(msg || "Failed to send Instagram DM");
+      }
     },
   });
 }
@@ -199,6 +227,7 @@ export function useInstagramLoginConversations(connectorId: string) {
     },
     enabled: !!connectorId,
     refetchInterval: 30_000,
+    retry: 1,
   });
 }
 
@@ -213,6 +242,7 @@ export function useInstagramLoginMessages(connectorId: string, conversationId: s
     },
     enabled: !!connectorId && !!conversationId,
     refetchInterval: 10_000,
+    retry: 1,
   });
 }
 
@@ -266,9 +296,81 @@ export function useSendInstagramLoginDM() {
       toast.success("Instagram DM sent!");
     },
     onError(err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? "Failed to send Instagram DM");
+      const e = err as { response?: { data?: { message?: string; detail?: string } }; message?: string };
+      // Prefer the backend's structured message, fall back to raw error
+      const msg =
+        e?.response?.data?.message ??
+        e?.response?.data?.detail ??
+        e?.message ??
+        "";
+      // 100/2534014 = recipient not accessible (Dev mode restriction or wrong IGSID)
+      if (msg.includes("2534014") || msg.toLowerCase().includes("cannot be found")) {
+        toast.error(
+          "Instagram can't reach this user — they must have messaged you within the last 24 h, and your Meta app must be Live (not in Development mode).",
+          { duration: 10000 }
+        );
+      } else if (msg) {
+        toast.error(msg, { duration: 8000 });
+      } else {
+        toast.error("Failed to send Instagram DM");
+      }
     },
+  });
+}
+
+// ── Posts / Media ─────────────────────────────────────────────────────────────
+
+export function useInstagramLoginPosts(connectorId: string) {
+  return useQuery({
+    queryKey: ["instagram-login-posts", connectorId],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: IGPost[] }>(
+        `/social/instagram_login/posts?connector_id=${connectorId}&limit=50`
+      );
+      return data.data;
+    },
+    enabled: !!connectorId,
+    staleTime: 60_000,
+  });
+}
+
+export function useInstagramLoginPostComments(connectorId: string, postId: string) {
+  return useQuery({
+    queryKey: ["instagram-login-post-comments", connectorId, postId],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: IGComment[] }>(
+        `/social/instagram_login/posts/${postId}/comments?connector_id=${connectorId}`
+      );
+      return data.data;
+    },
+    enabled: !!connectorId && !!postId,
+  });
+}
+
+export function useFacebookPosts(connectorId: string, pageId: string) {
+  return useQuery({
+    queryKey: ["facebook-posts", connectorId, pageId],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: FBPost[] }>(
+        `/social/facebook/posts?connector_id=${connectorId}&page_id=${pageId}&limit=50`
+      );
+      return data.data;
+    },
+    enabled: !!connectorId && !!pageId,
+    staleTime: 60_000,
+  });
+}
+
+export function useFacebookPostComments(connectorId: string, pageId: string, postId: string) {
+  return useQuery({
+    queryKey: ["facebook-post-comments", connectorId, pageId, postId],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: FBComment[] }>(
+        `/social/facebook/posts/${postId}/comments?connector_id=${connectorId}&page_id=${pageId}`
+      );
+      return data.data;
+    },
+    enabled: !!connectorId && !!pageId && !!postId,
   });
 }
 
@@ -304,6 +406,9 @@ export interface ConversationParticipant {
   name: string;
   id: string;
   email?: string;
+  username?: string;
+  /** Set by backend for instagram_login conversations — true = this is the connected account */
+  is_self?: boolean;
 }
 
 export interface Conversation {
@@ -319,4 +424,44 @@ export interface ChatMessage {
   message: string;
   from: { name: string; id: string };
   created_time: string;
+}
+
+export interface IGPost {
+  id: string;
+  caption?: string;
+  media_type: "IMAGE" | "VIDEO" | "CAROUSEL_ALBUM";
+  media_url?: string;
+  thumbnail_url?: string;
+  timestamp: string;
+  like_count?: number;
+  comments_count?: number;
+  permalink?: string;
+}
+
+export interface IGComment {
+  id: string;
+  text: string;
+  timestamp: string;
+  username?: string;
+  like_count?: number;
+  replies?: { data: IGComment[] };
+}
+
+export interface FBPost {
+  id: string;
+  message?: string;
+  story?: string;
+  created_time: string;
+  full_picture?: string;
+  likes?: { data: unknown[]; summary: { total_count: number } };
+  comments?: { data: unknown[]; summary: { total_count: number } };
+  shares?: { count: number };
+}
+
+export interface FBComment {
+  id: string;
+  message: string;
+  from?: { name: string; id: string };
+  created_time: string;
+  like_count?: number;
 }

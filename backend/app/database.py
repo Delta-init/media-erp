@@ -64,6 +64,7 @@ async def create_indexes() -> None:
     await db["sync_runs"].create_index([("connector_id", ASCENDING), ("started_at", DESCENDING)])
     # 4.5 — reports (saved reports)
     await db["reports"].create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+    await db["reports"].create_index("share_token", sparse=True)
     # 6.2 — ai_queries
     await db["ai_queries"].create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
     # 7.2 — notifications
@@ -89,4 +90,38 @@ async def create_indexes() -> None:
     await db["password_resets"].create_index("email")     # lookup by email + otp
     await db["password_resets"].create_index(
         "expires_at", expireAfterSeconds=0  # TTL: MongoDB auto-deletes expired docs
+    )
+    # rules & triggers (Feature 9)
+    await db["rules"].create_index([("user_id", ASCENDING), ("enabled", ASCENDING)])
+    await db["rules"].create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+    await db["rule_triggers"].create_index([("user_id", ASCENDING), ("triggered_at", DESCENDING)])
+    await db["rule_triggers"].create_index("rule_id")
+    # email schedules (Feature 6)
+    await db["email_schedules"].create_index([("user_id", ASCENDING), ("enabled", ASCENDING)])
+    await db["email_schedules"].create_index("next_send_at")
+    # subscriptions (Feature 5)
+    await db["subscriptions"].create_index("user_id", unique=True)
+    await db["subscriptions"].create_index("stripe_customer_id")
+    # clients (Feature 10)
+    await db["clients"].create_index([("agency_user_id", ASCENDING), ("status", ASCENDING)])
+    await db["clients"].create_index([("agency_user_id", ASCENDING), ("created_at", DESCENDING)])
+    await db["clients"].create_index("invite_token")
+    # white-label (Feature 18)
+    await db["whitelabel"].create_index("user_id", unique=True)
+    # social_messages — webhook-persisted DMs (Feature: webhook DM persistence)
+    await db["social_messages"].create_index("mid", unique=True, sparse=True)
+    await db["social_messages"].create_index([("page_id", ASCENDING), ("created_at", DESCENDING)])
+    await db["social_messages"].create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+    # api_keys — programmatic access
+    await db["api_keys"].create_index("key_hash", unique=True)
+    await db["api_keys"].create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+    await db["api_keys"].create_index(
+        "expires_at",
+        expireAfterSeconds=0,
+        sparse=True,   # only index docs that have an expires_at field
+    )
+    # custom_metrics — formula builder (Sprint 3)
+    await db["custom_metrics"].create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+    await db["custom_metrics"].create_index(
+        [("user_id", ASCENDING), ("name", ASCENDING)], unique=True
     )

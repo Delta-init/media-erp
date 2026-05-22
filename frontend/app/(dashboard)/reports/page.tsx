@@ -6,14 +6,21 @@ import { cn } from "@/lib/utils";
 import {
   BarChart2,
   BookmarkCheck,
+  Check,
+  Copy,
   Download,
   Eye,
+  GitMerge,
+  Link2,
+  Loader2,
   MousePointerClick,
   RefreshCw,
   Trash2,
   TrendingUp,
   Users,
   DollarSign,
+  X,
+  GitBranch,
 } from "lucide-react";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
@@ -27,7 +34,10 @@ import { PlatformDonut }  from "@/components/reports/PlatformDonut";
 import { CampaignBarChart } from "@/components/reports/CampaignBarChart";
 import { DataTable }      from "@/components/reports/DataTable";
 import { Pagination }     from "@/components/reports/Pagination";
-import { ReportBuilder }  from "@/components/reports/ReportBuilder";
+import { ReportBuilder }      from "@/components/reports/ReportBuilder";
+import { BlendBuilder }       from "@/components/reports/BlendBuilder";
+import { AttributionReport }  from "@/components/reports/AttributionReport";
+import { AnomalyPanel }       from "@/components/reports/AnomalyPanel";
 import { Button }         from "@/components/ui/button";
 
 import {
@@ -38,7 +48,10 @@ import {
   useExportCsv,
   useSavedReports,
   useDeleteSavedReport,
+  useShareReport,
+  useRevokeShare,
 } from "@/hooks/useReports";
+import { useFx, convertValue, fmtCurrency, SUPPORTED_CURRENCIES, type Currency } from "@/hooks/useFx";
 import { fadeVariants, kpiContainerVariants, listVariants, listItemVariants } from "@/lib/animations";
 import type { ReportMetric, CampaignRow, OverviewKpis, SavedReport } from "@/types/report";
 
@@ -50,6 +63,7 @@ function daysAgo(n: number) {
 }
 
 // ── KPI config ────────────────────────────────────────────────────────────────
+const MONETARY_METRICS = new Set(["spend", "revenue", "cpc"]);
 interface KpiConf {
   metric: keyof OverviewKpis;
   label: string;
@@ -70,12 +84,14 @@ const KPI_CONF: KpiConf[] = [
 const TREND_OPTIONS: ReportMetric[] = ["spend", "clicks", "impressions", "conversions", "revenue"];
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
-type Tab = "analytics" | "builder" | "saved";
+type Tab = "analytics" | "builder" | "saved" | "blend" | "attribution";
 
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
-  { id: "analytics", label: "Analytics",      icon: BarChart2      },
-  { id: "builder",   label: "Report Builder", icon: TrendingUp     },
-  { id: "saved",     label: "Saved Reports",  icon: BookmarkCheck  },
+  { id: "analytics",   label: "Analytics",      icon: BarChart2      },
+  { id: "builder",     label: "Report Builder", icon: TrendingUp     },
+  { id: "saved",       label: "Saved Reports",  icon: BookmarkCheck  },
+  { id: "blend",       label: "Data Blend",     icon: GitMerge       },
+  { id: "attribution", label: "Attribution",    icon: GitBranch      },
 ];
 
 // ── Saved report card ─────────────────────────────────────────────────────────
@@ -85,6 +101,39 @@ function SavedReportCard({ report, onDelete }: { report: SavedReport; onDelete: 
     line: TrendingUp, bar: BarChart2, donut: Eye, table: MousePointerClick,
   };
   const ChartIcon = CHART_ICONS[report.chart_type] ?? BarChart2;
+
+  const shareReport = useShareReport();
+  const revokeShare = useRevokeShare();
+  const [shareUrl, setShareUrl] = useState<string | null>(
+    report.share_token ? `${window?.location?.origin ?? ""}/reports/shared/${report.share_token}` : null
+  );
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = async () => {
+    if (shareUrl) {
+      // Already shared — just copy
+      await handleCopy();
+      return;
+    }
+    const result = await shareReport.mutateAsync(report._id);
+    setShareUrl(result.share_url);
+  };
+
+  const handleCopy = async () => {
+    const url = shareUrl ?? "";
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+    }
+  };
+
+  const handleRevoke = async () => {
+    await revokeShare.mutateAsync(report._id);
+    setShareUrl(null);
+  };
 
   return (
     <motion.div
@@ -103,15 +152,51 @@ function SavedReportCard({ report, onDelete }: { report: SavedReport; onDelete: 
             {report.name}
           </Link>
         </div>
-        <button
-          type="button"
-          onClick={() => onDelete(report._id)}
-          className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
-          title="Delete report"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={handleShare}
+            disabled={shareReport.isPending}
+            className="rounded-md p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+            title={shareUrl ? "Copy share link" : "Share report"}
+          >
+            {shareReport.isPending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : copied ? (
+              <Check className="size-3.5 text-emerald-500" />
+            ) : shareUrl ? (
+              <Copy className="size-3.5" />
+            ) : (
+              <Link2 className="size-3.5" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onDelete(report._id)}
+            className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            title="Delete report"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
       </div>
+
+      {/* Share URL banner */}
+      {shareUrl && (
+        <div className="flex items-center gap-2 rounded-lg bg-primary/5 border border-primary/20 px-2.5 py-1.5">
+          <Link2 className="size-3 shrink-0 text-primary" />
+          <span className="flex-1 truncate text-[11px] text-primary">{shareUrl}</span>
+          <button
+            type="button"
+            onClick={handleRevoke}
+            disabled={revokeShare.isPending}
+            className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
+            title="Revoke share link"
+          >
+            <X className="size-3" />
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-1.5">
         {report.metrics.map((m) => (
@@ -137,8 +222,13 @@ export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState<Tab>("analytics");
 
   // ── Analytics tab state ────────────────────────────────────────────────────
-  const [dateFrom, setDateFrom] = useState(daysAgo(30));
-  const [dateTo,   setDateTo]   = useState(today());
+  const [dateFrom,  setDateFrom]  = useState(daysAgo(30));
+  const [dateTo,    setDateTo]    = useState(today());
+  const [currency,  setCurrency]  = useState<Currency>("USD");
+
+  // FX rates (stale 1 h, falls back gracefully)
+  const { data: fxData } = useFx("USD");
+  const fxRates = fxData?.rates ?? {};
   const [trendMetric, setTrendMetric] = useState<ReportMetric>("spend");
   const [search,  setSearch]  = useState("");
   const [page,    setPage]    = useState(1);
@@ -249,13 +339,32 @@ export default function ReportsPage() {
             exit="exit"
             className="space-y-5"
           >
-            {/* Date picker */}
-            <DateRangePicker
-              dateFrom={dateFrom}
-              dateTo={dateTo}
-              onFromChange={(v) => { setDateFrom(v); setPage(1); }}
-              onToChange={(v)   => { setDateTo(v);   setPage(1); }}
-            />
+            {/* Date picker + currency selector */}
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex-1">
+                <DateRangePicker
+                  dateFrom={dateFrom}
+                  dateTo={dateTo}
+                  onFromChange={(v) => { setDateFrom(v); setPage(1); }}
+                  onToChange={(v)   => { setDateTo(v);   setPage(1); }}
+                />
+              </div>
+              <div className="space-y-1 shrink-0">
+                <p className="text-xs text-muted-foreground">Currency</p>
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value as Currency)}
+                  className="rounded-xl border bg-background px-3 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                >
+                  {SUPPORTED_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Anomaly panel */}
+            <AnomalyPanel dateFrom={dateFrom} dateTo={dateTo} />
 
             {/* KPI cards */}
             <motion.div
@@ -264,18 +373,30 @@ export default function ReportsPage() {
               animate="animate"
               className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
             >
-              {KPI_CONF.map((conf) => (
-                <KpiCard
-                  key={conf.metric}
-                  metric={conf.metric}
-                  label={conf.label}
-                  icon={conf.icon}
-                  color={conf.color}
-                  bg={conf.bg}
-                  data={overview.data?.kpis[conf.metric]}
-                  loading={overview.isLoading}
-                />
-              ))}
+              {KPI_CONF.map((conf) => {
+                const raw = overview.data?.kpis[conf.metric];
+                // Apply FX conversion for monetary metrics
+                const converted = (raw && currency !== "USD" && MONETARY_METRICS.has(conf.metric))
+                  ? {
+                      value: raw.value !== null ? convertValue(raw.value, currency, fxRates) : null,
+                      delta: raw.delta,
+                    }
+                  : raw;
+                return (
+                  <KpiCard
+                    key={conf.metric}
+                    metric={conf.metric}
+                    label={currency !== "USD" && MONETARY_METRICS.has(conf.metric)
+                      ? `${conf.label} (${currency})`
+                      : conf.label}
+                    icon={conf.icon}
+                    color={conf.color}
+                    bg={conf.bg}
+                    data={converted}
+                    loading={overview.isLoading}
+                  />
+                );
+              })}
             </motion.div>
 
             {/* Trend + Donut */}
@@ -419,6 +540,32 @@ export default function ReportsPage() {
                 ))}
               </motion.div>
             ) : null}
+          </motion.div>
+        )}
+
+        {/* ── BLEND TAB ─────────────────────────────────────────────── */}
+        {activeTab === "blend" && (
+          <motion.div
+            key="blend"
+            variants={fadeVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+          >
+            <BlendBuilder />
+          </motion.div>
+        )}
+
+        {/* ── ATTRIBUTION TAB ───────────────────────────────────────── */}
+        {activeTab === "attribution" && (
+          <motion.div
+            key="attribution"
+            variants={fadeVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+          >
+            <AttributionReport />
           </motion.div>
         )}
       </AnimatePresence>

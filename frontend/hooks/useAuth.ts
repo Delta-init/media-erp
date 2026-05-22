@@ -174,3 +174,94 @@ export function useUpdatePassword() {
     },
   });
 }
+
+// ── 2FA hooks ─────────────────────────────────────────────────────────────────
+
+export function use2faStatus() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  return useQuery({
+    queryKey: ["2fa-status"],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: { two_fa_enabled: boolean } }>("/auth/2fa/status");
+      return data.data;
+    },
+    enabled: isAuthenticated,
+  });
+}
+
+export function use2faSetup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<{ success: boolean; data: { secret: string; uri: string } }>("/auth/2fa/setup");
+      return data.data;
+    },
+    onSuccess() {
+      qc.invalidateQueries({ queryKey: ["2fa-status"] });
+    },
+  });
+}
+
+export function use2faEnable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (code: string) => {
+      const { data } = await api.post<{ success: boolean; data: { two_fa_enabled: boolean } }>("/auth/2fa/enable", { code });
+      return data.data;
+    },
+    onSuccess() {
+      toast.success("Two-factor authentication enabled!");
+      qc.invalidateQueries({ queryKey: ["2fa-status"] });
+    },
+    onError(err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? "Invalid code. Please try again.");
+    },
+  });
+}
+
+export function use2faDisable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (code: string) => {
+      const { data } = await api.post<{ success: boolean; data: { two_fa_enabled: boolean } }>("/auth/2fa/disable", { code });
+      return data.data;
+    },
+    onSuccess() {
+      toast.success("Two-factor authentication disabled.");
+      qc.invalidateQueries({ queryKey: ["2fa-status"] });
+    },
+    onError(err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? "Invalid code. Please try again.");
+    },
+  });
+}
+
+// ── Onboarding hook ───────────────────────────────────────────────────────────
+
+export function useOnboardingStatus() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  return useQuery({
+    queryKey: ["onboarding-status"],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: { onboarding_complete: boolean } }>("/auth/onboarding/status");
+      return data.data;
+    },
+    enabled: isAuthenticated,
+    staleTime: Infinity, // once loaded, don't refetch unless invalidated
+  });
+}
+
+export function useCompleteOnboarding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post<{ success: boolean }>("/auth/onboarding/complete");
+      return data;
+    },
+    onSuccess() {
+      qc.invalidateQueries({ queryKey: ["onboarding-status"] });
+    },
+  });
+}

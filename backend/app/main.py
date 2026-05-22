@@ -1,8 +1,10 @@
 from contextlib import asynccontextmanager
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import connect_db, close_db, create_indexes
@@ -34,6 +36,24 @@ from app.routers import roles as roles_router
 from app.routers import users as users_router
 from app.routers import chat as chat_router
 from app.routers import social as social_router
+from app.routers import webhook as webhook_router
+from app.routers import media as media_router
+from app.routers import campaigns_write as campaigns_write_router
+from app.routers import budget as budget_router
+from app.routers import schedule as schedule_router
+from app.routers import rules as rules_router
+from app.routers import email_reports as email_reports_router
+from app.routers import export as export_router
+from app.routers import billing as billing_router
+from app.routers import clients as clients_router
+from app.routers import whitelabel as whitelabel_router
+from app.routers import audit_logs as audit_logs_router
+from app.routers import kpi_targets as kpi_targets_router
+from app.routers import api_keys as api_keys_router
+from app.routers import analytics as analytics_router
+from app.routers import custom_metrics as custom_metrics_router
+from app.routers import fx as fx_router
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.utils.response import success_response
 
 
@@ -41,6 +61,21 @@ from app.utils.response import success_response
 async def lifespan(app: FastAPI):
     await connect_db()
     await create_indexes()
+    # Post scheduling daemon thread
+    import threading
+    from app.services.schedule_service import start_scheduler
+    threading.Thread(target=start_scheduler, daemon=True, name="post-scheduler").start()
+    logger.info("Post scheduler started")
+
+    # Rules evaluation daemon thread (every 5 min)
+    from app.services.rules_service import start_rules_evaluator
+    threading.Thread(target=start_rules_evaluator, daemon=True, name="rules-evaluator").start()
+    logger.info("Rules evaluator started")
+
+    # Email report scheduler daemon thread (every 1 min)
+    from app.services.email_report_service import start_email_scheduler
+    threading.Thread(target=start_email_scheduler, daemon=True, name="email-scheduler").start()
+    logger.info("Email scheduler started")
     yield
     await close_db()
 
@@ -60,6 +95,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RateLimitMiddleware)
 
 
 app.include_router(auth_router.router)
@@ -73,6 +109,29 @@ app.include_router(roles_router.router)
 app.include_router(users_router.router)
 app.include_router(chat_router.router)
 app.include_router(social_router.router)
+app.include_router(webhook_router.router)
+app.include_router(media_router.router)
+app.include_router(campaigns_write_router.router)
+app.include_router(budget_router.router)
+app.include_router(schedule_router.router)
+app.include_router(rules_router.router)
+app.include_router(email_reports_router.router)
+app.include_router(export_router.router)
+app.include_router(billing_router.router)
+app.include_router(clients_router.router)
+app.include_router(whitelabel_router.router)
+app.include_router(audit_logs_router.router)
+app.include_router(kpi_targets_router.router)
+app.include_router(api_keys_router.router)
+app.include_router(analytics_router.router)
+app.include_router(custom_metrics_router.router)
+app.include_router(fx_router.router)
+
+# Serve uploaded files at /uploads/<filename>
+# These are publicly reachable via ngrok so Instagram can fetch images.
+_UPLOADS_DIR = Path(__file__).parent.parent / "uploads"
+_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")
 
 
 @app.get("/api/v1/health", tags=["health"])

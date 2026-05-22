@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Share2, Camera, MessageCircle, Send, RefreshCw,
-  User, ChevronRight, Inbox, AlertTriangle, PenSquare, X,
+  User, ChevronRight, Inbox, AlertTriangle, PenSquare, X, Sparkles,
 } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -17,19 +17,31 @@ import {
   useInstagramAccounts,
   useInstagramConversations,
   useInstagramMessages,
+  useInstagramLoginAccount,
+  useInstagramLoginConversations,
+  useInstagramLoginMessages,
   useSendFacebookDM,
   useSendInstagramDM,
+  useSendInstagramLoginDM,
   type Conversation,
   type FacebookPage,
   type InstagramAccount,
 } from "@/hooks/useSocial";
 
-type Platform = "facebook" | "instagram";
+type Platform = "facebook" | "instagram" | "instagram_login";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getOtherParticipant(conv: Conversation, selfId: string) {
-  return conv.participants?.data?.find((p) => p.id !== selfId) ?? conv.participants?.data?.[0];
+  const participants = conv.participants?.data ?? [];
+  // 1. Use the is_self flag set by the backend (reliable — avoids ID-format mismatches)
+  const byFlag = participants.find((p) => p.is_self === false);
+  if (byFlag) return byFlag;
+  // 2. Fallback: exclude by selfId string comparison
+  const byId = participants.find((p) => p.id !== selfId);
+  if (byId) return byId;
+  // 3. Last resort: first participant
+  return participants[0];
 }
 
 function timeAgo(iso: string) {
@@ -56,6 +68,14 @@ function extractErrorMessage(err: unknown): string {
   );
 }
 
+// ── Platform tab config ───────────────────────────────────────────────────────
+
+const PLATFORM_TABS: { id: Platform; label: string; icon: React.ReactNode }[] = [
+  { id: "facebook",        label: "Messenger",        icon: <Share2 className="size-4" /> },
+  { id: "instagram",       label: "Instagram (FB)",   icon: <Camera className="size-4" /> },
+  { id: "instagram_login", label: "Instagram Direct", icon: <Sparkles className="size-4" /> },
+];
+
 // ── Conversation list item ────────────────────────────────────────────────────
 
 function ConvItem({
@@ -78,7 +98,11 @@ function ConvItem({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-1">
-          <p className="truncate text-sm font-medium">{other?.name ?? "Unknown"}</p>
+          <p className="truncate text-sm font-medium">
+            {other?.name || other?.username
+              ? (other.name || `@${other.username}`)
+              : "Instagram User"}
+          </p>
           {(conv.unread_count ?? 0) > 0 && (
             <span className="shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
               {conv.unread_count}
@@ -86,7 +110,17 @@ function ConvItem({
           )}
         </div>
         <p className="truncate text-xs text-muted-foreground">{conv.snippet || "—"}</p>
-        <p className="mt-0.5 text-[10px] text-muted-foreground/60">{timeAgo(conv.updated_time)}</p>
+        <div className="flex items-center justify-between mt-0.5">
+          <p className="text-[10px] text-muted-foreground/60">{timeAgo(conv.updated_time)}</p>
+          {other?.id && (
+            <span
+              className="text-[9px] text-muted-foreground/40 font-mono truncate max-w-[90px]"
+              title={`IGSID: ${other.id}`}
+            >
+              ···{other.id.slice(-8)}
+            </span>
+          )}
+        </div>
       </div>
       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40 mt-1" />
     </button>
@@ -96,13 +130,7 @@ function ConvItem({
 // ── Compose modal ─────────────────────────────────────────────────────────────
 
 function ComposeModal({
-  open,
-  onClose,
-  platform,
-  connectorId,
-  accountId,
-  selectedIgAccount,
-  onSent,
+  open, onClose, platform, connectorId, accountId, selectedIgAccount, onSent,
 }: {
   open: boolean;
   onClose: () => void;
@@ -114,9 +142,10 @@ function ComposeModal({
 }) {
   const [recipientId, setRecipientId] = useState("");
   const [message, setMessage] = useState("");
-  const sendFbDM = useSendFacebookDM();
-  const sendIgDM = useSendInstagramDM();
-  const isPending = sendFbDM.isPending || sendIgDM.isPending;
+  const sendFbDM        = useSendFacebookDM();
+  const sendIgDM        = useSendInstagramDM();
+  const sendIgLoginDM   = useSendInstagramLoginDM();
+  const isPending = sendFbDM.isPending || sendIgDM.isPending || sendIgLoginDM.isPending;
 
   useEffect(() => {
     if (!open) { setRecipientId(""); setMessage(""); }
@@ -126,17 +155,14 @@ function ComposeModal({
     e.preventDefault();
     if (!recipientId.trim() || !message.trim()) return;
 
+    const afterSend = () => { setRecipientId(""); setMessage(""); onSent(); onClose(); };
+
     if (platform === "facebook") {
       sendFbDM.mutate(
         { connector_id: connectorId, page_id: accountId, recipient_id: recipientId.trim(), message },
-        {
-          onSuccess: () => {
-            setRecipientId(""); setMessage("");
-            onSent(); onClose();
-          },
-        }
+        { onSuccess: afterSend }
       );
-    } else {
+    } else if (platform === "instagram") {
       if (!selectedIgAccount) return;
       sendIgDM.mutate(
         {
@@ -146,17 +172,20 @@ function ComposeModal({
           recipient_id: recipientId.trim(),
           message,
         },
-        {
-          onSuccess: () => {
-            setRecipientId(""); setMessage("");
-            onSent(); onClose();
-          },
-        }
+        { onSuccess: afterSend }
+      );
+    } else {
+      // instagram_login — just needs connector_id + recipient + message
+      sendIgLoginDM.mutate(
+        { connector_id: connectorId, recipient_id: recipientId.trim(), message },
+        { onSuccess: afterSend }
       );
     }
   }
 
   if (!open) return null;
+
+  const isInstagram = platform === "instagram" || platform === "instagram_login";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -167,34 +196,45 @@ function ComposeModal({
         transition={{ duration: 0.15 }}
         className="w-full max-w-md rounded-2xl border bg-card shadow-xl mx-4"
       >
-        {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h2 className="text-sm font-semibold">New Message</h2>
-          <button
-            onClick={onClose}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted transition-colors"
-          >
+          <button onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-muted transition-colors">
             <X className="size-4" />
           </button>
         </div>
 
-        {/* Body */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {/* Instagram restriction warning */}
+          {isInstagram && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 p-3 space-y-1">
+              <p className="text-xs font-semibold text-amber-800 dark:text-amber-400">⚠ Instagram DM restrictions</p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-500 leading-relaxed">
+                Instagram only allows replies to users who have <strong>already messaged your account within the last 24 hours</strong>.
+                You cannot initiate conversations with new users.
+              </p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-500 leading-relaxed">
+                The <strong>Recipient ID</strong> must be their numeric Instagram User ID (IGSID) — <em>not</em> a username.
+                Find it by clicking a conversation in your inbox and copying the participant&apos;s ID.
+              </p>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Recipient {platform === "facebook" ? "PSID" : "Instagram User ID"}
+              {platform === "facebook" ? "Recipient Page-Scoped ID (PSID)" : "Recipient Instagram User ID (IGSID)"}
             </label>
             <input
               type="text"
               value={recipientId}
               onChange={(e) => setRecipientId(e.target.value)}
-              placeholder={platform === "facebook" ? "e.g. 1234567890" : "e.g. 9876543210"}
+              placeholder={platform === "facebook" ? "e.g. 1234567890" : "Numeric ID only, e.g. 9876543210"}
               className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
-            <p className="text-[11px] text-muted-foreground/70">
-              Enter the recipient&apos;s {platform === "facebook" ? "Page-Scoped ID (PSID)" : "Instagram-scoped User ID"}.
-              The recipient must have messaged you first (Meta policy).
-            </p>
+            {!isInstagram && (
+              <p className="text-[11px] text-muted-foreground/70">
+                The person must have messaged your Page first (Meta 24h policy).
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -209,14 +249,8 @@ function ComposeModal({
           </div>
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button type="button" variant="outline" size="sm" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={!recipientId.trim() || !message.trim() || isPending}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+            <Button type="submit" size="sm" disabled={!recipientId.trim() || !message.trim() || isPending}>
               <Send className="size-3.5 mr-1.5" />
               {isPending ? "Sending…" : "Send"}
             </Button>
@@ -230,89 +264,91 @@ function ComposeModal({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function SocialDMPage() {
-  const [platform, setPlatform] = useState<Platform>("facebook");
-  const [connectorId, setConnectorId] = useState("");
-  const [accountId, setAccountId] = useState("");
+  const [platform, setPlatform]             = useState<Platform>("facebook");
+  const [connectorId, setConnectorId]       = useState("");
+  const [accountId, setAccountId]           = useState("");
   const [selectedFbPage, setSelectedFbPage] = useState<FacebookPage | null>(null);
   const [selectedIgAccount, setSelectedIgAccount] = useState<InstagramAccount | null>(null);
   const [selectedConvId, setSelectedConvId] = useState("");
-  const [reply, setReply] = useState("");
-  const [composeOpen, setComposeOpen] = useState(false);
+  const [reply, setReply]                   = useState("");
+  const [composeOpen, setComposeOpen]       = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { data: allConnectors = [] } = useConnectors();
 
-  const fbConnectors = allConnectors.filter(
-    (c) => c.platform === "facebook_pages" && c.status === "connected"
-  );
-  const igConnectors = allConnectors.filter(
-    (c) => c.platform === "instagram" && c.status === "connected"
-  );
-  const activeConnectors = platform === "facebook" ? fbConnectors : igConnectors;
+  const fbConnectors  = allConnectors.filter((c) => c.platform === "facebook_pages"  && c.status === "connected");
+  const igConnectors  = allConnectors.filter((c) => c.platform === "instagram"       && c.status === "connected");
+  const igLConnectors = allConnectors.filter((c) => c.platform === "instagram_login" && c.status === "connected");
+
+  const activeConnectors =
+    platform === "facebook"        ? fbConnectors  :
+    platform === "instagram"       ? igConnectors  :
+                                     igLConnectors;
 
   // ── Facebook data ──────────────────────────────────────────────────────────
   const { data: fbPages = [], isLoading: fbPagesLoading } = useFacebookPages(
     platform === "facebook" ? connectorId : ""
   );
-  const {
-    data: fbConversations = [],
-    isLoading: fbConvLoading,
-    isError: fbConvError,
-    error: fbConvErrorObj,
-    refetch: refetchFbConvs,
-  } = useFacebookConversations(
-    connectorId,
-    platform === "facebook" ? accountId : ""
-  );
-  const {
-    data: fbMessages = [],
-    isLoading: fbMsgLoading,
-    refetch: refetchFbMsgs,
-  } = useFacebookMessages(connectorId, platform === "facebook" ? accountId : "", selectedConvId);
+  const { data: fbConversations = [], isLoading: fbConvLoading, isError: fbConvError, error: fbConvErrorObj, refetch: refetchFbConvs } =
+    useFacebookConversations(connectorId, platform === "facebook" ? accountId : "");
+  const { data: fbMessages = [], isLoading: fbMsgLoading, refetch: refetchFbMsgs } =
+    useFacebookMessages(connectorId, platform === "facebook" ? accountId : "", selectedConvId);
 
-  // ── Instagram data ─────────────────────────────────────────────────────────
+  // ── Instagram (via Facebook OAuth) data ────────────────────────────────────
   const { data: igAccounts = [], isLoading: igAccountsLoading } = useInstagramAccounts(
     platform === "instagram" ? connectorId : ""
   );
-  const {
-    data: igConversations = [],
-    isLoading: igConvLoading,
-    isError: igConvError,
-    error: igConvErrorObj,
-    refetch: refetchIgConvs,
-  } = useInstagramConversations(
-    platform === "instagram" ? connectorId : "",
-    platform === "instagram" ? accountId : ""
+  const { data: igConversations = [], isLoading: igConvLoading, isError: igConvError, error: igConvErrorObj, refetch: refetchIgConvs } =
+    useInstagramConversations(platform === "instagram" ? connectorId : "", platform === "instagram" ? accountId : "");
+  const { data: igMessages = [], isLoading: igMsgLoading, refetch: refetchIgMsgs } =
+    useInstagramMessages(platform === "instagram" ? connectorId : "", platform === "instagram" ? accountId : "", selectedConvId);
+
+  // ── Instagram Login (direct) data ─────────────────────────────────────────
+  const { data: igLAccount } = useInstagramLoginAccount(
+    platform === "instagram_login" ? connectorId : ""
   );
-  const {
-    data: igMessages = [],
-    isLoading: igMsgLoading,
-    refetch: refetchIgMsgs,
-  } = useInstagramMessages(
-    platform === "instagram" ? connectorId : "",
-    platform === "instagram" ? accountId : "",
-    selectedConvId
-  );
+  const { data: igLConversations = [], isLoading: igLConvLoading, isError: igLConvError, error: igLConvErrorObj, refetch: refetchIgLConvs } =
+    useInstagramLoginConversations(platform === "instagram_login" ? connectorId : "");
+  const { data: igLMessages = [], isLoading: igLMsgLoading, refetch: refetchIgLMsgs } =
+    useInstagramLoginMessages(platform === "instagram_login" ? connectorId : "", selectedConvId);
 
   // ── Unified ────────────────────────────────────────────────────────────────
-  const conversations = platform === "facebook" ? fbConversations : igConversations;
-  const convLoading   = platform === "facebook" ? fbConvLoading   : igConvLoading;
-  const convError     = platform === "facebook" ? fbConvError     : igConvError;
-  const convErrorObj  = platform === "facebook" ? fbConvErrorObj  : igConvErrorObj;
-  const messages      = platform === "facebook" ? fbMessages      : igMessages;
-  const msgLoading    = platform === "facebook" ? fbMsgLoading    : igMsgLoading;
+  const conversations = platform === "facebook" ? fbConversations : platform === "instagram" ? igConversations : igLConversations;
+  const convLoading   = platform === "facebook" ? fbConvLoading   : platform === "instagram" ? igConvLoading   : igLConvLoading;
+  const convError     = platform === "facebook" ? fbConvError     : platform === "instagram" ? igConvError     : igLConvError;
+  const convErrorObj  = platform === "facebook" ? fbConvErrorObj  : platform === "instagram" ? igConvErrorObj  : igLConvErrorObj;
+  const messages      = platform === "facebook" ? fbMessages      : platform === "instagram" ? igMessages      : igLMessages;
+  const msgLoading    = platform === "facebook" ? fbMsgLoading    : platform === "instagram" ? igMsgLoading    : igLMsgLoading;
   const selectedConv  = conversations.find((c) => c.id === selectedConvId) ?? null;
-  const selfId        = accountId;
+  // For instagram_login the account's own IG ID comes from the account info, not accountId picker
+  const selfId = platform === "instagram_login" ? (igLAccount?.id ?? "") : accountId;
+
+  // Build a set of all known self-IDs to handle IGSID vs IGBID format mismatches.
+  // Includes: the primary selfId + any participant flagged is_self by the backend.
+  const selfIds = (() => {
+    const ids = new Set<string>();
+    if (selfId) ids.add(selfId);
+    if (platform === "instagram_login") {
+      for (const conv of igLConversations) {
+        for (const p of conv.participants?.data ?? []) {
+          if (p.is_self === true && p.id) ids.add(p.id);
+        }
+      }
+    }
+    return ids;
+  })();
 
   function refetchAll() {
-    if (platform === "facebook") { refetchFbConvs(); refetchFbMsgs(); }
-    else { refetchIgConvs(); refetchIgMsgs(); }
+    if (platform === "facebook")        { refetchFbConvs();  refetchFbMsgs();  }
+    else if (platform === "instagram")  { refetchIgConvs();  refetchIgMsgs();  }
+    else                                { refetchIgLConvs(); refetchIgLMsgs(); }
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
-  const sendFbDM = useSendFacebookDM();
-  const sendIgDM = useSendInstagramDM();
-  const isPending = sendFbDM.isPending || sendIgDM.isPending;
+  const sendFbDM      = useSendFacebookDM();
+  const sendIgDM      = useSendInstagramDM();
+  const sendIgLoginDM = useSendInstagramLoginDM();
+  const isPending = sendFbDM.isPending || sendIgDM.isPending || sendIgLoginDM.isPending;
 
   function getRecipientId() {
     if (!selectedConv) return "";
@@ -330,16 +366,16 @@ export default function SocialDMPage() {
         { connector_id: connectorId, page_id: accountId, recipient_id: recipientId, message: reply },
         { onSuccess: () => { setReply(""); setTimeout(refetchAll, 1000); } }
       );
-    } else {
+    } else if (platform === "instagram") {
       if (!selectedIgAccount) return;
       sendIgDM.mutate(
-        {
-          connector_id: connectorId,
-          ig_id: accountId,
-          page_token: selectedIgAccount.page_token,
-          recipient_id: recipientId,
-          message: reply,
-        },
+        { connector_id: connectorId, ig_id: accountId, page_token: selectedIgAccount.page_token, recipient_id: recipientId, message: reply },
+        { onSuccess: () => { setReply(""); setTimeout(refetchAll, 1000); } }
+      );
+    } else {
+      // instagram_login — recipient is the other participant's IGSID
+      sendIgLoginDM.mutate(
+        { connector_id: connectorId, recipient_id: recipientId, message: reply },
         { onSuccess: () => { setReply(""); setTimeout(refetchAll, 1000); } }
       );
     }
@@ -351,8 +387,7 @@ export default function SocialDMPage() {
   }, [messages]);
 
   useEffect(() => {
-    setSelectedConvId("");
-    setReply("");
+    setSelectedConvId(""); setReply("");
   }, [platform, connectorId, accountId]);
 
   useEffect(() => {
@@ -363,10 +398,19 @@ export default function SocialDMPage() {
     setSelectedIgAccount(igAccounts.find((a) => a.ig_id === accountId) ?? null);
   }, [accountId, igAccounts]);
 
-  const inboxReady = connectorId && accountId;
+  // For instagram_login, connectorId IS the account — no extra picker needed
+  const needsAccountPicker = platform !== "instagram_login";
+  const inboxReady =
+    platform === "instagram_login"
+      ? !!connectorId
+      : !!(connectorId && accountId);
 
-  // Can send a compose DM when a connector + account is selected
-  const canCompose = inboxReady && (platform === "facebook" ? !!selectedFbPage : !!selectedIgAccount);
+  const canCompose =
+    inboxReady && (
+      platform === "facebook"        ? !!selectedFbPage     :
+      platform === "instagram"       ? !!selectedIgAccount  :
+      true // instagram_login — always composable once connector selected
+    );
 
   return (
     <div className="flex h-full flex-col space-y-4">
@@ -376,24 +420,18 @@ export default function SocialDMPage() {
       />
 
       {/* Platform tabs */}
-      <div className="flex gap-2">
-        {(["facebook", "instagram"] as Platform[]).map((p) => (
+      <div className="flex gap-2 flex-wrap">
+        {PLATFORM_TABS.map(({ id, label, icon }) => (
           <button
-            key={p}
-            onClick={() => {
-              setPlatform(p);
-              setConnectorId("");
-              setAccountId("");
-              setSelectedConvId("");
-            }}
+            key={id}
+            onClick={() => { setPlatform(id); setConnectorId(""); setAccountId(""); setSelectedConvId(""); }}
             className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
-              platform === p
+              platform === id
                 ? "bg-primary text-primary-foreground"
                 : "bg-muted text-muted-foreground hover:bg-muted/80"
             }`}
           >
-            {p === "facebook" ? <Share2 className="size-4" /> : <Camera className="size-4" />}
-            {p === "facebook" ? "Messenger" : "Instagram Direct"}
+            {icon}{label}
           </button>
         ))}
       </div>
@@ -417,8 +455,8 @@ export default function SocialDMPage() {
           </Field>
         </div>
 
-        {/* Account selector — Facebook Page or Instagram account */}
-        {connectorId && (
+        {/* Account selector — Facebook Page or Instagram account (not needed for instagram_login) */}
+        {connectorId && needsAccountPicker && (
           <div className="min-w-[200px] flex-1">
             <Field>
               <FieldLabel>{platform === "facebook" ? "Facebook Page" : "Instagram Account"}</FieldLabel>
@@ -430,9 +468,7 @@ export default function SocialDMPage() {
                   onChange={(e) => setAccountId(e.target.value)}
                   className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
-                  <option value="">
-                    {platform === "facebook" ? "Select page…" : "Select account…"}
-                  </option>
+                  <option value="">{platform === "facebook" ? "Select page…" : "Select account…"}</option>
                   {platform === "facebook"
                     ? fbPages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)
                     : igAccounts.map((a) => (
@@ -447,15 +483,10 @@ export default function SocialDMPage() {
           </div>
         )}
 
-        {/* Compose button — always visible when account is selected */}
+        {/* Compose button */}
         {canCompose && (
           <div className="flex items-end">
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-[38px] gap-1.5"
-              onClick={() => setComposeOpen(true)}
-            >
+            <Button size="sm" variant="outline" className="h-[38px] gap-1.5" onClick={() => setComposeOpen(true)}>
               <PenSquare className="size-3.5" />
               New Message
             </Button>
@@ -508,16 +539,10 @@ export default function SocialDMPage() {
               <span className="text-sm font-semibold">
                 Conversations
                 {conversations.length > 0 && (
-                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                    ({conversations.length})
-                  </span>
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">({conversations.length})</span>
                 )}
               </span>
-              <button
-                onClick={refetchAll}
-                className="rounded-md p-1 text-muted-foreground hover:bg-muted transition-colors"
-                title="Refresh"
-              >
+              <button onClick={refetchAll} className="rounded-md p-1 text-muted-foreground hover:bg-muted transition-colors" title="Refresh">
                 <RefreshCw className="size-3.5" />
               </button>
             </div>
@@ -525,12 +550,9 @@ export default function SocialDMPage() {
             <div className="flex-1 overflow-y-auto">
               {convLoading ? (
                 <div className="flex flex-col gap-2 p-4">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="h-14 rounded-lg bg-muted animate-pulse" />
-                  ))}
+                  {[1, 2, 3].map((i) => <div key={i} className="h-14 rounded-lg bg-muted animate-pulse" />)}
                 </div>
               ) : convError ? (
-                /* ── Error state ── */
                 <div className="flex flex-col items-center gap-3 py-10 px-4 text-center">
                   <AlertTriangle className="size-7 text-destructive/60" />
                   <div className="space-y-1">
@@ -538,37 +560,71 @@ export default function SocialDMPage() {
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
                       {extractErrorMessage(convErrorObj)}
                     </p>
-                    {platform === "instagram" && (
+                    {(platform === "instagram" || platform === "instagram_login") && (
                       <p className="text-[11px] text-muted-foreground/70 leading-relaxed mt-1">
-                        Instagram messaging requires the <strong>instagram_manage_messages</strong> permission.
-                        Make sure your Meta app has this permission approved.
+                        Instagram requires <strong>instagram_business_manage_messages</strong> permission in your Meta app, and the app must be <strong>Live</strong> (not in Development mode) for users who aren&apos;t added as testers.
                       </p>
                     )}
                   </div>
                   <Button size="sm" variant="outline" onClick={refetchAll} className="mt-1">
-                    <RefreshCw className="size-3 mr-1.5" />
-                    Retry
+                    <RefreshCw className="size-3 mr-1.5" /> Retry
                   </Button>
-                  <button
-                    onClick={() => setComposeOpen(true)}
-                    className="text-[11px] text-primary underline underline-offset-2"
-                  >
-                    Send a message anyway →
-                  </button>
+                  {platform === "facebook" && (
+                    <button onClick={() => setComposeOpen(true)} className="text-[11px] text-primary underline underline-offset-2">
+                      Try sending a message →
+                    </button>
+                  )}
+                  {(platform === "instagram" || platform === "instagram_login") && (
+                    <a href="/connectors" className="text-[11px] text-primary underline underline-offset-2">
+                      Reconnect connector →
+                    </a>
+                  )}
                 </div>
               ) : conversations.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 py-12 px-4 text-center">
+                <div className="flex flex-col items-center gap-3 py-8 px-4 text-center">
                   <MessageCircle className="size-8 text-muted-foreground/30" />
-                  <p className="text-xs text-muted-foreground">No conversations yet.</p>
-                  <p className="text-[11px] text-muted-foreground/60">
-                    Conversations appear once someone messages your account.
-                  </p>
-                  <button
-                    onClick={() => setComposeOpen(true)}
-                    className="mt-2 text-[11px] text-primary underline underline-offset-2"
-                  >
-                    Send a new message →
-                  </button>
+                  <p className="text-xs font-semibold text-muted-foreground">No conversations yet</p>
+                  {(platform === "instagram" || platform === "instagram_login") ? (
+                    <div className="space-y-3 max-w-[230px] text-left">
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 p-2.5 space-y-1.5">
+                        <p className="text-[10px] font-semibold text-amber-800 dark:text-amber-400">Why is this empty?</p>
+                        <p className="text-[10px] text-amber-700 dark:text-amber-500 leading-relaxed">
+                          1. Someone must message your account first (Instagram policy)
+                        </p>
+                        <p className="text-[10px] text-amber-700 dark:text-amber-500 leading-relaxed">
+                          2. If your Meta app is in <strong>Development mode</strong>, only testers you add in Meta Developer Console can send messages to it
+                        </p>
+                        <p className="text-[10px] text-amber-700 dark:text-amber-500 leading-relaxed">
+                          3. Your token may need the <strong>instagram_business_manage_messages</strong> permission — try reconnecting your connector
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <a
+                          href="https://developers.facebook.com/apps"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-primary underline underline-offset-2"
+                        >
+                          Open Meta Developer Console →
+                        </a>
+                        <a
+                          href="/connectors"
+                          className="text-[10px] text-primary underline underline-offset-2"
+                        >
+                          Reconnect connector →
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-[11px] text-muted-foreground/60">
+                        Conversations appear once someone messages your Page.
+                      </p>
+                      <button onClick={() => setComposeOpen(true)} className="mt-2 text-[11px] text-primary underline underline-offset-2">
+                        Send a new message →
+                      </button>
+                    </>
+                  )}
                 </div>
               ) : (
                 conversations.map((conv) => (
@@ -590,12 +646,11 @@ export default function SocialDMPage() {
               <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center px-6">
                 <MessageCircle className="size-10 text-muted-foreground/20" />
                 <p className="text-sm text-muted-foreground">Select a conversation to view messages</p>
-                <button
-                  onClick={() => setComposeOpen(true)}
-                  className="text-xs text-primary underline underline-offset-2"
-                >
-                  Or compose a new message →
-                </button>
+                {platform === "facebook" && (
+                  <button onClick={() => setComposeOpen(true)} className="text-xs text-primary underline underline-offset-2">
+                    Or compose a new message →
+                  </button>
+                )}
               </div>
             ) : (
               <>
@@ -607,17 +662,16 @@ export default function SocialDMPage() {
                     </div>
                     <div>
                       <p className="text-sm font-semibold">
-                        {getOtherParticipant(selectedConv, selfId)?.name ?? "Unknown"}
+                        {(() => {
+                          const other = getOtherParticipant(selectedConv, selfId);
+                          return other?.name || other?.username
+                            ? (other.name || `@${other.username}`)
+                            : "Instagram User";
+                        })()}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        Last active {timeAgo(selectedConv.updated_time)}
-                      </p>
+                      <p className="text-xs text-muted-foreground">Last active {timeAgo(selectedConv.updated_time)}</p>
                     </div>
-                    <button
-                      onClick={refetchAll}
-                      className="ml-auto rounded-md p-1.5 text-muted-foreground hover:bg-muted transition-colors"
-                      title="Refresh messages"
-                    >
+                    <button onClick={refetchAll} className="ml-auto rounded-md p-1.5 text-muted-foreground hover:bg-muted transition-colors" title="Refresh">
                       <RefreshCw className="size-3.5" />
                     </button>
                   </div>
@@ -628,10 +682,7 @@ export default function SocialDMPage() {
                   {msgLoading ? (
                     <div className="flex flex-col gap-3">
                       {[1, 2, 3, 4].map((i) => (
-                        <div
-                          key={i}
-                          className={`h-10 w-48 rounded-2xl bg-muted animate-pulse ${i % 2 === 0 ? "ml-auto" : ""}`}
-                        />
+                        <div key={i} className={`h-10 w-48 rounded-2xl bg-muted animate-pulse ${i % 2 === 0 ? "ml-auto" : ""}`} />
                       ))}
                     </div>
                   ) : messages.length === 0 ? (
@@ -639,7 +690,7 @@ export default function SocialDMPage() {
                   ) : (
                     <AnimatePresence initial={false}>
                       {messages.map((msg) => {
-                        const isFromSelf = msg.from?.id === selfId;
+                        const isFromSelf = msg.from?.id ? selfIds.has(msg.from.id) : false;
                         return (
                           <motion.div
                             key={msg.id}
@@ -649,18 +700,14 @@ export default function SocialDMPage() {
                             className={`flex ${isFromSelf ? "justify-end" : "justify-start"}`}
                           >
                             <div className={`flex flex-col max-w-[70%] gap-0.5 ${isFromSelf ? "items-end" : "items-start"}`}>
-                              <div
-                                className={`rounded-2xl px-4 py-2 text-sm ${
-                                  isFromSelf
-                                    ? "bg-primary text-primary-foreground rounded-br-sm"
-                                    : "bg-muted text-foreground rounded-bl-sm"
-                                }`}
-                              >
+                              <div className={`rounded-2xl px-4 py-2 text-sm ${
+                                isFromSelf
+                                  ? "bg-primary text-primary-foreground rounded-br-sm"
+                                  : "bg-muted text-foreground rounded-bl-sm"
+                              }`}>
                                 {msg.message}
                               </div>
-                              <span className="text-[10px] text-muted-foreground/60 px-1">
-                                {timeAgo(msg.created_time)}
-                              </span>
+                              <span className="text-[10px] text-muted-foreground/60 px-1">{timeAgo(msg.created_time)}</span>
                             </div>
                           </motion.div>
                         );
@@ -685,12 +732,7 @@ export default function SocialDMPage() {
                     placeholder="Type a reply… (Enter to send, Shift+Enter for new line)"
                     className="flex-1 resize-none rounded-xl border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={!reply.trim() || isPending}
-                    className="shrink-0 h-10"
-                  >
+                  <Button type="submit" size="sm" disabled={!reply.trim() || isPending} className="shrink-0 h-10">
                     <Send className="size-4" />
                   </Button>
                 </form>

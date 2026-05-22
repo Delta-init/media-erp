@@ -1,12 +1,17 @@
 import csv
 import io
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+from bson import ObjectId
+from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse, Response
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.config import settings
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.schemas.report import CustomReportRequest, SaveReportRequest, ReportFilters
@@ -15,6 +20,7 @@ from app.services.report_service import (
     get_campaigns,
     get_trend,
     run_custom,
+    blend_platforms,
     get_saved_reports,
     create_saved_report,
     get_saved_report,
@@ -98,6 +104,36 @@ async def custom_report(
     data = await run_custom(user_id, body.metrics, body.dimensions, filters, db)
     data["chart_type"] = body.chart_type
     return success_response(data=data, message="Custom report generated")
+
+
+# 4.4b — Data blend (cross-platform join on date axis)
+class BlendSource(BaseModel):
+    platform: str
+    metrics: list[str] = []
+
+
+class BlendRequest(BaseModel):
+    sources:   list[BlendSource]
+    date_from: Optional[str] = None
+    date_to:   Optional[str] = None
+
+
+@router.post("/blend")
+async def blend_report(
+    body: BlendRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Cross-platform data blend.
+    Returns date-aligned series for every requested platform + metric combination.
+    """
+    user_id  = str(current_user["_id"])
+    df = body.date_from or _thirty_days_ago_str()
+    dt = body.date_to   or _today_str()
+    sources = [s.model_dump() for s in body.sources]
+    data = await blend_platforms(user_id, sources, df, dt, db)
+    return success_response(data=data, message="Blend report generated")
 
 
 # 4.5 — Saved reports
@@ -198,4 +234,95 @@ async def export_report(
         iter([output.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=report.csv"},
+    )
+
+
+# ── Report sharing ─────────────────────────────────────────────────────────────
+
+@router.post("/saved/{report_id}/share")
+async def create_share_link(
+    report_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Generate (or return existing) a public share token for a saved report.
+    The share link is read-only and requires no authentication.
+    """
+    user_id = str(current_user["_id"])
+    try:
+        oid = ObjectId(report_id)
+    except (InvalidId, Exception):
+        return error_response("Invalid report ID", status_code=400)
+
+    doc = await db["reports"].find_one({"_id": oid, "user_id": user_id})
+    if doc is None:
+        return error_response("Report not found", status_code=404)
+
+    # Reuse existing token or generate a new one
+    share_token = doc.get("share_token") or secrets.token_urlsafe(32)
+    await db["reports"].update_one(
+        {"_id": oid},
+        {"$set": {"share_token": share_token, "share_enabled": True, "shared_at": datetime.now(timezone.utc)}},
+    )
+
+    share_url = f"{settings.frontend_url}/reports/shared/{share_token}"
+    return success_response(
+        data={"share_token": share_token, "share_url": share_url},
+        message="Share link created",
+    )
+
+
+@router.delete("/saved/{report_id}/share")
+async def revoke_share_link(
+    report_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Revoke the public share link for a saved report."""
+    user_id = str(current_user["_id"])
+    try:
+        oid = ObjectId(report_id)
+    except (InvalidId, Exception):
+        return error_response("Invalid report ID", status_code=400)
+
+    result = await db["reports"].update_one(
+        {"_id": oid, "user_id": user_id},
+        {"$unset": {"share_token": "", "shared_at": ""}, "$set": {"share_enabled": False}},
+    )
+    if result.matched_count == 0:
+        return error_response("Report not found", status_code=404)
+    return success_response(data=None, message="Share link revoked")
+
+
+@router.get("/shared/{share_token}")
+async def get_shared_report(
+    share_token: str,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Public endpoint — no authentication required.
+    Returns the saved report configuration + its data for read-only viewing.
+    """
+    doc = await db["reports"].find_one(
+        {"share_token": share_token, "share_enabled": True}
+    )
+    if doc is None:
+        return error_response("Report not found or sharing has been disabled", status_code=404)
+
+    user_id = str(doc["user_id"]) if isinstance(doc.get("user_id"), ObjectId) else doc.get("user_id", "")
+    metrics    = doc.get("metrics", [])
+    dimensions = doc.get("dimensions", [])
+    filters    = doc.get("filters", {})
+
+    report_data = await run_custom(user_id, metrics, dimensions, filters, db)
+    report_data["chart_type"] = doc.get("chart_type", "bar")
+
+    from app.services.report_service import _serialize
+    return success_response(
+        data={
+            "report": _serialize(doc),
+            "data":   report_data,
+        },
+        message="Shared report retrieved",
     )

@@ -6,7 +6,11 @@ export type ConnectorPlatform =
   | "instagram"
   | "instagram_login"
   | "linkedin_ads"
-  | "tiktok_ads";
+  | "tiktok_ads"
+  | "mailchimp"
+  | "search_console"
+  | "hubspot"
+  | "shopify";
 
 export type SyncFrequency = "hourly" | "daily" | "manual";
 

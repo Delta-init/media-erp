@@ -6,6 +6,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useAuthStore } from "@/stores/authStore";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
+import { useOnboardingStatus, useCompleteOnboarding } from "@/hooks/useAuth";
 
 const pageVariants = {
   initial: { opacity: 0, y: 10 },
@@ -22,6 +24,9 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [hydrated, setHydrated] = useState(false);
+
+  const { data: onboardingData, isLoading: onboardingLoading } = useOnboardingStatus();
+  const completeOnboarding = useCompleteOnboarding();
 
   useEffect(() => {
     setHydrated(true);
@@ -45,6 +50,9 @@ export default function DashboardLayout({
     );
   }
 
+  // Show onboarding wizard for new users (once status is loaded and not complete)
+  const showOnboarding = !onboardingLoading && onboardingData?.onboarding_complete === false;
+
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
@@ -65,6 +73,15 @@ export default function DashboardLayout({
           </motion.main>
         </AnimatePresence>
       </div>
+
+      {/* Onboarding wizard overlay */}
+      <AnimatePresence>
+        {showOnboarding && (
+          <OnboardingWizard
+            onComplete={() => completeOnboarding.mutate()}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

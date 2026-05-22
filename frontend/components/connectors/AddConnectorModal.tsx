@@ -56,6 +56,7 @@ export function AddConnectorModal({ open, onOpenChange }: Props) {
     register,
     handleSubmit,
     setValue,
+    getValues,
     formState: { errors },
     reset,
   } = useForm<FormData>({
@@ -100,6 +101,9 @@ export function AddConnectorModal({ open, onOpenChange }: Props) {
                     onClick={() => {
                       setSelectedPlatform(p);
                       setValue("platform", p, { shouldValidate: true });
+                      if (!getValues("name")) {
+                        setValue("name", `My ${meta.label}`, { shouldValidate: true });
+                      }
                     }}
                     className={cn(
                       "flex flex-col items-center gap-1.5 rounded-lg border p-3 text-center text-xs transition-colors",

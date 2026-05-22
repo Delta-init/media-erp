@@ -5,11 +5,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart2,
+  Building2,
   Cable,
+  CalendarDays,
   ChevronLeft,
+  Calculator,
   Kanban,
+  Key,
   LayoutDashboard,
   LogOut,
+  Mail,
   MessageCircle,
   Send,
   Settings,
@@ -19,6 +24,7 @@ import {
   Target,
   TrendingUp,
   Users,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/uiStore";
@@ -38,17 +44,23 @@ const NAV_ITEMS = [
   { label: "Connectors", href: "/connectors", icon: Cable,           module: "connectors" },
   { label: "Reports",    href: "/reports",    icon: TrendingUp,      module: "reports" },
   { label: "Campaigns",  href: "/campaigns",  icon: Target,          module: "campaigns" },
-  { label: "Projects",   href: "/projects",   icon: Kanban,          module: "projects" },
+  { label: "Schedule",      href: "/schedule",      icon: CalendarDays },
+  { label: "Rules",         href: "/rules",         icon: Zap },
+  { label: "Email Reports", href: "/email-reports",  icon: Mail },
+  { label: "Projects",      href: "/projects",      icon: Kanban,          module: "projects" },
   { label: "AI Queries", href: "/ai",         icon: Sparkles,        module: "ai" },
   { label: "Publish",    href: "/social",     icon: Share2 },
   { label: "Send DM",    href: "/social/dm",  icon: Send },
   { label: "Chat",       href: "/chat",       icon: MessageCircle },
+  { label: "Clients",    href: "/clients",    icon: Building2 },
   { label: "Users",      href: "/users",      icon: Users,           module: "users" },
   { label: "Roles",      href: "/roles",      icon: ShieldCheck,     module: "roles" },
 ];
 
 const BOTTOM_ITEMS = [
-  { label: "Settings", href: "/settings", icon: Settings, module: "settings" },
+  { label: "API Keys",       href: "/settings/api-keys",      icon: Key        },
+  { label: "Custom Metrics", href: "/settings/custom-metrics", icon: Calculator },
+  { label: "Settings",       href: "/settings",               icon: Settings,  module: "settings" },
 ];
 
 interface NavItemProps {

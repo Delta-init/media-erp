@@ -47,6 +47,57 @@ def sync_connector(self, connector_id: str) -> dict:
     return result
 
 
+@celery_app.task(name="app.tasks.sync_tasks.scan_anomalies_all_users")
+def scan_anomalies_all_users() -> dict:
+    """
+    Daily Beat task — run anomaly detection for every active user over the
+    past 7 days and create in-app notifications for severe anomalies.
+    """
+    import asyncio
+    from datetime import datetime, timezone, timedelta
+    from app.database import get_sync_db
+    from app.services.anomaly_service import detect_anomalies
+    from app.services.notification_service import create_notification
+
+    logger.info("scan_anomalies_all_users started")
+
+    sync_db = get_sync_db()
+    user_ids = [str(u["_id"]) for u in sync_db["users"].find({}, {"_id": 1})]
+
+    today     = datetime.now(timezone.utc).date()
+    date_to   = today.strftime("%Y-%m-%d")
+    date_from = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    total_anomalies = 0
+
+    async def _scan_user(uid: str):
+        nonlocal total_anomalies
+        from app.database import get_db, connect_db
+        await connect_db()
+        db   = get_db()
+        result = await detect_anomalies(uid, date_from, date_to, [], db)
+        severe = [a for a in result["anomalies"] if a["severity"] == "severe"]
+        for anomaly in severe[:5]:  # cap notifications per user per run
+            pct = anomaly.get("pct_change")
+            pct_str = f" ({pct:+.0f}%)" if pct else ""
+            msg = (
+                f"Anomaly: {anomaly['platform']} {anomaly['metric']} "
+                f"{anomaly['direction']} on {anomaly['date']}{pct_str}"
+            )
+            await create_notification(db, uid, "anomaly", msg)
+        total_anomalies += len(result["anomalies"])
+
+    for uid in user_ids:
+        try:
+            asyncio.run(_scan_user(uid))
+        except Exception as exc:
+            logger.warning("anomaly scan failed for user %s: %s", uid, exc)
+
+    logger.info("scan_anomalies_all_users done: %d users, %d anomalies",
+                len(user_ids), total_anomalies)
+    return {"status": "ok", "users": len(user_ids), "anomalies": total_anomalies}
+
+
 @celery_app.task(name="app.tasks.sync_tasks.run_scheduled_syncs")
 def run_scheduled_syncs() -> dict:
     """

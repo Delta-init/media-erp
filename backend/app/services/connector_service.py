@@ -91,12 +91,22 @@ async def save_tokens(
     return await update_connector(connector_id, user_id, updates, db)
 
 
+_DEMO_TOKEN = "demo_token_placeholder"
+
+def _safe_decrypt(value: str | None) -> str | None:
+    """Decrypt an encrypted token, or pass through demo/plain tokens as-is."""
+    if not value:
+        return None
+    if value == _DEMO_TOKEN:
+        return value
+    try:
+        return decrypt(value)
+    except Exception:
+        return value  # already plain-text or unrecognised format
+
+
 def get_decrypted_tokens(connector: dict) -> dict:
     return {
-        "access_token": decrypt(connector["encrypted_access_token"])
-        if connector.get("encrypted_access_token")
-        else None,
-        "refresh_token": decrypt(connector["encrypted_refresh_token"])
-        if connector.get("encrypted_refresh_token")
-        else None,
+        "access_token": _safe_decrypt(connector.get("encrypted_access_token")),
+        "refresh_token": _safe_decrypt(connector.get("encrypted_refresh_token")),
     }

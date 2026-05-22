@@ -407,6 +407,120 @@ async def run_custom(
     return {"data": data, "metrics": metrics, "dimensions": dimensions}
 
 
+async def blend_platforms(
+    user_id: str,
+    sources: list[dict],   # [{platform: str, metrics: [str]}]
+    date_from: str,
+    date_to: str,
+    db: AsyncIOMotorDatabase,
+) -> dict:
+    """
+    Cross-platform data blend.
+
+    For each source (platform + metric list) run a daily aggregation,
+    then merge all results on the shared `date` key so the client can
+    render every platform's metrics on the same date axis.
+
+    Returns:
+      {
+        "dates": ["2024-01-01", ...],
+        "series": [
+          {"key": "google_ads.spend",    "platform": "google_ads",    "metric": "spend",    "data": [1200, ...]},
+          {"key": "facebook_ads.clicks", "platform": "facebook_ads",  "metric": "clicks",   "data": [340,  ...]},
+        ],
+        "date_from": "...", "date_to": "..."
+      }
+    """
+    col = db["marketing_data"]
+
+    BLEND_BASE   = {"spend", "clicks", "impressions", "conversions", "revenue"}
+    BLEND_DERIVED = {"ctr", "cpc", "roas"}
+
+    # Collect every unique date across all sources first so we can fill gaps
+    all_dates: set[str] = set()
+    # platform → metric → {date → value}
+    results: dict[str, dict[str, dict[str, float]]] = {}
+
+    for src in sources:
+        platform = src.get("platform", "")
+        requested = [m for m in src.get("metrics", []) if m in BLEND_BASE | BLEND_DERIVED]
+        if not platform or not requested:
+            continue
+
+        # Always sum the base metrics we need
+        needed_base = set(m for m in requested if m in BLEND_BASE)
+        if "ctr"  in requested: needed_base.update(["clicks", "impressions"])
+        if "cpc"  in requested: needed_base.update(["clicks", "spend"])
+        if "roas" in requested: needed_base.update(["revenue", "spend"])
+
+        group_stage: dict = {"_id": "$date"}
+        for m in needed_base:
+            group_stage[m] = {"$sum": f"$metrics.{m}"}
+
+        pipeline = [
+            {"$match": {
+                "user_id": user_id,
+                "platform": platform,
+                "date":    {"$gte": date_from, "$lte": date_to},
+            }},
+            {"$group": group_stage},
+            {"$sort":  {"_id": 1}},
+        ]
+
+        raw = await col.aggregate(pipeline).to_list(None)
+
+        # Compute derived metrics
+        platform_data: dict[str, dict[str, float]] = {}  # metric → {date → val}
+        for row in raw:
+            date = row["_id"]
+            all_dates.add(date)
+            sp = row.get("spend", 0) or 0
+            cl = row.get("clicks", 0) or 0
+            im = row.get("impressions", 0) or 0
+            rv = row.get("revenue", 0) or 0
+
+            computed: dict[str, float] = {}
+            for m in needed_base:
+                computed[m] = _safe_round(row.get(m, 0) or 0)
+            if "ctr"  in requested:
+                computed["ctr"]  = _safe_round((cl / im * 100) if im else 0)
+            if "cpc"  in requested:
+                computed["cpc"]  = _safe_round((sp / cl) if cl else 0)
+            if "roas" in requested:
+                computed["roas"] = _safe_round((rv / sp) if sp else 0)
+
+            for metric in requested:
+                if metric not in platform_data:
+                    platform_data[metric] = {}
+                platform_data[metric][date] = computed.get(metric, 0)
+
+        results[platform] = platform_data
+
+    # Build sorted date list and fill gaps with 0
+    sorted_dates = sorted(all_dates)
+    series = []
+    for src in sources:
+        platform = src.get("platform", "")
+        requested = [m for m in src.get("metrics", []) if m in BLEND_BASE | BLEND_DERIVED]
+        if platform not in results:
+            continue
+        for metric in requested:
+            date_map = results[platform].get(metric, {})
+            series.append({
+                "key":      f"{platform}.{metric}",
+                "platform": platform,
+                "metric":   metric,
+                "data":     [date_map.get(d, 0) for d in sorted_dates],
+            })
+
+    return {
+        "dates":     sorted_dates,
+        "series":    series,
+        "date_from": date_from,
+        "date_to":   date_to,
+    }
+
+
 async def get_saved_reports(user_id: str, db: AsyncIOMotorDatabase) -> list:
     col = db["reports"]
     cursor = col.find({"user_id": user_id}).sort("created_at", -1)
