@@ -293,7 +293,10 @@ async def instagram_login_auth(
         return error_response("Connector platform is not instagram_login", status_code=400)
 
     from app.platforms.instagram_login import get_auth_url
-    url = get_auth_url(connector_id, user_id)
+    try:
+        url = get_auth_url(connector_id, user_id)
+    except ValueError as exc:
+        return error_response(str(exc), status_code=400)
     return success_response({"auth_url": url}, "Instagram Login OAuth URL generated")
 
 

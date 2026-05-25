@@ -60,11 +60,14 @@ def _process_due_posts():
             logger.info("Published scheduled post %s", post_id)
         except Exception as exc:
             logger.error("Failed to publish scheduled post %s: %s", post_id, exc)
+            # Sanitize error before storing — strip any access_token query params
+            import re
+            safe_err = re.sub(r'access_token=[^&\s"\']+', 'access_token=***', str(exc))[:500]
             db["scheduled_posts"].update_one(
                 {"_id": post_id},
                 {"$set": {
                     "status": "failed",
-                    "error": str(exc)[:500],
+                    "error": safe_err,
                     "updated_at": datetime.now(timezone.utc),
                 }}
             )

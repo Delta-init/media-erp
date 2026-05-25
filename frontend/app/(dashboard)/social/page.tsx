@@ -642,18 +642,18 @@ function FacebookPreview({ caption, imageUrl, pageName }: { caption: string; ima
 
 // ── Status overlay ─────────────────────────────────────────────────────────────
 
-function StatusOverlay({ status, onReset }: { status: PostStatus; onReset: () => void }) {
+function StatusOverlay({ status, errorMsg, onReset }: { status: PostStatus; errorMsg?: string; onReset: () => void }) {
   if (status === "idle") return null;
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-card/95 backdrop-blur-sm rounded-2xl"
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-card/95 backdrop-blur-sm rounded-2xl p-6"
     >
       {status === "publishing" && (
         <>
           <Loader2 className="size-10 animate-spin text-primary" />
-          <p className="font-medium text-sm">Publishing…</p>
+          <p className="font-medium text-sm">Publishing… (images ready in ~5s, videos up to 90s)</p>
         </>
       )}
       {status === "success" && (
@@ -667,6 +667,9 @@ function StatusOverlay({ status, onReset }: { status: PostStatus; onReset: () =>
         <>
           <AlertCircle className="size-12 text-destructive" />
           <p className="font-semibold">Failed to publish</p>
+          {errorMsg && (
+            <p className="text-xs text-muted-foreground text-center max-w-xs leading-relaxed">{errorMsg}</p>
+          )}
           <Button size="sm" variant="outline" onClick={onReset}>Try again</Button>
         </>
       )}
@@ -1022,6 +1025,7 @@ export default function SocialPage() {
   const [link, setLink]                 = useState("");
   const [mediaType, setMediaType]       = useState<"image" | "video">("image");
   const [postStatus, setPostStatus]     = useState<PostStatus>("idle");
+  const [postError, setPostError]       = useState<string>("");
 
   const { data: allConnectors = [] }    = useConnectors();
   // Overview: show ALL connectors regardless of status (so users see disconnected/error too)
@@ -1038,18 +1042,32 @@ export default function SocialPage() {
   const publishFb = usePublishFacebookPost();
   const publishIg = usePublishInstagramLoginPost();
 
-  function resetForm() { setCaption(""); setImageUrl(""); setVideoUrl(""); setLink(""); setPostStatus("idle"); }
+  function resetForm() { setCaption(""); setImageUrl(""); setVideoUrl(""); setLink(""); setPostStatus("idle"); setPostError(""); }
 
   function handleConnectorChange(id: string) { setConnectorId(id); setPageId(""); }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!caption.trim() && !imageUrl.trim()) return;
+    const hasMedia = platform === "instagram" && mediaType === "video"
+      ? videoUrl.trim()
+      : imageUrl.trim();
+    if (!caption.trim() && !hasMedia) return;
     setPostStatus("publishing");
     if (platform === "facebook") {
       publishFb.mutate(
         { connector_id: connectorId, page_id: pageId, message: caption, link: link || undefined, image_url: imageUrl || undefined },
-        { onSuccess: () => setPostStatus("success"), onError: () => setPostStatus("error") }
+        {
+          onSuccess: () => setPostStatus("success"),
+          onError: (err: unknown) => {
+            const msg = (err as { response?: { data?: { detail?: string; message?: string } } })
+              ?.response?.data?.detail ||
+              (err as { response?: { data?: { detail?: string; message?: string } } })
+              ?.response?.data?.message ||
+              "Failed to publish. Please try again.";
+            setPostError(msg);
+            setPostStatus("error");
+          },
+        }
       );
     } else {
       publishIg.mutate(
@@ -1058,15 +1076,27 @@ export default function SocialPage() {
           image_url: mediaType === "image" ? imageUrl || undefined : undefined,
           video_url: mediaType === "video" ? videoUrl || undefined : undefined,
         },
-        { onSuccess: () => setPostStatus("success"), onError: () => setPostStatus("error") }
+        {
+          onSuccess: () => setPostStatus("success"),
+          onError: (err: unknown) => {
+            const msg = (err as { response?: { data?: { detail?: string; message?: string } } })
+              ?.response?.data?.detail ||
+              (err as { response?: { data?: { detail?: string; message?: string } } })
+              ?.response?.data?.message ||
+              "Failed to publish. Please try again.";
+            setPostError(msg);
+            setPostStatus("error");
+          },
+        }
       );
     }
   }
 
+  const activeMedia = platform === "instagram" && mediaType === "video" ? videoUrl : imageUrl;
   const canSubmit =
     !!connectorId &&
     (platform === "facebook" ? !!pageId : true) &&
-    (caption.trim() || imageUrl.trim()) &&
+    !!(caption.trim() || activeMedia.trim()) &&
     postStatus === "idle";
 
   const selectedFbPage = fbPages.find((p) => p.id === pageId);
@@ -1189,7 +1219,7 @@ export default function SocialPage() {
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
               {/* Left: composer */}
               <div className="relative rounded-2xl border bg-card shadow-sm overflow-hidden">
-                <StatusOverlay status={postStatus} onReset={resetForm} />
+                <StatusOverlay status={postStatus} errorMsg={postError} onReset={resetForm} />
                 <div className="p-6">
                   {activeConnectors.length === 0 ? (
                     <div className="flex flex-col items-center gap-3 py-16 text-center">

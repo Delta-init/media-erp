@@ -129,7 +129,8 @@ async def exchange_code(code: str, state: str) -> dict:
                 "fields": "id,name,username",
             },
         )
-        resp3.raise_for_status()
+        if not resp3.is_success:
+            _raise_meta_error(resp3)
         user_info = resp3.json()
 
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
@@ -154,7 +155,8 @@ async def get_user_info(access_token: str) -> dict:
                 "fields": "id,name,username,profile_picture_url,followers_count,media_count",
             },
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            _raise_meta_error(resp)
         return resp.json()
 
 

@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
@@ -8,6 +10,11 @@ from app.services.connector_service import get_connector, get_decrypted_tokens
 from app.utils.response import error_response, success_response
 
 router = APIRouter(prefix="/api/v1/social", tags=["social"])
+
+
+def _safe_exc(exc: Exception) -> str:
+    """Sanitize exception messages — strip access tokens before surfacing to users."""
+    return re.sub(r'access_token=[^&\s"\']+', 'access_token=***', str(exc))
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -80,7 +87,7 @@ async def list_facebook_pages(
     try:
         pages = await get_pages(tokens["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch pages: {exc}", status_code=502)
+        return error_response(f"Failed to fetch pages: {_safe_exc(exc)}", status_code=502)
     return success_response(pages, "Pages retrieved")
 
 
@@ -105,7 +112,7 @@ async def publish_facebook_post(
     try:
         pages = await get_pages(tokens["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch pages: {exc}", status_code=502)
+        return error_response(f"Failed to fetch pages: {_safe_exc(exc)}", status_code=502)
 
     page = next((p for p in pages if p["id"] == body.page_id), None)
     if not page:
@@ -120,7 +127,7 @@ async def publish_facebook_post(
             image_url=body.image_url,
         )
     except Exception as exc:
-        return error_response(f"Failed to publish post: {exc}", status_code=502)
+        return error_response(f"Failed to publish post: {_safe_exc(exc)}", status_code=502)
     return success_response(result, "Post published", status_code=201)
 
 
@@ -145,7 +152,7 @@ async def send_facebook_dm(
     try:
         pages = await get_pages(tokens["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch pages: {exc}", status_code=502)
+        return error_response(f"Failed to fetch pages: {_safe_exc(exc)}", status_code=502)
 
     page = next((p for p in pages if p["id"] == body.page_id), None)
     if not page:
@@ -159,7 +166,7 @@ async def send_facebook_dm(
             message=body.message,
         )
     except Exception as exc:
-        return error_response(f"Failed to send DM: {exc}", status_code=502)
+        return error_response(f"Failed to send DM: {_safe_exc(exc)}", status_code=502)
     return success_response(result, "DM sent", status_code=201)
 
 
@@ -186,7 +193,7 @@ async def list_instagram_accounts(
     try:
         accounts = await get_instagram_accounts(tokens["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch accounts: {exc}", status_code=502)
+        return error_response(f"Failed to fetch accounts: {_safe_exc(exc)}", status_code=502)
     return success_response(accounts, "Instagram accounts retrieved")
 
 
@@ -218,7 +225,7 @@ async def publish_instagram_post(
     except ValueError as exc:
         return error_response(str(exc), status_code=400)
     except Exception as exc:
-        return error_response(f"Failed to publish post: {exc}", status_code=502)
+        return error_response(f"Failed to publish post: {_safe_exc(exc)}", status_code=502)
     return success_response(result, "Instagram post published", status_code=201)
 
 
@@ -247,7 +254,7 @@ async def send_instagram_dm(
             message=body.message,
         )
     except Exception as exc:
-        return error_response(f"Failed to send DM: {exc}", status_code=502)
+        return error_response(f"Failed to send DM: {_safe_exc(exc)}", status_code=502)
     return success_response(result, "Instagram DM sent", status_code=201)
 
 
@@ -279,7 +286,7 @@ async def list_facebook_conversations(
             return error_response("Page not found in connected pages", status_code=404)
         conversations = await get_conversations(page_id, page["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch conversations: {exc}", status_code=502)
+        return error_response(f"Failed to fetch conversations: {_safe_exc(exc)}", status_code=502)
     return success_response(conversations, "Conversations retrieved")
 
 
@@ -310,7 +317,7 @@ async def get_facebook_conversation_messages(
             return error_response("Page not found in connected pages", status_code=404)
         messages = await get_conversation_messages(conversation_id, page["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch messages: {exc}", status_code=502)
+        return error_response(f"Failed to fetch messages: {_safe_exc(exc)}", status_code=502)
     return success_response(messages, "Messages retrieved")
 
 
@@ -342,7 +349,7 @@ async def list_instagram_conversations(
             return error_response("Instagram account not found for this connector", status_code=404)
         conversations = await get_conversations(ig_id, account["page_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch conversations: {exc}", status_code=502)
+        return error_response(f"Failed to fetch conversations: {_safe_exc(exc)}", status_code=502)
     return success_response(conversations, "Instagram conversations retrieved")
 
 
@@ -373,7 +380,7 @@ async def get_instagram_conversation_messages(
             return error_response("Instagram account not found for this connector", status_code=404)
         messages = await get_conversation_messages(conversation_id, account["page_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch messages: {exc}", status_code=502)
+        return error_response(f"Failed to fetch messages: {_safe_exc(exc)}", status_code=502)
     return success_response(messages, "Messages retrieved")
 
 
@@ -408,7 +415,7 @@ async def get_instagram_login_account(
     try:
         info = await get_user_info(tokens["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch account info: {exc}", status_code=502)
+        return error_response(f"Failed to fetch account info: {_safe_exc(exc)}", status_code=502)
     # Attach ig_user_id from stored platform_account_id as fallback
     if "id" not in info and connector.get("platform_account_id"):
         info["id"] = connector["platform_account_id"]
@@ -448,7 +455,7 @@ async def publish_instagram_login_post(
     except ValueError as exc:
         return error_response(str(exc), status_code=400)
     except Exception as exc:
-        return error_response(f"Failed to publish post: {exc}", status_code=502)
+        return error_response(f"Failed to publish post: {_safe_exc(exc)}", status_code=502)
     return success_response(result, "Instagram post published", status_code=201)
 
 
@@ -479,7 +486,7 @@ async def list_instagram_login_conversations(
     try:
         conversations = await get_conversations(ig_user_id, tokens["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch conversations: {exc}", status_code=502)
+        return error_response(f"Failed to fetch conversations: {_safe_exc(exc)}", status_code=502)
     return success_response(conversations, "Conversations retrieved")
 
 
@@ -505,7 +512,7 @@ async def get_instagram_login_conversation_messages(
     try:
         messages = await get_conversation_messages(conversation_id, tokens["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch messages: {exc}", status_code=502)
+        return error_response(f"Failed to fetch messages: {_safe_exc(exc)}", status_code=502)
     return success_response(messages, "Messages retrieved")
 
 
@@ -539,7 +546,7 @@ async def send_instagram_login_dm(
             message=body.message,
         )
     except Exception as exc:
-        return error_response(f"Failed to send DM: {exc}", status_code=502)
+        return error_response(f"Failed to send DM: {_safe_exc(exc)}", status_code=502)
     return success_response(result, "Instagram DM sent", status_code=201)
 
 
@@ -594,7 +601,7 @@ async def get_instagram_login_posts(
     try:
         posts = await get_media(ig_user_id, tokens["access_token"], limit=limit)
     except Exception as exc:
-        return error_response(f"Failed to fetch posts: {exc}", status_code=502)
+        return error_response(f"Failed to fetch posts: {_safe_exc(exc)}", status_code=502)
     return success_response(posts, "Posts retrieved")
 
 
@@ -619,7 +626,7 @@ async def get_instagram_login_post_comments(
     try:
         comments = await get_media_comments(post_id, tokens["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch comments: {exc}", status_code=502)
+        return error_response(f"Failed to fetch comments: {_safe_exc(exc)}", status_code=502)
     return success_response(comments, "Comments retrieved")
 
 
@@ -649,7 +656,7 @@ async def get_facebook_page_posts(
             return error_response("Page not found", status_code=404)
         posts = await get_page_posts(page_id, page["access_token"], limit=limit)
     except Exception as exc:
-        return error_response(f"Failed to fetch posts: {exc}", status_code=502)
+        return error_response(f"Failed to fetch posts: {_safe_exc(exc)}", status_code=502)
     return success_response(posts, "Posts retrieved")
 
 
@@ -710,5 +717,5 @@ async def get_facebook_post_comments(
             return error_response("Page not found", status_code=404)
         comments = await get_post_comments(post_id, page["access_token"])
     except Exception as exc:
-        return error_response(f"Failed to fetch comments: {exc}", status_code=502)
+        return error_response(f"Failed to fetch comments: {_safe_exc(exc)}", status_code=502)
     return success_response(comments, "Comments retrieved")

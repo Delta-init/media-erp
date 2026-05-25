@@ -5,6 +5,21 @@ const nextConfig: NextConfig = {
   // "standalone" is needed for Docker (copies only runtime files).
   // Vercel's build system ignores this and uses its own output format.
   output: "standalone",
+
+  // Proxy /api/v1/* to the backend so local preview avoids CORS restrictions.
+  // In production (Vercel/Docker) NEXT_PUBLIC_API_URL points directly to the backend.
+  async rewrites() {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+    // Only proxy when running against a remote backend (not localhost)
+    if (apiUrl.includes("localhost")) return [];
+    const backendBase = apiUrl.replace(/\/api\/v1\/?$/, "");
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${backendBase}/api/v1/:path*`,
+      },
+    ];
+  },
 };
 
 // Wrap with Sentry only when DSN is present; otherwise returns nextConfig unchanged.

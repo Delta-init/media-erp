@@ -1,7 +1,20 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
+// In a browser preview context, use the Next.js proxy (/api/v1) to avoid
+// CORS — the proxy rewrites to the real backend server-side.
+// In production (same-origin or CORS-enabled deployment), use the full URL.
+const _configuredUrl =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+
+const baseURL =
+  typeof window !== "undefined" &&
+  !_configuredUrl.includes("localhost") &&
+  window.location.hostname === "localhost"
+    ? "/api/v1"
+    : _configuredUrl;
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1",
+  baseURL,
   headers: { "Content-Type": "application/json" },
   withCredentials: false,
   timeout: 30_000, // 30 s — prevents hanging forever if backend is slow

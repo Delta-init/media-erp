@@ -106,8 +106,23 @@ export function useStartOAuth() {
     onSuccess(url) {
       window.location.href = url;
     },
-    onError() {
-      toast.error("Failed to start OAuth — check your credentials in .env");
+    onError(err: unknown) {
+      // Try to extract the backend's error message
+      const msg =
+        (err as { response?: { data?: { detail?: string; message?: string } } })
+          ?.response?.data?.detail ||
+        (err as { response?: { data?: { detail?: string; message?: string } } })
+          ?.response?.data?.message ||
+        "Failed to start OAuth. Check that your platform credentials are set in the server .env file.";
+
+      if (msg === "instagram_not_configured") {
+        toast.error(
+          "Instagram credentials are not configured. Set INSTAGRAM_APP_ID and INSTAGRAM_APP_SECRET in the server .env file.",
+          { duration: 10000 }
+        );
+      } else {
+        toast.error(msg, { duration: 8000 });
+      }
     },
   });
 }
