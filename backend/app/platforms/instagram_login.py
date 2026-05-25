@@ -219,34 +219,41 @@ async def publish_post(
                 raise ValueError(f"Instagram media creation failed with HTTP {resp.status_code}")
         creation_id = resp.json()["id"]
 
-        # Step 2: For videos/Reels, poll until container is FINISHED
-        # Instagram processes video asynchronously — publishing before FINISHED returns 400
-        if video_url:
-            max_wait_secs = 90
-            poll_interval = 5
-            elapsed = 0
-            while elapsed < max_wait_secs:
-                await asyncio.sleep(poll_interval)
-                elapsed += poll_interval
-                status_resp = await client.get(
-                    f"{_API_BASE}/{creation_id}",
-                    params={"access_token": access_token, "fields": "status_code"},
-                )
-                if status_resp.is_success:
-                    status_code = status_resp.json().get("status_code", "")
-                    if status_code == "FINISHED":
-                        break
-                    elif status_code in ("ERROR", "EXPIRED"):
+        # Step 2: Poll until container is FINISHED before publishing.
+        # Instagram processes ALL media asynchronously (images ~5s, videos up to 90s).
+        # Calling media_publish before FINISHED always returns 400.
+        max_wait_secs = 90 if video_url else 30
+        poll_interval = 3
+        elapsed = 0
+        while elapsed < max_wait_secs:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            status_resp = await client.get(
+                f"{_API_BASE}/{creation_id}",
+                params={"access_token": access_token, "fields": "status_code"},
+            )
+            if status_resp.is_success:
+                container_status = status_resp.json().get("status_code", "")
+                if container_status == "FINISHED":
+                    break
+                elif container_status in ("ERROR", "EXPIRED"):
+                    if video_url:
                         raise ValueError(
-                            f"Instagram video processing {status_code.lower()}. "
+                            f"Instagram video processing {container_status.lower()}. "
                             "Try a shorter video (under 90 seconds) or re-encode as MP4 (H.264 video, AAC audio)."
                         )
-                    # IN_PROGRESS → keep waiting
-            else:
-                raise ValueError(
-                    "Instagram video is still processing after 90 seconds. "
-                    "Try a shorter video or ensure the URL is a direct publicly accessible MP4 link."
-                )
+                    else:
+                        raise ValueError(
+                            f"Instagram image processing {container_status.lower()}. "
+                            "Ensure the image is a publicly accessible JPEG or PNG under 8 MB."
+                        )
+                # IN_PROGRESS → keep waiting
+        else:
+            media_type = "video" if video_url else "image"
+            raise ValueError(
+                f"Instagram {media_type} container timed out after {max_wait_secs} seconds. "
+                "Ensure the URL is a direct, publicly accessible link with no redirects."
+            )
 
         # Step 3: Publish the container
         resp2 = await client.post(
