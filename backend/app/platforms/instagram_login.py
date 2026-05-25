@@ -49,6 +49,10 @@ def _raise_meta_error(resp: "httpx.Response") -> None:
 
 
 def get_auth_url(connector_id: str, user_id: str) -> str:
+    if not settings.instagram_app_id or not settings.instagram_app_secret:
+        raise ValueError(
+            "instagram_not_configured"
+        )
     state = generate_state()
     store_state(state, connector_id=connector_id, user_id=user_id, platform="instagram_login")
     params = {
@@ -164,9 +168,12 @@ async def publish_post(
     """
     Publish to Instagram via Instagram Login.
     Two-step: create media container → publish.
+    For videos/Reels: polls until container status is FINISHED before publishing.
     image_url or video_url must be a publicly accessible URL.
     Returns {id: media_id}.
     """
+    import asyncio
+
     if not image_url and not video_url:
         raise ValueError("image_url or video_url is required for Instagram posts")
 
@@ -185,7 +192,9 @@ async def publish_post(
                 f"Received: {url[:80]}"
             )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    # Videos need longer timeout for processing; images are immediate
+    timeout = 120.0 if video_url else 30.0
+    async with httpx.AsyncClient(timeout=timeout) as client:
         params: dict = {"access_token": access_token, "caption": caption}
         if video_url:
             params["media_type"] = "REELS"
@@ -193,18 +202,67 @@ async def publish_post(
         else:
             params["image_url"] = image_url
 
+        # Step 1: Create media container
         resp = await client.post(
             f"{_API_BASE}/{ig_user_id}/media",
             params=params,
         )
-        resp.raise_for_status()
+        if not resp.is_success:
+            try:
+                err = resp.json().get("error", {})
+                msg = err.get("error_user_msg") or err.get("message") or f"HTTP {resp.status_code}"
+                code_val = err.get("code", "")
+                raise ValueError(f"Instagram media creation failed (code {code_val}): {msg}")
+            except ValueError:
+                raise
+            except Exception:
+                raise ValueError(f"Instagram media creation failed with HTTP {resp.status_code}")
         creation_id = resp.json()["id"]
 
+        # Step 2: For videos/Reels, poll until container is FINISHED
+        # Instagram processes video asynchronously — publishing before FINISHED returns 400
+        if video_url:
+            max_wait_secs = 90
+            poll_interval = 5
+            elapsed = 0
+            while elapsed < max_wait_secs:
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                status_resp = await client.get(
+                    f"{_API_BASE}/{creation_id}",
+                    params={"access_token": access_token, "fields": "status_code"},
+                )
+                if status_resp.is_success:
+                    status_code = status_resp.json().get("status_code", "")
+                    if status_code == "FINISHED":
+                        break
+                    elif status_code in ("ERROR", "EXPIRED"):
+                        raise ValueError(
+                            f"Instagram video processing {status_code.lower()}. "
+                            "Try a shorter video (under 90 seconds) or re-encode as MP4 (H.264 video, AAC audio)."
+                        )
+                    # IN_PROGRESS → keep waiting
+            else:
+                raise ValueError(
+                    "Instagram video is still processing after 90 seconds. "
+                    "Try a shorter video or ensure the URL is a direct publicly accessible MP4 link."
+                )
+
+        # Step 3: Publish the container
         resp2 = await client.post(
             f"{_API_BASE}/{ig_user_id}/media_publish",
             params={"access_token": access_token, "creation_id": creation_id},
         )
-        resp2.raise_for_status()
+        if not resp2.is_success:
+            try:
+                err = resp2.json().get("error", {})
+                msg = err.get("error_user_msg") or err.get("message") or f"HTTP {resp2.status_code}"
+                code_val = err.get("code", "")
+                raise ValueError(f"Instagram publish failed (code {code_val}): {msg}")
+            except ValueError:
+                raise
+            except Exception:
+                raise ValueError(f"Instagram publish failed with HTTP {resp2.status_code}")
         return resp2.json()
 
 
