@@ -50,13 +50,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Redis INCR + EXPIRE.  Falls back to allow-all when Redis is unavailable.
     """
 
+    # When Redis is unreachable, stop hammering it (each dead call costs a full
+    # socket_connect_timeout). Skip Redis entirely for this many seconds, then
+    # probe once more — so the limiter self-heals when Redis comes back.
+    _COOLDOWN_SECS = 30.0
+
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
         self._redis = None
         self._init_failed = False
+        self._cooldown_until = 0.0   # monotonic deadline; >now means "skip Redis"
 
     def _get_redis(self):
         if self._init_failed:
+            return None
+        # Circuit breaker: while in cooldown, don't touch Redis at all.
+        if time.monotonic() < self._cooldown_until:
             return None
         if self._redis is not None:
             return self._redis
@@ -73,6 +82,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             logger.warning("RateLimit: Redis init failed — rate limiting disabled: %s", exc)
             self._init_failed = True
         return self._redis
+
+    def _trip_breaker(self, exc: Exception) -> None:
+        """Open the circuit for _COOLDOWN_SECS after a Redis failure."""
+        self._cooldown_until = time.monotonic() + self._COOLDOWN_SECS
+        logger.warning(
+            "RateLimit: Redis unreachable — pausing rate limiting for %.0fs: %s",
+            self._COOLDOWN_SECS, exc,
+        )
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         path = request.url.path
@@ -102,7 +119,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             if count == 1:
                 await redis.expire(key, _WINDOW_SECS + 5)  # +5 s buffer
         except Exception as exc:
-            logger.debug("RateLimit: Redis error (allowing request): %s", exc)
+            # Open the circuit so the next requests skip Redis instead of each
+            # paying the full connect timeout.
+            self._trip_breaker(exc)
             return await call_next(request)
 
         remaining = max(0, limit - count)
