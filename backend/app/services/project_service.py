@@ -46,7 +46,8 @@ async def list_tasks(
             {"description": {"$regex": search, "$options": "i"}},
         ]
 
-    if status and status in VALID_STATUSES:
+    # Status is now dynamic (custom Kanban columns) — accept any non-empty key
+    if status:
         query["status"] = status
 
     if priority and priority in VALID_PRIORITIES:

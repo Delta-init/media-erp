@@ -23,13 +23,15 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus } from "lucide-react";
+import { Plus, Pencil, Trash2, Columns3, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUpdateTask } from "@/hooks/useProjects";
+import { useStatuses, useDeleteStatus } from "@/hooks/useStatuses";
 import { KanbanCard } from "./KanbanCard";
 import { AddTaskModal } from "./AddTaskModal";
-import type { Task, TaskStatus } from "@/types/project";
-import { COLUMNS } from "@/types/project";
+import { StatusColumnModal } from "./StatusColumnModal";
+import type { Task, TaskStatus, BoardStatus } from "@/types/project";
+import { statusStyles } from "@/types/project";
 import { useDroppable } from "@dnd-kit/core";
 
 // ── Drop animation — spring-like easing ──────────────────────────────────────
@@ -43,38 +45,75 @@ const dropAnimation: DropAnimation = {
 
 // ── Column ────────────────────────────────────────────────────────────────────
 interface ColumnProps {
-  colId: TaskStatus;
-  label: string;
-  color: string;
-  bg: string;
+  status: BoardStatus;
   tasks: Task[];
   isOver: boolean;
   onAdd: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  canDelete: boolean;
 }
 
-function KanbanColumn({ colId, label, color, bg, tasks, isOver, onAdd }: ColumnProps) {
-  const { setNodeRef } = useDroppable({ id: colId });
+function KanbanColumn({ status, tasks, isOver, onAdd, onEdit, onDelete, canDelete }: ColumnProps) {
+  const { setNodeRef } = useDroppable({ id: status.key });
+  const s = statusStyles(status.color);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <div className="flex flex-col gap-2 min-w-[272px] w-[272px] shrink-0">
       {/* Header */}
-      <div className={cn("rounded-xl border px-3 py-2.5 flex items-center justify-between transition-colors", bg)}>
-        <div className="flex items-center gap-2">
-          <span className={cn("text-xs font-bold uppercase tracking-wider", color)}>{label}</span>
-          <span className={cn(
-            "flex size-5 items-center justify-center rounded-full text-[10px] font-bold",
-            color, "bg-white/50 dark:bg-black/20"
-          )}>
+      <div
+        className="group/col rounded-xl border px-3 py-2.5 flex items-center justify-between transition-colors"
+        style={{ ...s.headerBg }}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="size-2.5 rounded-full shrink-0" style={s.dot} />
+          <span className="text-xs font-bold uppercase tracking-wider truncate" style={s.text}>
+            {status.label}
+          </span>
+          <span
+            className="flex size-5 items-center justify-center rounded-full text-[10px] font-bold shrink-0"
+            style={s.badgeBg}
+          >
             {tasks.length}
           </span>
         </div>
-        <button
-          onClick={onAdd}
-          className={cn("rounded-lg p-1 transition-colors hover:bg-white/40 dark:hover:bg-black/20", color)}
-          title={`Add to ${label}`}
-        >
-          <Plus className="size-3.5" />
-        </button>
+
+        <div className="flex items-center gap-0.5 shrink-0">
+          {/* Edit + delete appear on column hover */}
+          <button
+            onClick={onEdit}
+            className="rounded-lg p-1 opacity-0 group-hover/col:opacity-100 transition-all hover:bg-white/40 dark:hover:bg-black/20"
+            style={s.text}
+            title="Edit column"
+          >
+            <Pencil className="size-3" />
+          </button>
+          {canDelete && (
+            <button
+              onClick={() => {
+                if (confirmDelete) { onDelete(); setConfirmDelete(false); }
+                else { setConfirmDelete(true); setTimeout(() => setConfirmDelete(false), 2500); }
+              }}
+              className={cn(
+                "rounded-lg p-1 transition-all hover:bg-white/40 dark:hover:bg-black/20",
+                confirmDelete ? "opacity-100 text-red-600 bg-red-100 dark:bg-red-900/40" : "opacity-0 group-hover/col:opacity-100"
+              )}
+              style={confirmDelete ? undefined : s.text}
+              title={confirmDelete ? "Click again to delete" : "Delete column"}
+            >
+              <Trash2 className="size-3" />
+            </button>
+          )}
+          <button
+            onClick={onAdd}
+            className="rounded-lg p-1 transition-colors hover:bg-white/40 dark:hover:bg-black/20"
+            style={s.text}
+            title={`Add to ${status.label}`}
+          >
+            <Plus className="size-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Drop zone */}
@@ -82,10 +121,9 @@ function KanbanColumn({ colId, label, color, bg, tasks, isOver, onAdd }: ColumnP
         ref={setNodeRef}
         className={cn(
           "flex flex-col gap-2 flex-1 min-h-[140px] rounded-xl p-1.5 transition-all duration-150",
-          isOver
-            ? "bg-primary/8 ring-2 ring-primary/25 ring-offset-1"
-            : "bg-transparent"
+          isOver ? "ring-2 ring-primary/25 ring-offset-1" : ""
         )}
+        style={isOver ? { backgroundColor: `${status.color}14` } : undefined}
       >
         <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
           <AnimatePresence initial={false}>
@@ -110,7 +148,7 @@ function KanbanColumn({ colId, label, color, bg, tasks, isOver, onAdd }: ColumnP
             "flex flex-1 items-center justify-center rounded-lg border border-dashed p-6 transition-colors duration-150",
             isOver ? "border-primary/40 bg-primary/5" : "border-muted-foreground/20"
           )}>
-            <p className="text-xs text-muted-foreground/50 text-center">
+            <p className="text-xs text-muted-foreground/50 text-center whitespace-pre-line">
               {isOver ? "Drop here" : "Drop tasks here\nor click + to add"}
             </p>
           </div>
@@ -125,6 +163,8 @@ interface Props { tasks: Task[] }
 
 export function KanbanBoard({ tasks }: Props) {
   const updateTask = useUpdateTask();
+  const deleteStatus = useDeleteStatus();
+  const { data: statuses = [], isLoading: statusesLoading } = useStatuses();
 
   // Local copy for optimistic real-time ordering
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
@@ -133,34 +173,34 @@ export function KanbanBoard({ tasks }: Props) {
   const [addStatus, setAddStatus]     = useState<TaskStatus>("pending");
   const [addOpen, setAddOpen]         = useState(false);
 
-  // Keep local state in sync when server data changes (but not while dragging)
+  // Column management modals
+  const [columnModalOpen, setColumnModalOpen] = useState(false);
+  const [editingStatus, setEditingStatus]     = useState<BoardStatus | undefined>(undefined);
+
   useEffect(() => {
     if (!activeTask) setLocalTasks(tasks);
   }, [tasks, activeTask]);
 
-  // Sensors — separate mouse & touch so each gets proper activation constraints
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const validStatuses = COLUMNS.map(c => c.id) as string[];
+  const validStatuses = statuses.map(s => s.key);
 
   function resolveColumn(overId: string): TaskStatus | null {
-    if (validStatuses.includes(overId)) return overId as TaskStatus;
+    if (validStatuses.includes(overId)) return overId;
     const overTask = localTasks.find(t => t.id === overId);
     return overTask?.status ?? null;
   }
 
-  // ── DragStart ───────────────────────────────────────────────────────────────
   function onDragStart({ active }: DragStartEvent) {
     const t = localTasks.find(t => t.id === active.id);
     setActiveTask(t ?? null);
     setOverColumnId(t?.status ?? null);
   }
 
-  // ── DragOver — real-time optimistic column switch + intra-column reorder ────
   const onDragOver = useCallback(({ active, over }: DragOverEvent) => {
     if (!over) { setOverColumnId(null); return; }
 
@@ -181,14 +221,9 @@ export function KanbanBoard({ tasks }: Props) {
       const isCrossColumn = activeItem.status !== targetColumn;
 
       if (isCrossColumn) {
-        // Move to new column, insert before the over-item (or at end of column)
         const overIdx = prev.findIndex(t => t.id === overId);
         const insertAt = overIdx === -1 ? prev.length : overIdx;
-
-        const updated = prev
-          .map(t => t.id === activeId ? { ...t, status: targetColumn } : t);
-
-        // Re-order: move activeIdx to insertAt
+        const updated = prev.map(t => t.id === activeId ? { ...t, status: targetColumn } : t);
         const withoutActive = updated.filter(t => t.id !== activeId);
         const newInsertAt = Math.min(insertAt, withoutActive.length);
         return [
@@ -197,15 +232,13 @@ export function KanbanBoard({ tasks }: Props) {
           ...withoutActive.slice(newInsertAt),
         ];
       } else {
-        // Same column — reorder
         const overIdx = prev.findIndex(t => t.id === overId);
         if (overIdx === -1) return prev;
         return arrayMove(prev, activeIdx, overIdx);
       }
     });
-  }, [localTasks]);
+  }, [localTasks, validStatuses]);
 
-  // ── DragEnd — commit the change that already happened optimistically ─────────
   function onDragEnd({ active }: DragEndEvent) {
     const activeId = String(active.id);
     const movedTask = localTasks.find(t => t.id === activeId);
@@ -219,18 +252,35 @@ export function KanbanBoard({ tasks }: Props) {
     setOverColumnId(null);
   }
 
-  // ── DragCancel — revert to server state ────────────────────────────────────
   function onDragCancel() {
     setLocalTasks(tasks);
     setActiveTask(null);
     setOverColumnId(null);
   }
 
-  const tasksByColumn = (id: TaskStatus) => localTasks.filter(t => t.status === id);
+  const tasksByColumn = (key: string) => localTasks.filter(t => t.status === key);
 
   function openAdd(status: TaskStatus) {
     setAddStatus(status);
     setAddOpen(true);
+  }
+
+  function openNewColumn() {
+    setEditingStatus(undefined);
+    setColumnModalOpen(true);
+  }
+
+  function openEditColumn(s: BoardStatus) {
+    setEditingStatus(s);
+    setColumnModalOpen(true);
+  }
+
+  if (statusesLoading) {
+    return (
+      <div className="flex flex-1 items-center justify-center py-20">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   return (
@@ -244,21 +294,29 @@ export function KanbanBoard({ tasks }: Props) {
         onDragCancel={onDragCancel}
       >
         <div className="flex gap-4 overflow-x-auto pb-4 pt-1 select-none">
-          {COLUMNS.map(col => (
+          {statuses.map(col => (
             <KanbanColumn
               key={col.id}
-              colId={col.id}
-              label={col.label}
-              color={col.color}
-              bg={col.bg}
-              tasks={tasksByColumn(col.id)}
-              isOver={overColumnId === col.id && activeTask?.status !== col.id}
-              onAdd={() => openAdd(col.id)}
+              status={col}
+              tasks={tasksByColumn(col.key)}
+              isOver={overColumnId === col.key && activeTask?.status !== col.key}
+              onAdd={() => openAdd(col.key)}
+              onEdit={() => openEditColumn(col)}
+              onDelete={() => deleteStatus.mutate(col.id)}
+              canDelete={statuses.length > 1}
             />
           ))}
+
+          {/* Add column */}
+          <button
+            onClick={openNewColumn}
+            className="flex flex-col items-center justify-center gap-2 min-w-[200px] w-[200px] shrink-0 rounded-xl border-2 border-dashed border-muted-foreground/20 text-muted-foreground/60 hover:border-primary/40 hover:text-primary hover:bg-primary/[0.03] transition-colors min-h-[140px]"
+          >
+            <Columns3 className="size-5" />
+            <span className="text-xs font-medium">Add Column</span>
+          </button>
         </div>
 
-        {/* Overlay — the card that follows the cursor */}
         <DragOverlay dropAnimation={dropAnimation}>
           {activeTask ? <KanbanCard task={activeTask} overlay /> : null}
         </DragOverlay>
@@ -269,6 +327,15 @@ export function KanbanBoard({ tasks }: Props) {
         onClose={() => setAddOpen(false)}
         defaultStatus={addStatus}
       />
+
+      <AnimatePresence>
+        {columnModalOpen && (
+          <StatusColumnModal
+            status={editingStatus}
+            onClose={() => setColumnModalOpen(false)}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }

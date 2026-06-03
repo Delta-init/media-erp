@@ -1,10 +1,30 @@
-export type TaskStatus =
-  | "pending"
-  | "upcoming"
-  | "currently_working"
-  | "updation_needed";
+// Status is now a dynamic, user-defined Kanban column key (free-form string).
+// The defaults are pending | upcoming | currently_working | updation_needed.
+export type TaskStatus = string;
 
 export type TaskPriority = "low" | "medium" | "high";
+
+/** A customisable Kanban column, defined in the DB. */
+export interface BoardStatus {
+  id: string;
+  key: string;
+  label: string;
+  color: string;     // hex
+  position: number;
+  is_default: boolean;
+}
+
+/** Build inline styles for a status column from its hex colour. */
+export function statusStyles(color: string) {
+  return {
+    text:      { color },
+    headerBg:  { backgroundColor: `${color}1a`, borderColor: `${color}40` }, // ~10% bg, ~25% border
+    columnBg:  { backgroundColor: `${color}0d` },                             // ~5%
+    badgeBg:   { backgroundColor: `${color}26`, color },                      // ~15%
+    dot:       { backgroundColor: color },
+    border:    { borderColor: `${color}59` },                                 // ~35%
+  };
+}
 
 export type DateFilterOption =
   | ""

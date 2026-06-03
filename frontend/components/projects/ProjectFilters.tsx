@@ -3,6 +3,7 @@
 import { Search, X, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useStatuses } from "@/hooks/useStatuses";
 import type { DateFilterOption, ProjectFilters, TaskPriority, TaskStatus } from "@/types/project";
 
 const DATE_OPTS: { value: DateFilterOption; label: string }[] = [
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function ProjectFiltersBar({ filters, onChange, onReset }: Props) {
+  const { data: statuses = [] } = useStatuses();
   const hasActive =
     filters.search || filters.status || filters.priority || filters.date_filter;
 
@@ -82,6 +84,18 @@ export function ProjectFiltersBar({ filters, onChange, onReset }: Props) {
           />
         </div>
       )}
+
+      {/* Status filter */}
+      <select
+        value={filters.status}
+        onChange={e => onChange({ status: e.target.value as TaskStatus | "" })}
+        className="rounded-lg border bg-background px-3 py-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition text-muted-foreground"
+      >
+        <option value="">All Statuses</option>
+        {statuses.map(s => (
+          <option key={s.id} value={s.key}>{s.label}</option>
+        ))}
+      </select>
 
       {/* Priority filter */}
       <select

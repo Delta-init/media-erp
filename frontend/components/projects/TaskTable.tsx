@@ -5,8 +5,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, ArrowUpDown, Calendar, Paperclip, Trash2, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
+import { useStatuses } from "@/hooks/useStatuses";
 import type { Task, TaskPriority, TaskStatus } from "@/types/project";
-import { COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
+import { PRIORITY_META, isTaskOverdue, assigneeLabel, statusStyles } from "@/types/project";
 import { listItemVariants, listVariants } from "@/lib/animations";
 
 type SortKey = "title" | "status" | "priority" | "due_date" | "created_at";
@@ -18,6 +19,7 @@ export function TaskTable({ tasks }: Props) {
   const [sortAsc, setSortAsc]   = useState(false);
   const updateTask  = useUpdateTask();
   const deleteTask  = useDeleteTask();
+  const { data: statuses = [] } = useStatuses();
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
   function toggleSort(k: SortKey) {
@@ -84,7 +86,8 @@ export function TaskTable({ tasks }: Props) {
         <tbody>
           <AnimatePresence initial={false}>
             {sorted.map((task, i) => {
-              const col = COLUMNS.find(c => c.id === task.status);
+              const col = statuses.find(c => c.key === task.status);
+              const colStyle = col ? statusStyles(col.color).badgeBg : undefined;
               const pri = PRIORITY_META[task.priority];
               const isOverdue = isTaskOverdue(task);
               const attachmentCount = task.attachments?.length ?? 0;
@@ -124,12 +127,10 @@ export function TaskTable({ tasks }: Props) {
                       onChange={e =>
                         updateTask.mutate({ id: task.id, payload: { status: e.target.value as TaskStatus } })
                       }
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-[11px] font-semibold border-0 outline-none cursor-pointer",
-                        col?.color, col?.bg
-                      )}
+                      style={colStyle}
+                      className="rounded-full px-2 py-0.5 text-[11px] font-semibold border-0 outline-none cursor-pointer"
                     >
-                      {COLUMNS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                      {statuses.map(c => <option key={c.id} value={c.key}>{c.label}</option>)}
                     </select>
                   </td>
 

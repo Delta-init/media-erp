@@ -11,8 +11,8 @@ import { useCreateTask } from "@/hooks/useProjects";
 import { useUploadAttachments } from "@/hooks/useUpload";
 import { useTeams, useTeam } from "@/hooks/useTeams";
 import { useUsersList } from "@/hooks/useUsers";
+import { useStatuses } from "@/hooks/useStatuses";
 import type { TaskPriority, TaskStatus, Attachment } from "@/types/project";
-import { COLUMNS } from "@/types/project";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -49,6 +49,13 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
   const [assignedTo, setAssignedTo] = useState("");
   const [dueDate, setDueDate]       = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+
+  // Dynamic Kanban columns
+  const { data: statuses = [] } = useStatuses();
+
+  // If the requested default status no longer exists, fall back to the first column
+  const statusValid = statuses.some(s => s.key === status);
+  const effectiveStatus = statusValid ? status : (statuses[0]?.key ?? status);
 
   // Teams the current user belongs to
   const { data: teams = [] } = useTeams();
@@ -87,7 +94,7 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
       title: title.trim(),
       description,
       priority,
-      status,
+      status: effectiveStatus,
       team_id: teamId || null,
       assigned_to: assignedTo,
       assigned_to_name: assigneeName,
@@ -181,12 +188,12 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Status</label>
                   <select
-                    value={status}
+                    value={effectiveStatus}
                     onChange={e => setStatus(e.target.value as TaskStatus)}
                     className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition"
                   >
-                    {COLUMNS.map(c => (
-                      <option key={c.id} value={c.id}>{c.label}</option>
+                    {statuses.map(c => (
+                      <option key={c.id} value={c.key}>{c.label}</option>
                     ))}
                   </select>
                 </div>
