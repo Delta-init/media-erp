@@ -78,10 +78,18 @@ async def get_tasks(
     date_from: str = Query(default=""),
     date_to: str = Query(default=""),
     team_id: str = Query(default=""),
+    member_id: str = Query(default=""),
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
     visibility, uid = await _resolve_visibility(current_user, team_id, db)
+
+    # Member filter — only allowed for admins or team leaders.
+    # A regular member is locked to their own tasks regardless of this param.
+    if member_id and visibility in ("all", "team"):
+        visibility = "own"      # reuse own-filter logic
+        uid = member_id         # but scope to the requested member
+
     tasks = await list_tasks(
         db,
         search=search,

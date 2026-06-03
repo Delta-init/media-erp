@@ -18,8 +18,12 @@ from fastapi.concurrency import run_in_threadpool
 from app.middleware.auth import get_current_user
 from app.config import settings
 from app.utils.response import success_response, error_response
+from app.utils.storage import upload_bytes
 
 router = APIRouter(prefix="/api/v1/media", tags=["media"])
+
+# Max attachment size: 25 MB per file
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 # Directory where files are stored — two levels up from this file → repo_root/uploads/
 UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
@@ -75,6 +79,45 @@ async def upload_media(
     return success_response(
         data={"url": public_url, "filename": unique_name, "size": len(contents)},
         message="File uploaded successfully",
+        status_code=201,
+    )
+
+
+@router.post("/upload-attachments")
+async def upload_attachments(
+    files: list[UploadFile] = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Upload one or more task attachments (any file type) to R2 / local storage.
+
+    Returns a list of {url, key, filename, size, content_type, backend}.
+    Used by the task composer for multi-file attachments.
+    """
+    if not files:
+        return error_response("No files provided", status_code=400)
+    if len(files) > 10:
+        return error_response("Maximum 10 files per upload", status_code=400)
+
+    results = []
+    for f in files:
+        contents = await f.read()
+        if len(contents) > MAX_ATTACHMENT_BYTES:
+            return error_response(
+                f"'{f.filename}' is too large ({len(contents)//(1024*1024)} MB). Maximum is 25 MB per file.",
+                status_code=413,
+            )
+        meta = await run_in_threadpool(
+            upload_bytes,
+            contents,
+            f.filename or "file",
+            f.content_type or "application/octet-stream",
+        )
+        results.append(meta)
+
+    return success_response(
+        data=results,
+        message=f"{len(results)} file{'s' if len(results) != 1 else ''} uploaded",
         status_code=201,
     )
 

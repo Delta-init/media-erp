@@ -25,6 +25,8 @@ export function useTasks(filters: Partial<ProjectFilters> = {}) {
       if (filters.date_filter) params.date_filter = filters.date_filter;
       if (filters.date_from)   params.date_from   = filters.date_from;
       if (filters.date_to)     params.date_to     = filters.date_to;
+      if (filters.team_id)     params.team_id     = filters.team_id;
+      if (filters.member_id)   params.member_id   = filters.member_id;
       const { data } = await api.get<{ success: boolean; data: Task[] }>(
         "/projects",
         { params }

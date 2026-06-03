@@ -14,6 +14,15 @@ export type DateFilterOption =
   | "this_year"
   | "custom";
 
+export interface Attachment {
+  url: string;
+  key: string;
+  filename: string;
+  size: number;
+  content_type: string;
+  backend: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -21,7 +30,10 @@ export interface Task {
   priority: TaskPriority;
   status: TaskStatus;
   assigned_to: string;
+  assigned_to_name?: string;
   due_date: string | null;
+  team_id?: string | null;
+  attachments?: Attachment[];
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -33,7 +45,10 @@ export interface CreateTaskPayload {
   priority?: TaskPriority;
   status?: TaskStatus;
   assigned_to?: string;
+  assigned_to_name?: string;
   due_date?: string | null;
+  team_id?: string | null;
+  attachments?: Attachment[];
 }
 
 export interface UpdateTaskPayload {
@@ -42,7 +57,16 @@ export interface UpdateTaskPayload {
   priority?: TaskPriority;
   status?: TaskStatus;
   assigned_to?: string;
+  assigned_to_name?: string;
   due_date?: string | null;
+  team_id?: string | null;
+  attachments?: Attachment[];
+}
+
+/** Display label for a task's assignee — prefers the denormalized name,
+ *  falls back to the raw assigned_to (legacy data stored names there). */
+export function assigneeLabel(task: Pick<Task, "assigned_to" | "assigned_to_name">): string {
+  return task.assigned_to_name?.trim() || task.assigned_to || "";
 }
 
 export interface ProjectFilters {
@@ -52,6 +76,20 @@ export interface ProjectFilters {
   date_filter: DateFilterOption;
   date_from: string;
   date_to: string;
+  team_id?: string;
+  member_id?: string;
+}
+
+/**
+ * A task is overdue when its due date is in the past AND it isn't done.
+ * "currently_working" is treated as the active/in-progress terminal state.
+ */
+export function isTaskOverdue(task: Pick<Task, "due_date" | "status">): boolean {
+  if (!task.due_date) return false;
+  if (task.status === "currently_working") return false;
+  const due = new Date(task.due_date);
+  due.setHours(23, 59, 59, 999); // grace until end of due day
+  return due < new Date();
 }
 
 export const COLUMNS: { id: TaskStatus; label: string; color: string; bg: string }[] = [

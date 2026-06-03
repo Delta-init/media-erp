@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowUpDown, Calendar, Trash2, User } from "lucide-react";
+import { AlertTriangle, ArrowUpDown, Calendar, Paperclip, Trash2, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
 import type { Task, TaskPriority, TaskStatus } from "@/types/project";
-import { COLUMNS, PRIORITY_META } from "@/types/project";
+import { COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
 import { listItemVariants, listVariants } from "@/lib/animations";
 
 type SortKey = "title" | "status" | "priority" | "due_date" | "created_at";
@@ -86,7 +86,8 @@ export function TaskTable({ tasks }: Props) {
             {sorted.map((task, i) => {
               const col = COLUMNS.find(c => c.id === task.status);
               const pri = PRIORITY_META[task.priority];
-              const isOverdue = task.due_date && new Date(task.due_date) < new Date();
+              const isOverdue = isTaskOverdue(task);
+              const attachmentCount = task.attachments?.length ?? 0;
 
               return (
                 <motion.tr
@@ -96,11 +97,21 @@ export function TaskTable({ tasks }: Props) {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.15, delay: i * 0.02 }}
-                  className="border-b last:border-0 hover:bg-muted/30 transition-colors group"
+                  className={cn(
+                    "border-b last:border-0 hover:bg-muted/30 transition-colors group",
+                    isOverdue && "bg-red-50/40 dark:bg-red-950/15"
+                  )}
                 >
                   {/* Title + description */}
                   <td className="px-4 py-3 max-w-[240px]">
-                    <p className="text-sm font-medium truncate">{task.title}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium truncate">{task.title}</p>
+                      {attachmentCount > 0 && (
+                        <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0">
+                          <Paperclip className="size-3" />{attachmentCount}
+                        </span>
+                      )}
+                    </div>
                     {task.description && (
                       <p className="text-[11px] text-muted-foreground truncate mt-0.5">{task.description}</p>
                     )}
@@ -139,12 +150,12 @@ export function TaskTable({ tasks }: Props) {
 
                   {/* Assigned to */}
                   <td className="px-4 py-3">
-                    {task.assigned_to ? (
+                    {assigneeLabel(task) ? (
                       <div className="flex items-center gap-1.5">
                         <div className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[9px]">
-                          {task.assigned_to[0]?.toUpperCase()}
+                          {assigneeLabel(task)[0]?.toUpperCase()}
                         </div>
-                        <span className="text-xs text-muted-foreground">{task.assigned_to}</span>
+                        <span className="text-xs text-muted-foreground">{assigneeLabel(task)}</span>
                       </div>
                     ) : (
                       <span className="text-xs text-muted-foreground/40">—</span>
@@ -154,9 +165,10 @@ export function TaskTable({ tasks }: Props) {
                   {/* Due date */}
                   <td className="px-4 py-3">
                     {task.due_date ? (
-                      <span className={cn("flex items-center gap-1 text-xs", isOverdue ? "text-red-500" : "text-muted-foreground")}>
-                        <Calendar className="size-3" />
+                      <span className={cn("flex items-center gap-1 text-xs", isOverdue ? "text-red-500 font-semibold" : "text-muted-foreground")}>
+                        {isOverdue ? <AlertTriangle className="size-3" /> : <Calendar className="size-3" />}
                         {new Date(task.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                        {isOverdue && <span className="ml-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-600 dark:bg-red-900/50 dark:text-red-400">OVERDUE</span>}
                       </span>
                     ) : (
                       <span className="text-xs text-muted-foreground/40">—</span>

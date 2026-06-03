@@ -88,6 +88,16 @@ class Settings(BaseSettings):
     tiktok_app_secret: str = ""
     tiktok_redirect_uri: str = ""           # auto-derived if empty
 
+    # ── Cloudflare R2 (S3-compatible object storage) ──────────────────────────
+    # Leave empty to fall back to local disk storage (uploads/ + PUBLIC_BASE_URL).
+    r2_account_id:        str = ""
+    r2_access_key_id:     str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket:            str = ""
+    # Public base URL for the bucket (R2 public dev URL or custom domain), e.g.
+    #   https://pub-xxxx.r2.dev   or   https://files.yourdomain.com
+    r2_public_url:        str = ""
+
     # ── Stripe ────────────────────────────────────────────────────────────────
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
@@ -99,6 +109,20 @@ class Settings(BaseSettings):
     stripe_price_enterprise_yearly: str = ""
 
     model_config = {"env_file": str(_ENV_FILE), "case_sensitive": False, "extra": "ignore"}
+
+    @property
+    def r2_enabled(self) -> bool:
+        """True only when all required R2 credentials are present."""
+        return bool(
+            self.r2_account_id
+            and self.r2_access_key_id
+            and self.r2_secret_access_key
+            and self.r2_bucket
+        )
+
+    @property
+    def r2_endpoint(self) -> str:
+        return f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
 
     @model_validator(mode="after")
     def _build_redirect_uris(self) -> "Settings":

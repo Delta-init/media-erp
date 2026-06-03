@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Kanban, LayoutList, Plus } from "lucide-react";
+import { Kanban, LayoutList, Plus, Users, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { KanbanBoard } from "@/components/projects/KanbanBoard";
 import { TaskTable } from "@/components/projects/TaskTable";
 import { AddTaskModal } from "@/components/projects/AddTaskModal";
 import { ProjectFiltersBar } from "@/components/projects/ProjectFilters";
 import { useTasks } from "@/hooks/useProjects";
+import { useTeams, useTeam } from "@/hooks/useTeams";
 import { cn } from "@/lib/utils";
 import type { ProjectFilters } from "@/types/project";
 
@@ -19,6 +20,8 @@ const EMPTY_FILTERS: ProjectFilters = {
   date_filter: "",
   date_from: "",
   date_to: "",
+  team_id: "",
+  member_id: "",
 };
 
 type ViewMode = "kanban" | "table";
@@ -26,13 +29,35 @@ type ViewMode = "kanban" | "table";
 export default function ProjectsPage() {
   const [view, setView]         = useState<ViewMode>("kanban");
   const [addOpen, setAddOpen]   = useState(false);
-  const [filters, setFilters]   = useState<ProjectFilters>(EMPTY_FILTERS);
+  // Initialise team_id from the ?team_id= URL param (client-only initializer
+  // avoids the useSearchParams Suspense requirement).
+  const [filters, setFilters]   = useState<ProjectFilters>(() => {
+    if (typeof window !== "undefined") {
+      const tid = new URLSearchParams(window.location.search).get("team_id");
+      if (tid) return { ...EMPTY_FILTERS, team_id: tid };
+    }
+    return EMPTY_FILTERS;
+  });
+
+  // Teams the current user belongs to
+  const { data: teams = [] } = useTeams();
+  // Enriched detail (members + my_role) for the selected team
+  const { data: teamDetail } = useTeam(filters.team_id || "");
 
   const { data: tasks = [], isLoading } = useTasks(filters);
 
   function patchFilter(patch: Partial<ProjectFilters>) {
     setFilters(prev => ({ ...prev, ...patch }));
   }
+
+  // Only leaders / admins can browse other members' tasks
+  const canFilterByMember =
+    teamDetail?.my_role === "leader" || teamDetail?.my_role === "admin";
+
+  const memberOptions = useMemo(
+    () => (teamDetail?.members ?? []).map(m => ({ id: m.user_id, name: m.name || m.email })),
+    [teamDetail]
+  );
 
   const totalByStatus = {
     pending:           tasks.filter(t => t.status === "pending").length,
@@ -83,6 +108,52 @@ export default function ProjectsPage() {
         </div>
       </div>
 
+      {/* Team + member scope selectors */}
+      {teams.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/20 px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <Users className="size-4 text-muted-foreground" />
+            <select
+              value={filters.team_id || ""}
+              onChange={e => patchFilter({ team_id: e.target.value, member_id: "" })}
+              className="rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition min-w-[160px]"
+            >
+              <option value="">All my tasks</option>
+              {teams.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Member selector — only for leaders / admins of the selected team */}
+          {filters.team_id && canFilterByMember && (
+            <div className="flex items-center gap-2">
+              <UserRound className="size-4 text-muted-foreground" />
+              <select
+                value={filters.member_id || ""}
+                onChange={e => patchFilter({ member_id: e.target.value })}
+                className="rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition min-w-[160px]"
+              >
+                <option value="">All members</option>
+                {memberOptions.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {filters.team_id && (
+            <span className="text-xs text-muted-foreground ml-auto">
+              {teamDetail?.my_role === "leader"
+                ? "Viewing team tasks (you're a leader)"
+                : teamDetail?.my_role === "admin"
+                ? "Viewing team tasks (admin)"
+                : "Viewing your tasks in this team"}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Filters bar */}
       <ProjectFiltersBar
         filters={filters}
@@ -109,6 +180,7 @@ export default function ProjectsPage() {
       <AddTaskModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
+        defaultTeamId={filters.team_id || ""}
       />
     </div>
   );

@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Calendar, GripVertical, Trash2 } from "lucide-react";
+import { AlertTriangle, Calendar, GripVertical, Paperclip, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
 import type { Task, TaskStatus } from "@/types/project";
-import { COLUMNS, PRIORITY_META } from "@/types/project";
+import { COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
 
 interface Props {
   task: Task;
@@ -37,10 +37,9 @@ export function KanbanCard({ task, overlay = false }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const meta = PRIORITY_META[task.priority];
-  const isOverdue =
-    task.due_date &&
-    new Date(task.due_date) < new Date() &&
-    task.status !== "currently_working";
+  const isOverdue = isTaskOverdue(task);
+  const attachmentCount = task.attachments?.length ?? 0;
+  const assignee = assigneeLabel(task);
 
   function handleStatusChange(s: TaskStatus) {
     updateTask.mutate({ id: task.id, payload: { status: s } });
@@ -71,15 +70,25 @@ export function KanbanCard({ task, overlay = false }: Props) {
         "cursor-grab active:cursor-grabbing transition-shadow duration-150",
         overlay
           ? "shadow-2xl rotate-[1.5deg] scale-[1.04] ring-2 ring-primary/30 cursor-grabbing"
-          : "hover:shadow-md hover:border-primary/20"
+          : "hover:shadow-md hover:border-primary/20",
+        // Overdue tasks get a red border + subtle red wash
+        isOverdue && !overlay &&
+          "border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20 hover:border-red-400"
       )}
     >
       {/* Priority badge + grip icon (visual only — listeners are on the outer div) */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <GripVertical className="mt-0.5 size-4 shrink-0 text-muted-foreground/25 pointer-events-none" />
-        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", meta.color)}>
-          {meta.label}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {isOverdue && (
+            <span className="flex items-center gap-0.5 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:bg-red-900/50 dark:text-red-400">
+              <AlertTriangle className="size-2.5" /> Overdue
+            </span>
+          )}
+          <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", meta.color)}>
+            {meta.label}
+          </span>
+        </div>
       </div>
 
       {/* Title */}
@@ -98,12 +107,12 @@ export function KanbanCard({ task, overlay = false }: Props) {
       <div className="flex items-center justify-between pl-6 mt-2 gap-2">
         <div className="flex items-center gap-2 min-w-0">
           {/* Assignee avatar */}
-          {task.assigned_to && (
+          {assignee && (
             <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
               <div className="flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[9px]">
-                {task.assigned_to[0]?.toUpperCase()}
+                {assignee[0]?.toUpperCase()}
               </div>
-              <span className="truncate max-w-[60px]">{task.assigned_to}</span>
+              <span className="truncate max-w-[60px]">{assignee}</span>
             </div>
           )}
 
@@ -111,13 +120,21 @@ export function KanbanCard({ task, overlay = false }: Props) {
           {task.due_date && (
             <div className={cn(
               "flex items-center gap-0.5 text-[10px]",
-              isOverdue ? "text-red-500" : "text-muted-foreground"
+              isOverdue ? "text-red-500 font-semibold" : "text-muted-foreground"
             )}>
               <Calendar className="size-3" />
               {new Date(task.due_date).toLocaleDateString("en-GB", {
                 day: "numeric",
                 month: "short",
               })}
+            </div>
+          )}
+
+          {/* Attachments count */}
+          {attachmentCount > 0 && (
+            <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+              <Paperclip className="size-3" />
+              {attachmentCount}
             </div>
           )}
         </div>
