@@ -134,6 +134,11 @@ async def list_my_teams(
     for d in docs:
         t = _serialize_team(d)
         t["member_count"] = len(d.get("members", []))
+        tid = str(d["_id"])
+        t["task_count"] = await db["project_tasks"].count_documents({"team_id": tid})
+        t["done_count"] = await db["project_tasks"].count_documents(
+            {"team_id": tid, "status": "currently_working"}
+        )
         # Caller's role in this team
         for m in d.get("members", []):
             if m["user_id"] == uid:
@@ -184,6 +189,14 @@ async def get_team(
 
     t = _serialize_team(team)
     t["members"] = await _enrich_members(db, team.get("members", []))
+
+    # Caller's role in this team (drives frontend UI: member selector, scope note)
+    my_role = "admin" if _is_admin(current_user) else "member"
+    for m in team.get("members", []):
+        if m["user_id"] == uid:
+            my_role = m["role"]
+            break
+    t["my_role"] = my_role
 
     # Task stats for the team
     task_count = await db["project_tasks"].count_documents({"team_id": team_id})

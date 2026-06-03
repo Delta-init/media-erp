@@ -73,7 +73,7 @@ export function useTeams() {
   return useQuery({
     queryKey: QK.list,
     queryFn: async () => {
-      const { data } = await api.get<{ success: boolean; data: Team[] }>("/api/v1/teams");
+      const { data } = await api.get<{ success: boolean; data: Team[] }>("/teams");
       return data.data;
     },
   });
@@ -83,7 +83,7 @@ export function useTeam(teamId: string) {
   return useQuery({
     queryKey: QK.detail(teamId),
     queryFn: async () => {
-      const { data } = await api.get<{ success: boolean; data: Team }>(`/api/v1/teams/${teamId}`);
+      const { data } = await api.get<{ success: boolean; data: Team }>(`/teams/${teamId}`);
       return data.data;
     },
     enabled: !!teamId,
@@ -95,7 +95,7 @@ export function useMemberReport(teamId: string, userId: string) {
     queryKey: QK.report(teamId, userId),
     queryFn: async () => {
       const { data } = await api.get<{ success: boolean; data: MemberReport }>(
-        `/api/v1/teams/${teamId}/members/${userId}/report`
+        `/teams/${teamId}/members/${userId}/report`
       );
       return data.data;
     },
@@ -107,7 +107,7 @@ export function useCreateTeam() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: { name: string; description?: string; color?: string }) => {
-      const { data } = await api.post<{ success: boolean; data: Team }>("/api/v1/teams", payload);
+      const { data } = await api.post<{ success: boolean; data: Team }>("/teams", payload);
       return data.data;
     },
     onSuccess() {
@@ -124,7 +124,7 @@ export function useUpdateTeam(teamId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: { name?: string; description?: string; color?: string }) => {
-      const { data } = await api.put<{ success: boolean; data: Team }>(`/api/v1/teams/${teamId}`, payload);
+      const { data } = await api.put<{ success: boolean; data: Team }>(`/teams/${teamId}`, payload);
       return data.data;
     },
     onSuccess() {
@@ -142,7 +142,7 @@ export function useDeleteTeam() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (teamId: string) => {
-      await api.delete(`/api/v1/teams/${teamId}`);
+      await api.delete(`/teams/${teamId}`);
     },
     onSuccess() {
       qc.invalidateQueries({ queryKey: QK.list });
@@ -158,7 +158,7 @@ export function useAddTeamMember(teamId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: { user_id: string; role: "member" | "leader" }) => {
-      const { data } = await api.post(`/api/v1/teams/${teamId}/members`, payload);
+      const { data } = await api.post(`/teams/${teamId}/members`, payload);
       return data;
     },
     onSuccess() {
@@ -177,7 +177,7 @@ export function useRemoveTeamMember(teamId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (userId: string) => {
-      await api.delete(`/api/v1/teams/${teamId}/members/${userId}`);
+      await api.delete(`/teams/${teamId}/members/${userId}`);
     },
     onSuccess() {
       qc.invalidateQueries({ queryKey: QK.detail(teamId) });
@@ -195,7 +195,7 @@ export function useUpdateMemberRole(teamId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: "member" | "leader" }) => {
-      const { data } = await api.put(`/api/v1/teams/${teamId}/members/${userId}/role`, { role });
+      const { data } = await api.put(`/teams/${teamId}/members/${userId}/role`, { role });
       return data;
     },
     onSuccess() {
