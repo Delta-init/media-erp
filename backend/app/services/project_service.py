@@ -33,6 +33,10 @@ async def list_tasks(
     date_filter: str = "",        # today|this_week|this_month|this_year|custom
     date_from: str = "",
     date_to: str = "",
+    team_id: str = "",
+    # Visibility: "all" (admin), "team" (leader sees team tasks), "own" (member sees own only)
+    visibility: str = "all",
+    user_id: str = "",
 ) -> list[dict]:
     query: dict[str, Any] = {}
 
@@ -47,6 +51,16 @@ async def list_tasks(
 
     if priority and priority in VALID_PRIORITIES:
         query["priority"] = priority
+
+    # Team filter
+    if team_id:
+        query["team_id"] = team_id
+
+    # Visibility filter (role-based)
+    if visibility == "own" and user_id:
+        query["assigned_to"] = user_id
+    # "team" visibility is already handled by team_id filter above (leader sees all team tasks)
+    # "all" = no additional filter (admin)
 
     # Date filtering on created_at
     now = datetime.now(timezone.utc)
@@ -87,6 +101,7 @@ async def create_task(db: AsyncIOMotorDatabase, data: dict) -> dict:
         "status": data.get("status", "pending"),
         "assigned_to": data.get("assigned_to", ""),
         "due_date": data.get("due_date"),
+        "team_id": data.get("team_id") or None,
         "created_by": data.get("created_by", ""),
         "created_at": now,
         "updated_at": now,

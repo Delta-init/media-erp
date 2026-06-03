@@ -53,6 +53,7 @@ from app.routers import api_keys as api_keys_router
 from app.routers import analytics as analytics_router
 from app.routers import custom_metrics as custom_metrics_router
 from app.routers import fx as fx_router
+from app.routers import teams as teams_router
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.utils.response import success_response
 
@@ -126,6 +127,7 @@ app.include_router(api_keys_router.router)
 app.include_router(analytics_router.router)
 app.include_router(custom_metrics_router.router)
 app.include_router(fx_router.router)
+app.include_router(teams_router.router)
 
 # Serve uploaded files at /uploads/<filename>
 # These are publicly reachable via ngrok so Instagram can fetch images.

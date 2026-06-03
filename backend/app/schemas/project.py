@@ -9,6 +9,7 @@ class CreateTaskRequest(BaseModel):
     status: str = "pending"           # pending | upcoming | currently_working | updation_needed
     assigned_to: Optional[str] = ""
     due_date: Optional[str] = None    # ISO date string YYYY-MM-DD
+    team_id: Optional[str] = None     # optional team association
 
 
 class UpdateTaskRequest(BaseModel):
@@ -18,3 +19,4 @@ class UpdateTaskRequest(BaseModel):
     status: Optional[str] = None
     assigned_to: Optional[str] = None
     due_date: Optional[str] = None
+    team_id: Optional[str] = None

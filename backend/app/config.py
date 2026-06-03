@@ -25,7 +25,12 @@ class Settings(BaseSettings):
 
     encryption_key: str = "0" * 64  # 32-byte hex placeholder
 
-    # Ollama (local AI — no API key needed)
+    # AI — Gemini is used when GEMINI_API_KEY is set (recommended for production).
+    # Ollama is the fallback for local/offline setups.
+    gemini_api_key: str = ""
+    gemini_model:   str = "gemini-1.5-flash"   # fast + cheap; override with gemini-1.5-pro
+
+    # Ollama (local AI — no API key needed, requires `ollama serve` on the server)
     ollama_base_url: str = "http://localhost:11434"
     ollama_model:    str = "llama3.2:3b"
 
