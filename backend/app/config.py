@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from pydantic import model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings
 
 # Resolve .env relative to this file so it works regardless of where uvicorn is launched from >>
@@ -93,7 +93,11 @@ class Settings(BaseSettings):
     r2_account_id:        str = ""
     r2_access_key_id:     str = ""
     r2_secret_access_key: str = ""
-    r2_bucket:            str = ""
+    # Accept either R2_BUCKET or R2_BUCKET_NAME from the environment
+    r2_bucket:            str = Field(
+        default="",
+        validation_alias=AliasChoices("r2_bucket", "r2_bucket_name"),
+    )
     # Public base URL for the bucket (R2 public dev URL or custom domain), e.g.
     #   https://pub-xxxx.r2.dev   or   https://files.yourdomain.com
     r2_public_url:        str = ""
