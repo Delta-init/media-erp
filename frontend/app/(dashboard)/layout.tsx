@@ -9,12 +9,6 @@ import { Header } from "@/components/layout/Header";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { useOnboardingStatus, useCompleteOnboarding } from "@/hooks/useAuth";
 
-const pageVariants = {
-  initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
-  exit:    { opacity: 0, y: -6, transition: { duration: 0.15, ease: "easeIn" } },
-};
-
 export default function DashboardLayout({
   children,
 }: {
@@ -60,18 +54,17 @@ export default function DashboardLayout({
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
 
-        <AnimatePresence mode="wait">
-          <motion.main
-            key={pathname}
-            variants={pageVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            className="flex-1 overflow-y-auto p-6"
-          >
-            {children}
-          </motion.main>
-        </AnimatePresence>
+        {/* Keyed mount animation only — no exit-wait, so client navigations
+            always render the new page immediately (no "needs reload" bug). */}
+        <motion.main
+          key={pathname}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+          className="flex-1 overflow-y-auto p-6"
+        >
+          {children}
+        </motion.main>
       </div>
 
       {/* Onboarding wizard overlay */}
