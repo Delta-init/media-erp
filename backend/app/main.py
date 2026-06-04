@@ -93,6 +93,10 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.allowed_origins.split(",")],
+    # In dev, accept any localhost / 127.0.0.1 port so the frontend works no
+    # matter which port Next picks (3000/3001/…) or whether it's served from
+    # localhost vs 127.0.0.1. Production origins still come from ALLOWED_ORIGINS.
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
