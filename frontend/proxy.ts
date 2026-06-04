@@ -21,5 +21,8 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Exclude API routes (`/api/*`) so the auth gate never intercepts the
+  // backend proxy — otherwise login/register requests get 307-redirected to
+  // /login and never reach the API.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/).*)"],
 };
