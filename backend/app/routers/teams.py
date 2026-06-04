@@ -150,6 +150,37 @@ async def list_my_teams(
     return success_response(data=teams, message="Teams retrieved")
 
 
+@router.get("/users")
+async def list_assignable_users(
+    search: str = "",
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Minimal directory of users for building teams (leader/member pickers).
+    Available to any authenticated user so team leaders can add members even
+    without the global users:view permission. Returns only non-sensitive fields.
+    """
+    query: dict = {}
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+        ]
+    docs = await db["users"].find(
+        query, {"name": 1, "email": 1, "designation": 1, "avatar": 1, "status": 1}
+    ).sort("name", 1).to_list(500)
+    users = [{
+        "id":          str(u["_id"]),
+        "name":        u.get("name", ""),
+        "email":       u.get("email", ""),
+        "designation": u.get("designation", ""),
+        "avatar":      u.get("avatar", ""),
+        "status":      u.get("status", "active"),
+    } for u in docs]
+    return success_response(data=users, message="Users retrieved")
+
+
 @router.post("", status_code=201)
 async def create_team(
     body: CreateTeamRequest,
@@ -158,12 +189,43 @@ async def create_team(
 ):
     uid = str(current_user["_id"])
     now = datetime.now(timezone.utc)
+
+    # Validate the selected ids against real users
+    requested = [i for i in (body.leader_ids + body.member_ids) if ObjectId.is_valid(i)]
+    valid_ids: set[str] = set()
+    if requested:
+        found = await db["users"].find(
+            {"_id": {"$in": [ObjectId(i) for i in requested]}}, {"_id": 1}
+        ).to_list(500)
+        valid_ids = {str(u["_id"]) for u in found}
+
+    members: list[dict] = []
+    seen: set[str] = set()
+    for lid in body.leader_ids:
+        if lid in valid_ids and lid not in seen:
+            members.append({"user_id": lid, "role": "leader", "joined_at": now})
+            seen.add(lid)
+    for mid in body.member_ids:
+        if mid in valid_ids and mid not in seen:
+            members.append({"user_id": mid, "role": "member", "joined_at": now})
+            seen.add(mid)
+
+    # Guarantee at least one leader — fall back to the creator
+    if not any(m["role"] == "leader" for m in members):
+        if uid in seen:
+            for m in members:
+                if m["user_id"] == uid:
+                    m["role"] = "leader"
+        else:
+            members.insert(0, {"user_id": uid, "role": "leader", "joined_at": now})
+
     doc = {
         "name":        body.name.strip(),
         "description": body.description or "",
         "color":       body.color or "#6366f1",
+        "status":      body.status or "active",
         "created_by":  uid,
-        "members": [{"user_id": uid, "role": "leader", "joined_at": now}],
+        "members":     members,
         "created_at":  now,
         "updated_at":  now,
     }

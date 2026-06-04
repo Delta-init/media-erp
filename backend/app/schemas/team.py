@@ -6,12 +6,16 @@ class CreateTeamRequest(BaseModel):
     name: str
     description: Optional[str] = ""
     color: Optional[str] = "#6366f1"   # indigo default
+    status: Optional[str] = "active"   # active | inactive
+    leader_ids: list[str] = []         # users to add as Team Leaders
+    member_ids: list[str] = []         # users to add as Team Members
 
 
 class UpdateTeamRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     color: Optional[str] = None
+    status: Optional[str] = None
 
 
 class AddMemberRequest(BaseModel):

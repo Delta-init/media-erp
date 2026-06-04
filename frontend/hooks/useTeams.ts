@@ -21,6 +21,7 @@ export interface Team {
   name: string;
   description: string;
   color: string;
+  status?: "active" | "inactive";
   created_by: string;
   members: TeamMember[];
   member_count: number;
@@ -29,6 +30,15 @@ export interface Team {
   my_role?: "leader" | "member" | "admin";
   created_at: string;
   updated_at: string;
+}
+
+export interface AssignableUser {
+  id: string;
+  name: string;
+  email: string;
+  designation: string;
+  avatar?: string;
+  status: string;
 }
 
 export interface MemberReport {
@@ -90,6 +100,19 @@ export function useTeam(teamId: string) {
   });
 }
 
+export function useAssignableUsers() {
+  return useQuery({
+    queryKey: ["teams", "assignable-users"],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: AssignableUser[] }>(
+        "/teams/users"
+      );
+      return data.data;
+    },
+    staleTime: 60_000,
+  });
+}
+
 export function useMemberReport(teamId: string, userId: string) {
   return useQuery({
     queryKey: QK.report(teamId, userId),
@@ -106,7 +129,14 @@ export function useMemberReport(teamId: string, userId: string) {
 export function useCreateTeam() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { name: string; description?: string; color?: string }) => {
+    mutationFn: async (payload: {
+      name: string;
+      description?: string;
+      color?: string;
+      status?: "active" | "inactive";
+      leader_ids?: string[];
+      member_ids?: string[];
+    }) => {
       const { data } = await api.post<{ success: boolean; data: Team }>("/teams", payload);
       return data.data;
     },

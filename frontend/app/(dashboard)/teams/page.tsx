@@ -10,9 +10,10 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  useTeams, useCreateTeam, useDeleteTeam,
+  useTeams, useCreateTeam, useDeleteTeam, useAssignableUsers,
   type Team,
 } from "@/hooks/useTeams";
+import { UserPicker } from "@/components/teams/UserPicker";
 
 // ── Colour palette for teams ──────────────────────────────────────────────────
 
@@ -28,12 +29,29 @@ function CreateTeamModal({ onClose }: { onClose: () => void }) {
   const [name, setName]               = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor]             = useState(TEAM_COLORS[0]);
+  const [status, setStatus]           = useState<"active" | "inactive">("active");
+  const [leaderIds, setLeaderIds]     = useState<string[]>([]);
+  const [memberIds, setMemberIds]     = useState<string[]>([]);
+
   const create = useCreateTeam();
+  const { data: users = [], isLoading: usersLoading } = useAssignableUsers();
+
+  function toggle(list: string[], setList: (v: string[]) => void, id: string) {
+    setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    await create.mutateAsync({ name: name.trim(), description, color });
+    await create.mutateAsync({
+      name: name.trim(),
+      description,
+      color,
+      status,
+      leader_ids: leaderIds,
+      // a user picked as leader shouldn't also be a plain member
+      member_ids: memberIds.filter((id) => !leaderIds.includes(id)),
+    });
     onClose();
   }
 
@@ -43,76 +61,110 @@ function CreateTeamModal({ onClose }: { onClose: () => void }) {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="w-full max-w-md rounded-2xl border bg-card shadow-2xl overflow-hidden"
+        className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl border bg-card shadow-2xl overflow-hidden"
       >
-        <div className="flex items-center justify-between border-b px-6 py-4">
+        <div className="flex items-center justify-between border-b px-6 py-4 shrink-0">
           <h2 className="text-base font-semibold">Create Team</h2>
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
             <X className="size-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {/* Preview chip */}
-          <div className="flex items-center gap-3">
-            <div
-              className="size-12 rounded-xl flex items-center justify-center shadow-md text-white font-bold text-lg"
-              style={{ background: color }}
-            >
-              {name.trim().charAt(0).toUpperCase() || "T"}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
+          <div className="p-6 space-y-5 overflow-y-auto">
+            {/* Team Name */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Team Name *</label>
+              <Input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Sales North"
+                required
+              />
             </div>
-            <div>
-              <p className="font-medium text-sm">{name.trim() || "Team name"}</p>
-              <p className="text-xs text-muted-foreground">{description || "No description"}</p>
+
+            {/* Description */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Description</label>
+              <Input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Optional team description"
+              />
+            </div>
+
+            {/* Status + Colour */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Status</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as "active" | "inactive")}
+                  className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-1.5">
+                  <Palette className="size-3.5" /> Colour
+                </label>
+                <div className="flex gap-1.5 flex-wrap pt-1.5">
+                  {TEAM_COLORS.slice(0, 8).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setColor(c)}
+                      className="size-5 rounded-full transition-all hover:scale-110"
+                      style={{ background: c, boxShadow: color === c ? `0 0 0 2px white, 0 0 0 4px ${c}` : "none" }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Team Leaders */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium flex items-center gap-1.5">
+                <Crown className="size-3.5 text-amber-500" /> Team Leaders (Managers)
+              </label>
+              <UserPicker
+                users={users}
+                selectedIds={leaderIds}
+                onToggle={(id) => {
+                  toggle(leaderIds, setLeaderIds, id);
+                  // if promoted to leader, drop from members
+                  setMemberIds((m) => m.filter((x) => x !== id));
+                }}
+                loading={usersLoading}
+                placeholder="Search users..."
+              />
+            </div>
+
+            {/* Team Members */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium flex items-center gap-1.5">
+                <User className="size-3.5" /> Team Members
+              </label>
+              <UserPicker
+                users={users}
+                selectedIds={memberIds}
+                onToggle={(id) => toggle(memberIds, setMemberIds, id)}
+                excludeIds={leaderIds}
+                loading={usersLoading}
+                placeholder="Search users..."
+              />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Team Name *</label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Marketing Squad"
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Description</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this team work on?"
-              rows={2}
-              className="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium flex items-center gap-1.5">
-              <Palette className="size-3.5" /> Colour
-            </label>
-            <div className="flex gap-2 flex-wrap">
-              {TEAM_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  className="size-7 rounded-full transition-all hover:scale-110"
-                  style={{
-                    background: c,
-                    boxShadow: color === c ? `0 0 0 3px white, 0 0 0 5px ${c}` : "none",
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="flex gap-3 pt-2">
-            <Button type="button" variant="outline" onClick={onClose} className="flex-1">
+          {/* Footer */}
+          <div className="flex justify-end gap-3 border-t px-6 py-4 shrink-0">
+            <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!name.trim() || create.isPending} className="flex-1">
+            <Button type="submit" disabled={!name.trim() || create.isPending}>
               {create.isPending ? <Loader2 className="size-4 animate-spin mr-2" /> : <Plus className="size-4 mr-2" />}
               Create Team
             </Button>

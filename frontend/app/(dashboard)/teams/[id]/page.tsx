@@ -13,9 +13,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   useTeam, useAddTeamMember, useRemoveTeamMember,
-  useUpdateMemberRole, useUpdateTeam,
+  useUpdateMemberRole, useUpdateTeam, useAssignableUsers,
   type TeamMember,
 } from "@/hooks/useTeams";
+import { UserPicker } from "@/components/teams/UserPicker";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,14 +57,22 @@ function AddMemberModal({ teamId, existingIds, onClose }: {
   existingIds: string[];
   onClose: () => void;
 }) {
-  const [userId, setUserId] = useState("");
-  const [role, setRole]     = useState<"member" | "leader">("member");
+  const [role, setRole]           = useState<"member" | "leader">("member");
+  const [selectedIds, setSelected] = useState<string[]>([]);
   const add = useAddTeamMember(teamId);
+  const { data: users = [], isLoading } = useAssignableUsers();
+
+  function toggle(id: string) {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!userId.trim()) return;
-    await add.mutateAsync({ user_id: userId.trim(), role });
+    if (selectedIds.length === 0) return;
+    // Add each selected user with the chosen role
+    for (const uid of selectedIds) {
+      await add.mutateAsync({ user_id: uid, role });
+    }
     onClose();
   }
 
@@ -73,50 +82,56 @@ function AddMemberModal({ teamId, existingIds, onClose }: {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
-        className="w-full max-w-sm rounded-2xl border bg-card shadow-2xl overflow-hidden"
+        className="w-full max-w-md max-h-[90vh] flex flex-col rounded-2xl border bg-card shadow-2xl overflow-hidden"
       >
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <h2 className="text-sm font-semibold">Add Member</h2>
+        <div className="flex items-center justify-between border-b px-5 py-4 shrink-0">
+          <h2 className="text-sm font-semibold">Add Members</h2>
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
             <X className="size-4" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">User ID</label>
-            <Input
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              placeholder="Paste user ID…"
-              required
-            />
-            <p className="text-[11px] text-muted-foreground">
-              Go to Users → click a user → copy their ID from the URL.
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Role</label>
-            <div className="flex gap-2">
-              {(["member", "leader"] as const).map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => setRole(r)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium transition-all ${
-                    role === r ? "border-primary bg-primary/5 text-primary" : "hover:border-muted-foreground/40"
-                  }`}
-                >
-                  {r === "leader" ? <Crown className="size-3.5" /> : <User className="size-3.5" />}
-                  {r.charAt(0).toUpperCase() + r.slice(1)}
-                </button>
-              ))}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0 flex-1">
+          <div className="p-5 space-y-4 overflow-y-auto">
+            {/* Role */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Add as</label>
+              <div className="flex gap-2">
+                {(["member", "leader"] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setRole(r)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium transition-all ${
+                      role === r ? "border-primary bg-primary/5 text-primary" : "hover:border-muted-foreground/40"
+                    }`}
+                  >
+                    {r === "leader" ? <Crown className="size-3.5" /> : <User className="size-3.5" />}
+                    {r === "leader" ? "Team Leader" : "Team Member"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* User picker */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Select users</label>
+              <UserPicker
+                users={users}
+                selectedIds={selectedIds}
+                onToggle={toggle}
+                excludeIds={existingIds}
+                loading={isLoading}
+                maxHeightClass="max-h-64"
+                placeholder="Search users..."
+              />
             </div>
           </div>
-          <div className="flex gap-3 pt-1">
-            <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
-            <Button type="submit" disabled={!userId.trim() || add.isPending} className="flex-1">
+
+          <div className="flex justify-end gap-3 border-t px-5 py-4 shrink-0">
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={selectedIds.length === 0 || add.isPending}>
               {add.isPending ? <Loader2 className="size-4 animate-spin mr-1.5" /> : <Plus className="size-4 mr-1.5" />}
-              Add
+              Add {selectedIds.length > 0 ? selectedIds.length : ""} {role === "leader" ? "Leader" : "Member"}{selectedIds.length !== 1 ? "s" : ""}
             </Button>
           </div>
         </form>
