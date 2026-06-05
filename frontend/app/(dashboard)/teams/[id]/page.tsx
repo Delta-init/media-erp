@@ -9,6 +9,7 @@ import {
   CheckCircle2, Clock, AlertCircle, BarChart3,
   MessageCircle, Settings,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -69,10 +70,20 @@ function AddMemberModal({ teamId, existingIds, onClose }: {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (selectedIds.length === 0) return;
-    // Add each selected user with the chosen role
+    // Add each selected user independently — one failure (e.g. already a
+    // member) shouldn't abort the rest.
+    let added = 0;
+    let skipped = 0;
     for (const uid of selectedIds) {
-      await add.mutateAsync({ user_id: uid, role });
+      try {
+        await add.mutateAsync({ user_id: uid, role });
+        added++;
+      } catch {
+        skipped++;
+      }
     }
+    if (added > 0) toast.success(`${added} member${added !== 1 ? "s" : ""} added`);
+    if (skipped > 0) toast.error(`${skipped} skipped (already in this team)`);
     onClose();
   }
 

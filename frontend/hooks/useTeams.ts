@@ -191,14 +191,10 @@ export function useAddTeamMember(teamId: string) {
       const { data } = await api.post(`/teams/${teamId}/members`, payload);
       return data;
     },
+    // No per-item toast — callers may add several at once and show a summary.
     onSuccess() {
       qc.invalidateQueries({ queryKey: QK.detail(teamId) });
-      toast.success("Member added");
-    },
-    onError(err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        || "Failed to add member";
-      toast.error(msg);
+      qc.invalidateQueries({ queryKey: QK.list });
     },
   });
 }

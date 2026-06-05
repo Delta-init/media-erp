@@ -341,16 +341,23 @@ async def add_member(
     if body.user_id in existing_ids:
         return error_response("User is already a member of this team", status_code=409)
 
-    new_member = {"user_id": body.user_id, "role": body.role, "joined_at": datetime.now(timezone.utc)}
+    now = datetime.now(timezone.utc)
+    new_member = {"user_id": body.user_id, "role": body.role, "joined_at": now}
     try:
         oid = ObjectId(team_id)
     except InvalidId:
         return error_response("Invalid team ID", status_code=422)
     await db["teams"].update_one(
         {"_id": oid},
-        {"$push": {"members": new_member}, "$set": {"updated_at": datetime.now(timezone.utc)}}
+        {"$push": {"members": new_member}, "$set": {"updated_at": now}}
     )
-    return success_response(data=new_member, message="Member added", status_code=201)
+    # Return a JSON-safe payload (datetime → isoformat) — a raw datetime here
+    # causes a 500 during JSON serialization.
+    return success_response(
+        data={"user_id": body.user_id, "role": body.role, "joined_at": now.isoformat()},
+        message="Member added",
+        status_code=201,
+    )
 
 
 @router.delete("/{team_id}/members/{user_id}", status_code=204)
