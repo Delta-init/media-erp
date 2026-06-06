@@ -28,7 +28,9 @@ export function RoleDialog({ open, onClose, role }: Props) {
     if (role) {
       setName(role.role_name);
       setDesc(role.description);
-      setPerms(role.permissions as Record<string, ModulePermissions>);
+      // Merge with defaults so newly-added modules (e.g. teams) appear even on
+      // older roles whose stored permissions predate them.
+      setPerms({ ...emptyPermissions(), ...(role.permissions as Record<string, ModulePermissions>) });
     } else {
       setName("");
       setDesc("");

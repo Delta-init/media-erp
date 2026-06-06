@@ -49,7 +49,7 @@ const NAV_ITEMS = [
   { label: "Rules",         href: "/rules",         icon: Zap },
   { label: "Email Reports", href: "/email-reports",  icon: Mail },
   { label: "Projects",      href: "/projects",      icon: Kanban,          module: "projects" },
-  { label: "Teams",         href: "/teams",         icon: UsersRound },
+  { label: "Teams",         href: "/teams",         icon: UsersRound,      module: "teams" },
   { label: "AI Queries", href: "/ai",         icon: Sparkles,        module: "ai" },
   { label: "Publish",    href: "/social",     icon: Share2 },
   { label: "Send DM",    href: "/social/dm",  icon: Send },

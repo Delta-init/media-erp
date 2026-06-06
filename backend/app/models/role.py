@@ -9,6 +9,7 @@ MODULES = [
     "reports",
     "campaigns",
     "projects",
+    "teams",
     "ai",
     "users",
     "roles",
@@ -31,7 +32,7 @@ def all_permissions() -> dict:
 def viewer_permissions() -> dict:
     """Only view=true for non-admin modules."""
     perms = default_permissions()
-    for m in ["dashboard", "reports", "campaigns", "projects", "ai"]:
+    for m in ["dashboard", "reports", "campaigns", "projects", "teams", "ai"]:
         perms[m]["view"] = True
     return perms
 
@@ -50,6 +51,10 @@ def manager_permissions() -> dict:
     perms["projects"]["create"] = True
     perms["projects"]["edit"] = True
     perms["projects"]["delete"] = True
+    perms["teams"]["view"] = True
+    perms["teams"]["create"] = True
+    perms["teams"]["edit"] = True
+    perms["teams"]["delete"] = True
     perms["ai"]["view"] = True
     perms["ai"]["create"] = True
     perms["users"]["view"] = True
