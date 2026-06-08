@@ -113,6 +113,7 @@ async def add_task(
 ):
     data = body.model_dump()
     data["created_by"] = str(current_user["_id"])
+    data["status"] = "pending"  # new work always enters the workflow at Pending
     task = await create_task(db, data)
     return success_response(data=task, message="Task created", status_code=201)
 

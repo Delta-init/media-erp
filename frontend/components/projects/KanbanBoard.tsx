@@ -74,14 +74,17 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
           </span>
         </div>
 
-        <button
-          onClick={onAdd}
-          className="rounded-md p-1 opacity-80 hover:opacity-100 hover:bg-white/40 dark:hover:bg-black/25 transition-all"
-          style={s.text}
-          title={`Add task to ${column.label}`}
-        >
-          <Plus className="size-3.5" />
-        </button>
+        {/* New work only enters at Pending — only that column gets a + */}
+        {column.key === "pending" && (
+          <button
+            onClick={onAdd}
+            className="rounded-md p-1 opacity-80 hover:opacity-100 hover:bg-white/40 dark:hover:bg-black/25 transition-all"
+            style={s.text}
+            title="Add task to Pending"
+          >
+            <Plus className="size-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Drop zone — fixed height, scrolls internally with the scrollbar hidden */}

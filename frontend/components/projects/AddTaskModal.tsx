@@ -12,7 +12,6 @@ import { useUploadAttachments } from "@/hooks/useUpload";
 import { useTeams, useTeam } from "@/hooks/useTeams";
 import { useUsersList } from "@/hooks/useUsers";
 import type { TaskPriority, TaskStatus, Attachment } from "@/types/project";
-import { BOARD_COLUMNS } from "@/types/project";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -44,16 +43,10 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
   const [title, setTitle]           = useState("");
   const [description, setDesc]      = useState("");
   const [priority, setPriority]     = useState<TaskPriority>("medium");
-  const [status, setStatus]         = useState<TaskStatus>(defaultStatus);
   const [teamId, setTeamId]         = useState(defaultTeamId);
   const [assignedTo, setAssignedTo] = useState("");
   const [dueDate, setDueDate]       = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-
-  // Fixed Kanban columns
-  const statuses = BOARD_COLUMNS;
-  const statusValid = statuses.some(s => s.key === status);
-  const effectiveStatus = statusValid ? status : statuses[0].key;
 
   // Teams the current user belongs to
   const { data: teams = [] } = useTeams();
@@ -71,7 +64,7 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
 
   function reset() {
     setTitle(""); setDesc(""); setPriority("medium");
-    setStatus(defaultStatus); setTeamId(defaultTeamId);
+    setTeamId(defaultTeamId);
     setAssignedTo(""); setDueDate(""); setAttachments([]);
   }
 
@@ -92,7 +85,7 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
       title: title.trim(),
       description,
       priority,
-      status: effectiveStatus,
+      status: "pending", // new work always enters at Pending
       team_id: teamId || null,
       assigned_to: assignedTo,
       assigned_to_name: assigneeName,
@@ -181,19 +174,14 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
                 </div>
               )}
 
-              {/* Status + Priority row */}
+              {/* Priority (new tasks always start in Pending) */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Status</label>
-                  <select
-                    value={effectiveStatus}
-                    onChange={e => setStatus(e.target.value as TaskStatus)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition"
-                  >
-                    {statuses.map(c => (
-                      <option key={c.key} value={c.key}>{c.label}</option>
-                    ))}
-                  </select>
+                  <label className="text-xs font-medium text-muted-foreground">Starts in</label>
+                  <div className="w-full rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground flex items-center gap-2">
+                    <span className="size-2 rounded-full" style={{ background: "#f59e0b" }} />
+                    Pending
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Priority</label>
