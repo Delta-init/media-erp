@@ -66,7 +66,7 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-5 h-full">
+    <div className="flex flex-col gap-5 h-full min-h-0">
       {/* Page header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -160,20 +160,24 @@ export default function ProjectsPage() {
         onReset={() => setFilters(EMPTY_FILTERS)}
       />
 
-      {/* Content */}
-      {isLoading ? (
-        <div className="flex flex-1 items-center justify-center">
-          <motion.div
-            animate={{ rotate: 360 }}
-            transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
-            className="h-7 w-7 rounded-full border-2 border-primary border-t-transparent"
-          />
-        </div>
-      ) : view === "kanban" ? (
-        <KanbanBoard tasks={tasks} />
-      ) : (
-        <TaskTable tasks={tasks} />
-      )}
+      {/* Content — fills remaining height; scrolls internally (no page scroll) */}
+      <div className="flex-1 min-h-0">
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+              className="h-7 w-7 rounded-full border-2 border-primary border-t-transparent"
+            />
+          </div>
+        ) : view === "kanban" ? (
+          <KanbanBoard tasks={tasks} />
+        ) : (
+          <div className="h-full overflow-auto no-scrollbar">
+            <TaskTable tasks={tasks} />
+          </div>
+        )}
+      </div>
 
       {/* Global Add Modal */}
       <AddTaskModal

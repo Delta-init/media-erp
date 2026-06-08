@@ -56,7 +56,7 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
   const s = statusStyles(column.color);
 
   return (
-    <div className="flex flex-col flex-1 min-w-[220px]">
+    <div className="flex flex-col flex-1 min-w-[200px] h-full min-h-0">
       {/* Header — solid top accent in the column colour */}
       <div
         className="rounded-t-xl border border-b-0 px-3 py-2.5 flex items-center justify-between"
@@ -88,12 +88,12 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
         )}
       </div>
 
-      {/* Drop zone — fixed height, scrolls internally with the scrollbar hidden */}
+      {/* Drop zone — fills the column height, scrolls internally, no scrollbar */}
       <div
         ref={setNodeRef}
         className={cn(
           "no-scrollbar flex flex-col gap-2 rounded-b-xl border border-t-0 p-1.5 transition-colors duration-150",
-          "h-[calc(100dvh-290px)] min-h-[160px] overflow-y-auto overflow-x-hidden",
+          "flex-1 min-h-0 overflow-y-auto overflow-x-hidden",
           isOver ? "ring-2 ring-inset" : ""
         )}
         style={{
@@ -256,8 +256,9 @@ export function KanbanBoard({ tasks }: Props) {
         onDragEnd={onDragEnd}
         onDragCancel={onDragCancel}
       >
-        {/* Equal-width columns fill the board — no horizontal scroll on desktop */}
-        <div className="flex gap-3 pb-2 pt-1 select-none min-w-0">
+        {/* Equal-width columns fill the board; horizontal scroll (hidden bar)
+            only kicks in on very narrow screens. */}
+        <div className="no-scrollbar flex h-full min-h-0 gap-3 pt-1 pb-1 select-none overflow-x-auto">
           {BOARD_COLUMNS.map((col) => (
             <KanbanColumn
               key={col.key}
