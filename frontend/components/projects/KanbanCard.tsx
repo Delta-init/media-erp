@@ -105,49 +105,48 @@ export function KanbanCard({ task, overlay = false }: Props) {
         </p>
       )}
 
-      {/* Meta row */}
-      <div className="flex items-center justify-between pl-6 mt-2 gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          {/* Assignee avatar */}
+      {/* Meta chips — wrap, never overlap */}
+      {(assignee || task.due_date || attachmentCount > 0) && (
+        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 pl-6 mt-2">
+          {/* Assignee */}
           {assignee && (
-            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-              <div className="flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[9px]">
+            <div className="flex items-center gap-1 text-[10px] text-muted-foreground min-w-0">
+              <div className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[9px]">
                 {assignee[0]?.toUpperCase()}
               </div>
-              <span className="truncate max-w-[60px]">{assignee}</span>
+              <span className="truncate max-w-[70px]">{assignee}</span>
             </div>
           )}
 
           {/* Due date */}
           {task.due_date && (
             <div className={cn(
-              "flex items-center gap-0.5 text-[10px]",
+              "flex items-center gap-0.5 text-[10px] shrink-0",
               isOverdue ? "text-red-500 font-semibold" : "text-muted-foreground"
             )}>
               <Calendar className="size-3" />
-              {new Date(task.due_date).toLocaleDateString("en-GB", {
-                day: "numeric",
-                month: "short",
-              })}
+              {new Date(task.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
             </div>
           )}
 
           {/* Attachments count */}
           {attachmentCount > 0 && (
-            <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+            <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0">
               <Paperclip className="size-3" />
               {attachmentCount}
             </div>
           )}
         </div>
+      )}
 
-        {/* Status quick-switch — stopPropagation so pointer-down doesn't start drag */}
+      {/* Status quick-switch on its own row — full width, no overlap */}
+      <div className="pl-6 mt-2">
         <select
           value={task.status}
           onChange={e => handleStatusChange(e.target.value as TaskStatus)}
           onPointerDown={e => e.stopPropagation()}
           onClick={e => e.stopPropagation()}
-          className="rounded-md border-0 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium outline-none cursor-pointer hover:bg-muted transition-colors max-w-[110px]"
+          className="w-full rounded-md border-0 bg-muted/50 px-2 py-1 text-[10px] font-medium outline-none cursor-pointer hover:bg-muted transition-colors"
         >
           {statuses.map(c => (
             <option key={c.id} value={c.key}>{c.label}</option>

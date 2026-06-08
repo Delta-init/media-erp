@@ -23,7 +23,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Pencil, Trash2, Columns3, Loader2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUpdateTask } from "@/hooks/useProjects";
 import { useStatuses, useDeleteStatus } from "@/hooks/useStatuses";
@@ -60,19 +60,19 @@ function KanbanColumn({ status, tasks, isOver, onAdd, onEdit, onDelete, canDelet
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
-    <div className="flex flex-col gap-2 min-w-[272px] w-[272px] shrink-0">
-      {/* Header */}
+    <div className="flex flex-col min-w-[256px] w-[256px] shrink-0">
+      {/* Header — solid accent bar + controls always visible */}
       <div
-        className="group/col rounded-xl border px-3 py-2.5 flex items-center justify-between transition-colors"
-        style={{ ...s.headerBg }}
+        className="rounded-t-xl border border-b-0 px-3 py-2 flex items-center justify-between"
+        style={{ ...s.headerBg, borderTop: `2px solid ${status.color}` }}
       >
         <div className="flex items-center gap-2 min-w-0">
           <span className="size-2.5 rounded-full shrink-0" style={s.dot} />
-          <span className="text-xs font-bold uppercase tracking-wider truncate" style={s.text}>
+          <span className="text-[11px] font-bold uppercase tracking-wider truncate" style={s.text}>
             {status.label}
           </span>
           <span
-            className="flex size-5 items-center justify-center rounded-full text-[10px] font-bold shrink-0"
+            className="flex h-4 min-w-4 px-1 items-center justify-center rounded-full text-[10px] font-bold shrink-0"
             style={s.badgeBg}
           >
             {tasks.length}
@@ -80,10 +80,9 @@ function KanbanColumn({ status, tasks, isOver, onAdd, onEdit, onDelete, canDelet
         </div>
 
         <div className="flex items-center gap-0.5 shrink-0">
-          {/* Edit + delete appear on column hover */}
           <button
             onClick={onEdit}
-            className="rounded-lg p-1 opacity-0 group-hover/col:opacity-100 transition-all hover:bg-white/40 dark:hover:bg-black/20"
+            className="rounded-md p-1 opacity-60 hover:opacity-100 hover:bg-white/40 dark:hover:bg-black/25 transition-all"
             style={s.text}
             title="Edit column"
           >
@@ -96,8 +95,10 @@ function KanbanColumn({ status, tasks, isOver, onAdd, onEdit, onDelete, canDelet
                 else { setConfirmDelete(true); setTimeout(() => setConfirmDelete(false), 2500); }
               }}
               className={cn(
-                "rounded-lg p-1 transition-all hover:bg-white/40 dark:hover:bg-black/20",
-                confirmDelete ? "opacity-100 text-red-600 bg-red-100 dark:bg-red-900/40" : "opacity-0 group-hover/col:opacity-100"
+                "rounded-md p-1 transition-all hover:bg-white/40 dark:hover:bg-black/25",
+                confirmDelete
+                  ? "opacity-100 text-red-600 bg-red-100 dark:bg-red-900/40"
+                  : "opacity-60 hover:opacity-100"
               )}
               style={confirmDelete ? undefined : s.text}
               title={confirmDelete ? "Click again to delete" : "Delete column"}
@@ -107,23 +108,27 @@ function KanbanColumn({ status, tasks, isOver, onAdd, onEdit, onDelete, canDelet
           )}
           <button
             onClick={onAdd}
-            className="rounded-lg p-1 transition-colors hover:bg-white/40 dark:hover:bg-black/20"
+            className="rounded-md p-1 opacity-80 hover:opacity-100 hover:bg-white/40 dark:hover:bg-black/25 transition-all"
             style={s.text}
-            title={`Add to ${status.label}`}
+            title={`Add task to ${status.label}`}
           >
             <Plus className="size-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Drop zone */}
+      {/* Drop zone — fixed height with internal scroll so many cards stay neat */}
       <div
         ref={setNodeRef}
         className={cn(
-          "flex flex-col gap-2 flex-1 min-h-[140px] rounded-xl p-1.5 transition-all duration-150",
-          isOver ? "ring-2 ring-primary/25 ring-offset-1" : ""
+          "flex flex-col gap-2 rounded-b-xl border border-t-0 p-1.5 transition-colors duration-150",
+          "h-[calc(100dvh-300px)] min-h-[160px] overflow-y-auto overflow-x-hidden",
+          isOver ? "ring-2 ring-inset" : ""
         )}
-        style={isOver ? { backgroundColor: `${status.color}14` } : undefined}
+        style={{
+          backgroundColor: isOver ? `${status.color}14` : `${status.color}07`,
+          borderColor: `${status.color}33`,
+        }}
       >
         <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
           <AnimatePresence initial={false}>
@@ -146,10 +151,10 @@ function KanbanColumn({ status, tasks, isOver, onAdd, onEdit, onDelete, canDelet
         {tasks.length === 0 && (
           <div className={cn(
             "flex flex-1 items-center justify-center rounded-lg border border-dashed p-6 transition-colors duration-150",
-            isOver ? "border-primary/40 bg-primary/5" : "border-muted-foreground/20"
+            isOver ? "border-primary/40 bg-primary/5" : "border-muted-foreground/15"
           )}>
-            <p className="text-xs text-muted-foreground/50 text-center whitespace-pre-line">
-              {isOver ? "Drop here" : "Drop tasks here\nor click + to add"}
+            <p className="text-[11px] text-muted-foreground/50 text-center whitespace-pre-line">
+              {isOver ? "Drop here" : "No tasks yet\nclick + to add"}
             </p>
           </div>
         )}
@@ -293,7 +298,7 @@ export function KanbanBoard({ tasks }: Props) {
         onDragEnd={onDragEnd}
         onDragCancel={onDragCancel}
       >
-        <div className="flex gap-4 overflow-x-auto pb-4 pt-1 select-none">
+        <div className="flex gap-3 overflow-x-auto pb-4 pt-1 select-none">
           {statuses.map(col => (
             <KanbanColumn
               key={col.id}
@@ -310,9 +315,11 @@ export function KanbanBoard({ tasks }: Props) {
           {/* Add column */}
           <button
             onClick={openNewColumn}
-            className="flex flex-col items-center justify-center gap-2 min-w-[200px] w-[200px] shrink-0 rounded-xl border-2 border-dashed border-muted-foreground/20 text-muted-foreground/60 hover:border-primary/40 hover:text-primary hover:bg-primary/[0.03] transition-colors min-h-[140px]"
+            className="group flex flex-col items-center justify-center gap-2 min-w-[180px] w-[180px] shrink-0 h-[calc(100dvh-300px)] min-h-[160px] rounded-xl border-2 border-dashed border-muted-foreground/20 text-muted-foreground/50 hover:border-primary/50 hover:text-primary hover:bg-primary/[0.04] transition-colors"
           >
-            <Columns3 className="size-5" />
+            <div className="flex size-9 items-center justify-center rounded-full bg-muted/60 group-hover:bg-primary/10 transition-colors">
+              <Plus className="size-4" />
+            </div>
             <span className="text-xs font-medium">Add Column</span>
           </button>
         </div>
