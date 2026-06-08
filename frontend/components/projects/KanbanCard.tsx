@@ -6,8 +6,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { AlertTriangle, Calendar, GripVertical, Paperclip, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
+import { useCanApprove } from "@/hooks/useCanApprove";
 import type { Task, TaskStatus } from "@/types/project";
-import { PRIORITY_META, isTaskOverdue, assigneeLabel, allowedColumns } from "@/types/project";
+import { BOARD_COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel, allowedColumns } from "@/types/project";
 
 interface Props {
   task: Task;
@@ -34,7 +35,15 @@ export function KanbanCard({ task, overlay = false }: Props) {
 
   const deleteTask = useDeleteTask();
   const updateTask = useUpdateTask();
+  const canApprove = useCanApprove();
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // In Pending Review only a team leader / admin may move the task
+  // (approve or rework). Everyone else sees it locked.
+  const reviewLocked = task.status === "pending_review" && !canApprove(task);
+  const statusOptions = reviewLocked
+    ? BOARD_COLUMNS.filter((c) => c.key === "pending_review")
+    : allowedColumns(task.status);
 
   const meta = PRIORITY_META[task.priority];
   const isOverdue = isTaskOverdue(task);
@@ -144,9 +153,11 @@ export function KanbanCard({ task, overlay = false }: Props) {
           onChange={e => handleStatusChange(e.target.value as TaskStatus)}
           onPointerDown={e => e.stopPropagation()}
           onClick={e => e.stopPropagation()}
-          className="w-full rounded-md border-0 bg-muted/50 px-2 py-1 text-[10px] font-medium outline-none cursor-pointer hover:bg-muted transition-colors"
+          disabled={reviewLocked}
+          title={reviewLocked ? "Only a team leader can approve or rework this" : undefined}
+          className="w-full rounded-md border-0 bg-muted/50 px-2 py-1 text-[10px] font-medium outline-none cursor-pointer hover:bg-muted transition-colors disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {allowedColumns(task.status).map(c => (
+          {statusOptions.map(c => (
             <option key={c.key} value={c.key}>{c.label}</option>
           ))}
         </select>

@@ -30,6 +30,7 @@ import { useUpdateTask } from "@/hooks/useProjects";
 import { KanbanCard } from "./KanbanCard";
 import { AddTaskModal } from "./AddTaskModal";
 import { toast } from "sonner";
+import { useCanApprove } from "@/hooks/useCanApprove";
 import type { Task, TaskStatus, BoardColumn } from "@/types/project";
 import { BOARD_COLUMNS, statusStyles, canTransition } from "@/types/project";
 
@@ -140,6 +141,7 @@ interface Props { tasks: Task[] }
 
 export function KanbanBoard({ tasks }: Props) {
   const updateTask = useUpdateTask();
+  const canApprove = useCanApprove();
 
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
@@ -182,8 +184,10 @@ export function KanbanBoard({ tasks }: Props) {
 
     // Block invalid workflow moves while dragging — keep the card in place.
     const dragged = localTasks.find((t) => t.id === activeId);
-    if (dragged && dragged.status !== targetColumn && !canTransition(dragged.status, targetColumn)) {
-      return;
+    if (dragged && dragged.status !== targetColumn) {
+      if (!canTransition(dragged.status, targetColumn)) return;
+      // Pending Review can only be moved by a team leader / admin
+      if (dragged.status === "pending_review" && !canApprove(dragged)) return;
     }
     setOverColumnId(targetColumn);
 
