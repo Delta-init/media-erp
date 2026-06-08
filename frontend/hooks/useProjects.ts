@@ -14,6 +14,33 @@ const QK = {
   tasks: (filters: Partial<ProjectFilters>) => ["projects", "tasks", filters] as const,
 };
 
+export interface LeaderTeam {
+  id: string;
+  name: string;
+  color: string;
+  members: { id: string; name: string; role: string }[];
+}
+
+export interface LeaderQueue {
+  is_leader: boolean;
+  review: Task[];
+  incoming: Task[];
+  teams: LeaderTeam[];
+}
+
+export function useLeaderQueue() {
+  return useQuery({
+    queryKey: ["projects", "leader-queue"],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: LeaderQueue }>(
+        "/projects/leader/queue"
+      );
+      return data.data;
+    },
+    refetchInterval: 15_000,
+  });
+}
+
 export function useTasks(filters: Partial<ProjectFilters> = {}) {
   return useQuery({
     queryKey: QK.tasks(filters),

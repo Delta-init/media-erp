@@ -54,6 +54,7 @@ export interface Task {
   due_date: string | null;
   team_id?: string | null;
   attachments?: Attachment[];
+  reedit_reason?: string;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -81,6 +82,7 @@ export interface UpdateTaskPayload {
   due_date?: string | null;
   team_id?: string | null;
   attachments?: Attachment[];
+  reedit_reason?: string;
 }
 
 /** Display label for a task's assignee — prefers the denormalized name,

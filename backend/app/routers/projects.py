@@ -127,6 +127,76 @@ async def add_task(
     return success_response(data=task, message="Task created", status_code=201)
 
 
+@router.get("/leader/queue")
+async def leader_queue(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Leader Desk feed (team leaders + admins):
+      - review:   pending_review tasks from teams the user leads
+      - incoming: new (pending) work in those teams that is unassigned or
+                  assigned to the leader — to distribute to members
+      - teams:    the led teams with their members (for the assign dropdown)
+    """
+    from bson import ObjectId
+    from app.services.project_service import _serialize
+
+    uid = str(current_user["_id"])
+    is_admin = current_user.get("role") == "admin"
+
+    if is_admin:
+        teams = await db["teams"].find({}).to_list(500)
+    else:
+        teams = await db["teams"].find(
+            {"members": {"$elemMatch": {"user_id": uid, "role": "leader"}}}
+        ).to_list(500)
+
+    if not teams:
+        return success_response(
+            data={"is_leader": is_admin, "review": [], "incoming": [], "teams": []},
+            message="Leader queue",
+        )
+
+    team_ids = [str(t["_id"]) for t in teams]
+
+    # Resolve member names for the assign dropdown
+    member_ids = {m["user_id"] for t in teams for m in t.get("members", [])}
+    valid = [ObjectId(i) for i in member_ids if ObjectId.is_valid(i)]
+    users = await db["users"].find({"_id": {"$in": valid}}, {"name": 1, "email": 1}).to_list(1000)
+    name_map = {str(u["_id"]): (u.get("name") or u.get("email", "")) for u in users}
+
+    teams_out = [{
+        "id": str(t["_id"]),
+        "name": t.get("name", ""),
+        "color": t.get("color", "#6366f1"),
+        "members": [
+            {"id": m["user_id"], "name": name_map.get(m["user_id"], ""), "role": m.get("role", "member")}
+            for m in t.get("members", [])
+        ],
+    } for t in teams]
+
+    review = await db["project_tasks"].find(
+        {"status": "pending_review", "team_id": {"$in": team_ids}}
+    ).sort("updated_at", -1).to_list(500)
+
+    incoming = await db["project_tasks"].find({
+        "status": "pending",
+        "team_id": {"$in": team_ids},
+        "$or": [{"assigned_to": {"$in": ["", None]}}, {"assigned_to": uid}],
+    }).sort("created_at", -1).to_list(500)
+
+    return success_response(
+        data={
+            "is_leader": True,
+            "review":   [_serialize(t) for t in review],
+            "incoming": [_serialize(t) for t in incoming],
+            "teams":    teams_out,
+        },
+        message="Leader queue",
+    )
+
+
 @router.put("/{task_id}")
 async def edit_task(
     task_id: str,
@@ -141,30 +211,41 @@ async def edit_task(
     updates = body.model_dump(exclude_none=True)
     new_status = updates.get("status")
 
-    # Enforce the workflow state machine on any status change
-    if new_status:
-        try:
-            oid = ObjectId(task_id)
-        except InvalidId:
-            return error_response("Invalid task ID", status_code=422)
-        current = await db["project_tasks"].find_one({"_id": oid})
-        if not current:
-            return error_response("Task not found", status_code=404)
-        cur_status = current.get("status", "pending")
+    try:
+        oid = ObjectId(task_id)
+    except InvalidId:
+        return error_response("Invalid task ID", status_code=422)
+    current = await db["project_tasks"].find_one({"_id": oid})
+    if not current:
+        return error_response("Task not found", status_code=404)
+    cur_status = current.get("status", "pending")
 
-        if new_status != cur_status:
-            if not workflow.is_allowed(cur_status, new_status):
-                return error_response(workflow.transition_error(cur_status, new_status), status_code=400)
-            # Approve / rework (leaving pending_review) is leader/admin only
-            if cur_status in workflow.LEADER_ONLY_FROM:
-                if not await workflow.can_approve(current_user, current, db):
-                    return error_response(
-                        "Only a team leader can approve a task or send it to rework.",
-                        status_code=403,
-                    )
-            # "one started task per person" — bump the assignee's other started task
-            if new_status == "started":
-                await workflow.bump_other_started(db, current)
+    # Enforce the workflow state machine on any status change
+    if new_status and new_status != cur_status:
+        if not workflow.is_allowed(cur_status, new_status):
+            return error_response(workflow.transition_error(cur_status, new_status), status_code=400)
+        # Approve / send-to-reedit (leaving pending_review) is leader/admin only
+        if cur_status in workflow.LEADER_ONLY_FROM:
+            if not await workflow.can_approve(current_user, current, db):
+                return error_response(
+                    "Only a team leader can approve a task or send it to reedit.",
+                    status_code=403,
+                )
+        # Sending to reedit requires a reason
+        if new_status == "reedit":
+            if not (updates.get("reedit_reason") or "").strip():
+                return error_response("Please add a reason for sending this task to reedit.", status_code=400)
+        else:
+            # leaving/entering any other state clears a stale reedit reason
+            updates.setdefault("reedit_reason", "")
+        # "one started task per person" — bump the assignee's other started task
+        if new_status == "started":
+            await workflow.bump_other_started(db, current)
+
+    # Reassigning a task to someone else is a leader/admin action
+    if "assigned_to" in updates and updates["assigned_to"] != current.get("assigned_to"):
+        if not await workflow.can_assign_to_others(current_user, current.get("team_id"), db):
+            return error_response("Only a team leader can assign tasks to others.", status_code=403)
 
     task = await update_task(db, task_id, updates)
     if not task:

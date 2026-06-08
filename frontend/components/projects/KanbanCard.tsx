@@ -112,6 +112,14 @@ export function KanbanCard({ task, overlay = false }: Props) {
         </p>
       )}
 
+      {/* Reedit reason — visible to the assignee so they know what to fix */}
+      {task.status === "reedit" && task.reedit_reason && (
+        <div className="ml-6 mb-2 rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-1.5">
+          <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400">Sent to reedit</p>
+          <p className="text-[11px] text-foreground/80 leading-snug">{task.reedit_reason}</p>
+        </div>
+      )}
+
       {/* Meta chips — wrap, never overlap */}
       {(assignee || task.due_date || attachmentCount > 0) && (
         <div className="flex items-center flex-wrap gap-x-2 gap-y-1 pl-6 mt-2">

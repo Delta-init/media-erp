@@ -9,6 +9,7 @@ import {
   Cable,
   CalendarDays,
   ChevronLeft,
+  ClipboardCheck,
   Calculator,
   Kanban,
   Key,
@@ -32,6 +33,7 @@ import { useUiStore } from "@/stores/uiStore";
 import { useAuthStore } from "@/stores/authStore";
 import { useLogout } from "@/hooks/useAuth";
 import { useUnreadCounts } from "@/hooks/useChat";
+import { useTeams } from "@/hooks/useTeams";
 import ThemeToggle from "@/components/shared/ThemeToggle";
 import {
   backdropVariants,
@@ -50,6 +52,7 @@ const NAV_ITEMS = [
   { label: "Email Reports", href: "/email-reports",  icon: Mail },
   { label: "Projects",      href: "/projects",      icon: Kanban,          module: "projects" },
   { label: "Teams",         href: "/teams",         icon: UsersRound,      module: "teams" },
+  { label: "Leader Desk",   href: "/leader",        icon: ClipboardCheck },
   { label: "AI Queries", href: "/ai",         icon: Sparkles,        module: "ai" },
   { label: "Publish",    href: "/social",     icon: Share2 },
   { label: "Send DM",    href: "/social/dm",  icon: Send },
@@ -159,9 +162,15 @@ function SidebarContent({
   const { data: unreadMap = {} } = useUnreadCounts();
   const totalUnread = Object.values(unreadMap).reduce((a, b) => a + b, 0);
 
+  // Leader Desk is for Super Admins and anyone who leads a team
+  const { data: teams = [] } = useTeams();
+  const isSuperAdmin = !!(user?.role?.is_system_role && user?.role?.role_name === "Super Admin");
+  const showLeaderDesk = isSuperAdmin || teams.some((t) => t.my_role === "leader");
+
   // Filter nav items the user can see
   const visibleNav = NAV_ITEMS.filter((item) =>
-    !item.module || hasPermission(item.module, "view")
+    (!item.module || hasPermission(item.module, "view")) &&
+    (item.href !== "/leader" || showLeaderDesk)
   );
   const visibleBottom = BOTTOM_ITEMS.filter((item) =>
     !item.module || hasPermission(item.module, "view")

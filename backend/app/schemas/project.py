@@ -33,3 +33,4 @@ class UpdateTaskRequest(BaseModel):
     due_date: Optional[str] = None
     team_id: Optional[str] = None
     attachments: Optional[list[Attachment]] = None
+    reedit_reason: Optional[str] = None   # why a review was sent back to reedit
