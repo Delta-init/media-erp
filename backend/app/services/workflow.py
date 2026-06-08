@@ -2,18 +2,20 @@
 Project task workflow state machine.
 
 Fixed columns:  pending -> started -> (break) -> pending_review -> approved
+                                         \-> reedit <-/  (leader sends back)
 
 Rules:
   - pending        -> started
   - started        -> break | pending_review
   - break          -> started
-  - pending_review -> approved | pending   (leader/admin only — approve or rework)
+  - reedit         -> started               (member picks the rework back up)
+  - pending_review -> approved | reedit      (leader/admin only — approve or send to reedit)
   - approved       -> (terminal)
 
   - Only ONE task per assignee may be in "started"; moving a task into started
     bumps that assignee's other started task to "break".
-  - You cannot move directly from started/break back to pending — the only path
-    back to pending is a leader sending a pending_review task to rework.
+  - Nothing returns to "pending" — that is only the entry point for new work.
+    A leader rejecting a review sends it to "reedit", not "pending".
 """
 from datetime import datetime, timezone
 
@@ -24,7 +26,8 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "pending":        {"started"},
     "started":        {"break", "pending_review"},
     "break":          {"started"},
-    "pending_review": {"approved", "pending"},
+    "reedit":         {"started"},
+    "pending_review": {"approved", "reedit"},
     "approved":       set(),
 }
 
@@ -41,16 +44,18 @@ def is_allowed(current: str, target: str) -> bool:
 def transition_error(current: str, target: str) -> str:
     labels = {
         "pending": "Pending", "started": "Started", "break": "Break",
-        "pending_review": "Pending Review", "approved": "Approved",
+        "reedit": "Reedit", "pending_review": "Pending Review", "approved": "Approved",
     }
     c = labels.get(current, current)
     t = labels.get(target, target)
-    if target == "pending" and current in ("started", "break"):
-        return (f"Can't move {c} → Pending directly. A task only returns to "
-                f"Pending when a team leader sends it to rework from Pending Review.")
+    if target == "pending":
+        return (f"Can't move {c} to Pending. Pending is only for brand-new work — "
+                f"a leader rejecting a review sends it to Reedit instead.")
     if target == "approved" and current != "pending_review":
-        return f"Tasks can only be Approved from Pending Review (a leader approves them)."
-    return f"Invalid move: {c} → {t}."
+        return "Tasks can only be Approved from Pending Review (a leader approves them)."
+    if target == "reedit" and current != "pending_review":
+        return "A task only goes to Reedit when a team leader sends it back from Pending Review."
+    return f"Invalid move: {c} -> {t}."
 
 
 async def can_approve(current_user: dict, task: dict, db: AsyncIOMotorDatabase) -> bool:

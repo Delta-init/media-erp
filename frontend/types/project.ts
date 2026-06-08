@@ -113,6 +113,7 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: "pending",        label: "Pending",        color: "#f59e0b" }, // amber
   { key: "started",        label: "Started",        color: "#3b82f6" }, // blue
   { key: "break",          label: "Break",          color: "#f97316" }, // orange
+  { key: "reedit",         label: "Reedit",         color: "#f43f5e" }, // rose — sent back for changes
   { key: "pending_review", label: "Pending Review", color: "#a855f7" }, // purple
   { key: "approved",       label: "Approved",       color: "#22c55e" }, // green
 ];
@@ -122,11 +123,13 @@ export const DONE_STATUS = "approved";
 
 // ── Workflow state machine (mirrors the backend) ─────────────────────────────
 //  pending -> started -> (break) -> pending_review -> approved
+//                          \-> reedit <-/ (leader sends back) -> started
 export const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   pending:        ["started"],
   started:        ["break", "pending_review"],
   break:          ["started"],
-  pending_review: ["approved", "pending"],   // approve / rework — leader only (enforced server-side)
+  reedit:         ["started"],               // member picks the rework back up
+  pending_review: ["approved", "reedit"],    // approve / send-to-reedit — leader only (server-enforced)
   approved:       [],
 };
 
