@@ -78,6 +78,29 @@ async def can_approve(current_user: dict, task: dict, db: AsyncIOMotorDatabase) 
     )
 
 
+async def can_assign_to_others(current_user: dict, team_id, db: AsyncIOMotorDatabase) -> bool:
+    """
+    True if the user may assign a task to someone else.
+    Allowed for: Super Admin, or the leader of the given team.
+    Regular members (and anyone on a personal/no-team task) may only self-assign.
+    """
+    if current_user.get("role") == "admin":
+        return True
+    if not team_id:
+        return False
+    try:
+        team = await db["teams"].find_one({"_id": ObjectId(team_id)})
+    except Exception:
+        team = None
+    if not team:
+        return False
+    uid = str(current_user["_id"])
+    return any(
+        m.get("user_id") == uid and m.get("role") == "leader"
+        for m in team.get("members", [])
+    )
+
+
 async def bump_other_started(db: AsyncIOMotorDatabase, task: dict) -> None:
     """
     Enforce "one started task per person": move the assignee's OTHER started

@@ -11,6 +11,7 @@ import { useCreateTask } from "@/hooks/useProjects";
 import { useUploadAttachments } from "@/hooks/useUpload";
 import { useTeams, useTeam } from "@/hooks/useTeams";
 import { useUsersList } from "@/hooks/useUsers";
+import { useAuthStore } from "@/stores/authStore";
 import type { TaskPriority, TaskStatus, Attachment } from "@/types/project";
 import { cn } from "@/lib/utils";
 
@@ -55,6 +56,13 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
   // Fallback: all users when no team selected
   const { data: usersData } = useUsersList({ limit: 100 });
 
+  // Only Super Admins and the leader of the selected team may assign work to
+  // others. A regular member can only create tasks for themselves.
+  const me = useAuthStore((s) => s.user);
+  const isSuperAdmin = !!(me?.role?.is_system_role && me?.role?.role_name === "Super Admin");
+  const isLeaderOfTeam = !!teamId && (teamDetail?.my_role === "leader" || teamDetail?.my_role === "admin");
+  const canAssignOthers = isSuperAdmin || isLeaderOfTeam;
+
   const assigneeOptions = useMemo(() => {
     if (teamId && teamDetail?.members) {
       return teamDetail.members.map((m) => ({ id: m.user_id, name: m.name || m.email }));
@@ -80,15 +88,19 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
-    const assigneeName = assigneeOptions.find(o => o.id === assignedTo)?.name ?? "";
+    // Members can only create tasks for themselves; leaders/admins can assign.
+    const finalAssignee = canAssignOthers ? assignedTo : (me?.id ?? "");
+    const finalAssigneeName = canAssignOthers
+      ? (assigneeOptions.find(o => o.id === assignedTo)?.name ?? "")
+      : (me?.name ?? "");
     await create.mutateAsync({
       title: title.trim(),
       description,
       priority,
       status: "pending", // new work always enters at Pending
       team_id: teamId || null,
-      assigned_to: assignedTo,
-      assigned_to_name: assigneeName,
+      assigned_to: finalAssignee,
+      assigned_to_name: finalAssigneeName,
       due_date: dueDate || null,
       attachments,
     });
@@ -201,16 +213,26 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Assigned To</label>
-                  <select
-                    value={assignedTo}
-                    onChange={e => setAssignedTo(e.target.value)}
-                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition"
-                  >
-                    <option value="">Unassigned</option>
-                    {assigneeOptions.map(o => (
-                      <option key={o.id} value={o.id}>{o.name}</option>
-                    ))}
-                  </select>
+                  {canAssignOthers ? (
+                    <select
+                      value={assignedTo}
+                      onChange={e => setAssignedTo(e.target.value)}
+                      className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition"
+                    >
+                      <option value="">Unassigned</option>
+                      {assigneeOptions.map(o => (
+                        <option key={o.id} value={o.id}>{o.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    // Members can only create tasks for themselves
+                    <div
+                      className="w-full rounded-lg border bg-muted/40 px-3 py-2 text-sm text-muted-foreground truncate"
+                      title="Only a team leader can assign tasks to others"
+                    >
+                      {me?.name ? `${me.name} (you)` : "You"}
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Due Date</label>

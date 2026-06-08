@@ -111,9 +111,18 @@ async def add_task(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
+    from app.services import workflow
+
     data = body.model_dump()
     data["created_by"] = str(current_user["_id"])
     data["status"] = "pending"  # new work always enters the workflow at Pending
+
+    # Members can only create tasks for themselves; only admins / team leaders
+    # may assign work to someone else.
+    if not await workflow.can_assign_to_others(current_user, data.get("team_id"), db):
+        data["assigned_to"] = str(current_user["_id"])
+        data["assigned_to_name"] = current_user.get("name", "")
+
     task = await create_task(db, data)
     return success_response(data=task, message="Task created", status_code=201)
 
