@@ -60,10 +60,9 @@ export default function ProjectsPage() {
   );
 
   const totalByStatus = {
-    pending:           tasks.filter(t => t.status === "pending").length,
-    upcoming:          tasks.filter(t => t.status === "upcoming").length,
-    currently_working: tasks.filter(t => t.status === "currently_working").length,
-    updation_needed:   tasks.filter(t => t.status === "updation_needed").length,
+    pending:  tasks.filter(t => t.status === "pending").length,
+    started:  tasks.filter(t => t.status === "started").length,
+    approved: tasks.filter(t => t.status === "approved").length,
   };
 
   return (
@@ -75,9 +74,9 @@ export default function ProjectsPage() {
           <p className="text-sm text-muted-foreground mt-0.5">
             {tasks.length} task{tasks.length !== 1 ? "s" : ""} total
             {" · "}
-            <span className="text-green-600 dark:text-green-400">{totalByStatus.currently_working} in progress</span>
+            <span className="text-blue-600 dark:text-blue-400">{totalByStatus.started} started</span>
             {" · "}
-            <span className="text-yellow-600 dark:text-yellow-400">{totalByStatus.pending} pending</span>
+            <span className="text-green-600 dark:text-green-400">{totalByStatus.approved} approved</span>
           </p>
         </div>
 

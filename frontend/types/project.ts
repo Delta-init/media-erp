@@ -100,24 +100,37 @@ export interface ProjectFilters {
   member_id?: string;
 }
 
+// ── Fixed Kanban columns ────────────────────────────────────────────────────
+// The board has exactly these 5 columns. Names/colours/order are fixed —
+// no add / edit / delete. Keys are the values stored in task.status.
+export interface BoardColumn {
+  key: string;
+  label: string;
+  color: string; // hex
+}
+
+export const BOARD_COLUMNS: BoardColumn[] = [
+  { key: "pending",        label: "Pending",        color: "#f59e0b" }, // amber
+  { key: "started",        label: "Started",        color: "#3b82f6" }, // blue
+  { key: "break",          label: "Break",          color: "#f97316" }, // orange
+  { key: "pending_review", label: "Pending Review", color: "#a855f7" }, // purple
+  { key: "approved",       label: "Approved",       color: "#22c55e" }, // green
+];
+
+/** The terminal "done" column. */
+export const DONE_STATUS = "approved";
+
 /**
- * A task is overdue when its due date is in the past AND it isn't done.
- * "currently_working" is treated as the active/in-progress terminal state.
+ * A task is overdue when its due date is in the past AND it isn't done
+ * (i.e. not in the Approved column).
  */
 export function isTaskOverdue(task: Pick<Task, "due_date" | "status">): boolean {
   if (!task.due_date) return false;
-  if (task.status === "currently_working") return false;
+  if (task.status === DONE_STATUS) return false;
   const due = new Date(task.due_date);
   due.setHours(23, 59, 59, 999); // grace until end of due day
   return due < new Date();
 }
-
-export const COLUMNS: { id: TaskStatus; label: string; color: string; bg: string }[] = [
-  { id: "pending",           label: "Pending",           color: "text-yellow-600 dark:text-yellow-400", bg: "bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800" },
-  { id: "upcoming",          label: "Upcoming",           color: "text-blue-600 dark:text-blue-400",   bg: "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800" },
-  { id: "currently_working", label: "Currently Working",  color: "text-green-600 dark:text-green-400", bg: "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800" },
-  { id: "updation_needed",   label: "Updation Needed",    color: "text-red-600 dark:text-red-400",     bg: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800" },
-];
 
 export const PRIORITY_META: Record<TaskPriority, { label: string; color: string }> = {
   low:    { label: "Low",    color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" },

@@ -3,7 +3,7 @@
 import { Search, X, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useStatuses } from "@/hooks/useStatuses";
+import { BOARD_COLUMNS } from "@/types/project";
 import type { DateFilterOption, ProjectFilters, TaskPriority, TaskStatus } from "@/types/project";
 
 const DATE_OPTS: { value: DateFilterOption; label: string }[] = [
@@ -22,7 +22,7 @@ interface Props {
 }
 
 export function ProjectFiltersBar({ filters, onChange, onReset }: Props) {
-  const { data: statuses = [] } = useStatuses();
+  const statuses = BOARD_COLUMNS;
   const hasActive =
     filters.search || filters.status || filters.priority || filters.date_filter;
 
@@ -93,7 +93,7 @@ export function ProjectFiltersBar({ filters, onChange, onReset }: Props) {
       >
         <option value="">All Statuses</option>
         {statuses.map(s => (
-          <option key={s.id} value={s.key}>{s.label}</option>
+          <option key={s.key} value={s.key}>{s.label}</option>
         ))}
       </select>
 

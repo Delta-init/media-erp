@@ -6,9 +6,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { AlertTriangle, Calendar, GripVertical, Paperclip, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
-import { useStatuses } from "@/hooks/useStatuses";
 import type { Task, TaskStatus } from "@/types/project";
-import { PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
+import { BOARD_COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
 
 interface Props {
   task: Task;
@@ -35,7 +34,6 @@ export function KanbanCard({ task, overlay = false }: Props) {
 
   const deleteTask = useDeleteTask();
   const updateTask = useUpdateTask();
-  const { data: statuses = [] } = useStatuses();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const meta = PRIORITY_META[task.priority];
@@ -148,8 +146,8 @@ export function KanbanCard({ task, overlay = false }: Props) {
           onClick={e => e.stopPropagation()}
           className="w-full rounded-md border-0 bg-muted/50 px-2 py-1 text-[10px] font-medium outline-none cursor-pointer hover:bg-muted transition-colors"
         >
-          {statuses.map(c => (
-            <option key={c.id} value={c.key}>{c.label}</option>
+          {BOARD_COLUMNS.map(c => (
+            <option key={c.key} value={c.key}>{c.label}</option>
           ))}
         </select>
       </div>

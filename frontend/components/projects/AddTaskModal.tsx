@@ -11,8 +11,8 @@ import { useCreateTask } from "@/hooks/useProjects";
 import { useUploadAttachments } from "@/hooks/useUpload";
 import { useTeams, useTeam } from "@/hooks/useTeams";
 import { useUsersList } from "@/hooks/useUsers";
-import { useStatuses } from "@/hooks/useStatuses";
 import type { TaskPriority, TaskStatus, Attachment } from "@/types/project";
+import { BOARD_COLUMNS } from "@/types/project";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -50,12 +50,10 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
   const [dueDate, setDueDate]       = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
 
-  // Dynamic Kanban columns
-  const { data: statuses = [] } = useStatuses();
-
-  // If the requested default status no longer exists, fall back to the first column
+  // Fixed Kanban columns
+  const statuses = BOARD_COLUMNS;
   const statusValid = statuses.some(s => s.key === status);
-  const effectiveStatus = statusValid ? status : (statuses[0]?.key ?? status);
+  const effectiveStatus = statusValid ? status : statuses[0].key;
 
   // Teams the current user belongs to
   const { data: teams = [] } = useTeams();
@@ -193,7 +191,7 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
                     className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition"
                   >
                     {statuses.map(c => (
-                      <option key={c.id} value={c.key}>{c.label}</option>
+                      <option key={c.key} value={c.key}>{c.label}</option>
                     ))}
                   </select>
                 </div>

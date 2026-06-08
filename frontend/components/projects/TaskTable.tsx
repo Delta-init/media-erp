@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, ArrowUpDown, Calendar, Paperclip, Trash2, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
-import { useStatuses } from "@/hooks/useStatuses";
+import { BOARD_COLUMNS } from "@/types/project";
 import type { Task, TaskPriority, TaskStatus } from "@/types/project";
 import { PRIORITY_META, isTaskOverdue, assigneeLabel, statusStyles } from "@/types/project";
 import { listItemVariants, listVariants } from "@/lib/animations";
@@ -19,7 +19,7 @@ export function TaskTable({ tasks }: Props) {
   const [sortAsc, setSortAsc]   = useState(false);
   const updateTask  = useUpdateTask();
   const deleteTask  = useDeleteTask();
-  const { data: statuses = [] } = useStatuses();
+  const statuses = BOARD_COLUMNS;
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
   function toggleSort(k: SortKey) {
@@ -130,7 +130,7 @@ export function TaskTable({ tasks }: Props) {
                       style={colStyle}
                       className="rounded-full px-2 py-0.5 text-[11px] font-semibold border-0 outline-none cursor-pointer"
                     >
-                      {statuses.map(c => <option key={c.id} value={c.key}>{c.label}</option>)}
+                      {statuses.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
                     </select>
                   </td>
 
