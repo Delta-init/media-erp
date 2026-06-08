@@ -70,8 +70,16 @@ export function useUpdateTask() {
     onSuccess() {
       qc.invalidateQueries({ queryKey: ["projects"] });
     },
-    onError() {
-      toast.error("Failed to update task");
+    onError(err: unknown) {
+      // Revert the optimistic board move and surface the workflow reason
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      const msg =
+        (err as { response?: { data?: { detail?: string; message?: string } } })
+          ?.response?.data?.detail ||
+        (err as { response?: { data?: { detail?: string; message?: string } } })
+          ?.response?.data?.message ||
+        "Failed to update task";
+      toast.error(msg);
     },
   });
 }

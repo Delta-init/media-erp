@@ -7,7 +7,7 @@ import { AlertTriangle, Calendar, GripVertical, Paperclip, Trash2 } from "lucide
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
 import type { Task, TaskStatus } from "@/types/project";
-import { BOARD_COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
+import { PRIORITY_META, isTaskOverdue, assigneeLabel, allowedColumns } from "@/types/project";
 
 interface Props {
   task: Task;
@@ -146,7 +146,7 @@ export function KanbanCard({ task, overlay = false }: Props) {
           onClick={e => e.stopPropagation()}
           className="w-full rounded-md border-0 bg-muted/50 px-2 py-1 text-[10px] font-medium outline-none cursor-pointer hover:bg-muted transition-colors"
         >
-          {BOARD_COLUMNS.map(c => (
+          {allowedColumns(task.status).map(c => (
             <option key={c.key} value={c.key}>{c.label}</option>
           ))}
         </select>

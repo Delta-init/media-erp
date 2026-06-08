@@ -5,9 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, ArrowUpDown, Calendar, Paperclip, Trash2, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
-import { BOARD_COLUMNS } from "@/types/project";
 import type { Task, TaskPriority, TaskStatus } from "@/types/project";
-import { PRIORITY_META, isTaskOverdue, assigneeLabel, statusStyles } from "@/types/project";
+import { BOARD_COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel, statusStyles, allowedColumns } from "@/types/project";
 import { listItemVariants, listVariants } from "@/lib/animations";
 
 type SortKey = "title" | "status" | "priority" | "due_date" | "created_at";
@@ -130,7 +129,7 @@ export function TaskTable({ tasks }: Props) {
                       style={colStyle}
                       className="rounded-full px-2 py-0.5 text-[11px] font-semibold border-0 outline-none cursor-pointer"
                     >
-                      {statuses.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+                      {allowedColumns(task.status).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
                     </select>
                   </td>
 

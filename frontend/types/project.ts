@@ -120,6 +120,27 @@ export const BOARD_COLUMNS: BoardColumn[] = [
 /** The terminal "done" column. */
 export const DONE_STATUS = "approved";
 
+// ── Workflow state machine (mirrors the backend) ─────────────────────────────
+//  pending -> started -> (break) -> pending_review -> approved
+export const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  pending:        ["started"],
+  started:        ["break", "pending_review"],
+  break:          ["started"],
+  pending_review: ["approved", "pending"],   // approve / rework — leader only (enforced server-side)
+  approved:       [],
+};
+
+export function canTransition(from: string, to: string): boolean {
+  if (from === to) return true;
+  return (ALLOWED_TRANSITIONS[from] ?? []).includes(to);
+}
+
+/** Columns selectable from a status: the current column plus its valid targets,
+ *  returned in board order. */
+export function allowedColumns(from: string): BoardColumn[] {
+  return BOARD_COLUMNS.filter((c) => c.key === from || canTransition(from, c.key));
+}
+
 /**
  * A task is overdue when its due date is in the past AND it isn't done
  * (i.e. not in the Approved column).

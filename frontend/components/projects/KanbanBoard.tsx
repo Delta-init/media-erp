@@ -29,8 +29,9 @@ import { cn } from "@/lib/utils";
 import { useUpdateTask } from "@/hooks/useProjects";
 import { KanbanCard } from "./KanbanCard";
 import { AddTaskModal } from "./AddTaskModal";
+import { toast } from "sonner";
 import type { Task, TaskStatus, BoardColumn } from "@/types/project";
-import { BOARD_COLUMNS, statusStyles } from "@/types/project";
+import { BOARD_COLUMNS, statusStyles, canTransition } from "@/types/project";
 
 // ── Drop animation — spring-like easing ──────────────────────────────────────
 const dropAnimation: DropAnimation = {
@@ -175,6 +176,12 @@ export function KanbanBoard({ tasks }: Props) {
 
     const targetColumn = resolveColumn(overId);
     if (!targetColumn) return;
+
+    // Block invalid workflow moves while dragging — keep the card in place.
+    const dragged = localTasks.find((t) => t.id === activeId);
+    if (dragged && dragged.status !== targetColumn && !canTransition(dragged.status, targetColumn)) {
+      return;
+    }
     setOverColumnId(targetColumn);
 
     setLocalTasks((prev) => {
@@ -207,7 +214,13 @@ export function KanbanBoard({ tasks }: Props) {
     const movedTask = localTasks.find((t) => t.id === activeId);
     const original  = tasks.find((t) => t.id === activeId);
     if (movedTask && original && movedTask.status !== original.status) {
-      updateTask.mutate({ id: activeId, payload: { status: movedTask.status } });
+      // Safety net — should already be prevented in onDragOver
+      if (!canTransition(original.status, movedTask.status)) {
+        setLocalTasks(tasks);
+        toast.error("That move isn't allowed by the workflow.");
+      } else {
+        updateTask.mutate({ id: activeId, payload: { status: movedTask.status } });
+      }
     }
     setActiveTask(null);
     setOverColumnId(null);

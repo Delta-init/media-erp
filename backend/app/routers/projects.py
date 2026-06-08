@@ -124,7 +124,39 @@ async def edit_task(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    task = await update_task(db, task_id, body.model_dump(exclude_none=True))
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    from app.services import workflow
+
+    updates = body.model_dump(exclude_none=True)
+    new_status = updates.get("status")
+
+    # Enforce the workflow state machine on any status change
+    if new_status:
+        try:
+            oid = ObjectId(task_id)
+        except InvalidId:
+            return error_response("Invalid task ID", status_code=422)
+        current = await db["project_tasks"].find_one({"_id": oid})
+        if not current:
+            return error_response("Task not found", status_code=404)
+        cur_status = current.get("status", "pending")
+
+        if new_status != cur_status:
+            if not workflow.is_allowed(cur_status, new_status):
+                return error_response(workflow.transition_error(cur_status, new_status), status_code=400)
+            # Approve / rework (leaving pending_review) is leader/admin only
+            if cur_status in workflow.LEADER_ONLY_FROM:
+                if not await workflow.can_approve(current_user, current, db):
+                    return error_response(
+                        "Only a team leader can approve a task or send it to rework.",
+                        status_code=403,
+                    )
+            # "one started task per person" — bump the assignee's other started task
+            if new_status == "started":
+                await workflow.bump_other_started(db, current)
+
+    task = await update_task(db, task_id, updates)
     if not task:
         return error_response("Task not found", status_code=404)
     return success_response(data=task, message="Task updated")
