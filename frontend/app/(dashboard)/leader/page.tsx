@@ -4,12 +4,12 @@ import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ClipboardCheck, CheckCircle2, RotateCcw, Inbox, UserPlus,
-  Loader2, X, Calendar, Crown, ChevronDown, GitBranch,
+  Loader2, X, Calendar, Crown, ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useLeaderQueue, useUpdateTask, usePipelineAdvance, type LeaderTeam } from "@/hooks/useProjects";
+import { useLeaderQueue, useUpdateTask, type LeaderTeam } from "@/hooks/useProjects";
+import { useAllTeams } from "@/hooks/useTeams";
 import type { Task } from "@/types/project";
-import type { PipelineBranchOption } from "@/types/pipeline";
 import { PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -68,25 +68,24 @@ function ReeditModal({ task, onClose }: { task: Task; onClose: () => void }) {
   );
 }
 
-// ── Pipeline branch picker ────────────────────────────────────────────────────
+// ── Approve + route modal ─────────────────────────────────────────────────────
+// Fetches ALL teams so the leader can route to any team, not just their own.
 
-function BranchPickerModal({
-  task,
-  branches,
-  onPick,
-  onClose,
-}: {
-  task: Task;
-  branches: PipelineBranchOption[];
-  onPick: (targetNodeId: string) => void;
-  onClose: () => void;
-}) {
-  const [selected, setSelected] = useState(branches[0]?.target_node_id ?? "");
-  const advance = usePipelineAdvance();
+function ApproveRouteModal({ task, onClose }: { task: Task; onClose: () => void }) {
+  const [destTeamId, setDestTeamId] = useState("");
+  const update = useUpdateTask();
+  const { data: allTeams = [] } = useAllTeams();
 
   async function confirm() {
-    if (!selected) return;
-    await advance.mutateAsync({ taskId: task.id, targetNodeId: selected });
+    const payload: { status: string; destination_team_id?: string } = { status: "approved" };
+    if (destTeamId) payload.destination_team_id = destTeamId;
+    await update.mutateAsync({ id: task.id, payload });
+    if (destTeamId) {
+      const teamName = allTeams.find((t) => t.id === destTeamId)?.name ?? "the selected team";
+      toast.success(`Approved — copy sent to ${teamName}`);
+    } else {
+      toast.success("Task approved");
+    }
     onClose();
   }
 
@@ -98,50 +97,48 @@ function BranchPickerModal({
       >
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div className="flex items-center gap-2">
-            <GitBranch className="size-4 text-primary" />
-            <h2 className="text-sm font-semibold">Choose next team</h2>
+            <CheckCircle2 className="size-4 text-green-600" />
+            <h2 className="text-sm font-semibold">Approve Task</h2>
           </div>
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted"><X className="size-4" /></button>
         </div>
         <div className="p-5 space-y-4">
           <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">{task.title}</span> is approved.
-            This pipeline has multiple next steps — pick where to send the task.
+            Task: <span className="font-medium text-foreground">{task.title}</span>
           </p>
-          <div className="space-y-2">
-            {branches.map((b) => (
-              <label
-                key={b.target_node_id}
-                className={cn(
-                  "flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-all",
-                  selected === b.target_node_id
-                    ? "border-primary bg-primary/5"
-                    : "hover:border-muted-foreground/30"
-                )}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">
+              Route to team <span className="text-muted-foreground font-normal">(optional)</span>
+            </label>
+            <p className="text-xs text-muted-foreground">
+              A copy of this task will appear in the selected team&apos;s incoming queue.
+            </p>
+            <div className="relative">
+              <select
+                value={destTeamId}
+                onChange={(e) => setDestTeamId(e.target.value)}
+                className="w-full appearance-none rounded-lg border bg-background px-3 py-2 pr-8 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
               >
-                <input
-                  type="radio"
-                  name="branch"
-                  value={b.target_node_id}
-                  checked={selected === b.target_node_id}
-                  onChange={() => setSelected(b.target_node_id)}
-                  className="mt-0.5"
-                />
-                <div>
-                  <p className="text-sm font-medium">{b.target_team_name}</p>
-                  {b.edge_label && (
-                    <p className="text-xs text-muted-foreground mt-0.5">{b.edge_label}</p>
-                  )}
-                </div>
-              </label>
-            ))}
+                <option value="">No routing — approve only</option>
+                {allTeams.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+            </div>
           </div>
         </div>
         <div className="flex justify-end gap-3 border-t px-5 py-4">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={confirm} disabled={!selected || advance.isPending}>
-            {advance.isPending ? <Loader2 className="size-4 animate-spin mr-1.5" /> : <CheckCircle2 className="size-4 mr-1.5" />}
-            Approve &amp; Send
+          <Button
+            onClick={confirm}
+            disabled={update.isPending}
+            className="bg-green-600 hover:bg-green-700 text-white"
+          >
+            {update.isPending
+              ? <Loader2 className="size-4 animate-spin mr-1.5" />
+              : <CheckCircle2 className="size-4 mr-1.5" />}
+            {destTeamId ? "Approve & Route" : "Approve"}
           </Button>
         </div>
       </motion.div>
@@ -152,36 +149,20 @@ function BranchPickerModal({
 // ── Review card ───────────────────────────────────────────────────────────────
 
 function ReviewCard({
-  task, teamName, onReedit, onBranchPick,
+  task, teamName, onReedit, onApprove,
 }: {
   task: Task;
   teamName: string;
   onReedit: (t: Task) => void;
-  onBranchPick: (task: Task, branches: PipelineBranchOption[]) => void;
+  onApprove: (t: Task) => void;
 }) {
-  const update = useUpdateTask();
   const pri = PRIORITY_META[task.priority];
   const overdue = isTaskOverdue(task);
-
-  async function handleApprove() {
-    const result = await update.mutateAsync({ id: task.id, payload: { status: "approved" } });
-    // Pipeline: if multiple branches, open picker; if auto-advanced, show a toast
-    if (result?._pipeline_branches?.length) {
-      onBranchPick(task, result._pipeline_branches);
-    } else if (result?._pipeline_auto_advanced) {
-      toast.success("Task approved and advanced to next team");
-    }
-  }
 
   return (
     <div className="rounded-xl border bg-card p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3 mb-1.5">
-        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-          {task.pipeline_id && (
-            <GitBranch className="size-3 text-primary shrink-0" />
-          )}
-          <p className="text-sm font-semibold leading-snug truncate">{task.title}</p>
-        </div>
+        <p className="text-sm font-semibold leading-snug truncate flex-1">{task.title}</p>
         <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0", pri.color)}>{pri.label}</span>
       </div>
       {task.description && <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{task.description}</p>}
@@ -205,13 +186,9 @@ function ReviewCard({
       <div className="flex gap-2">
         <Button
           size="sm" className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-          onClick={handleApprove}
-          disabled={update.isPending}
+          onClick={() => onApprove(task)}
         >
-          {update.isPending
-            ? <Loader2 className="size-4 animate-spin mr-1.5" />
-            : <CheckCircle2 className="size-4 mr-1.5" />}
-          Approve
+          <CheckCircle2 className="size-4 mr-1.5" /> Approve
         </Button>
         <Button size="sm" variant="outline" className="flex-1 border-rose-400/40 text-rose-600 hover:bg-rose-500/10" onClick={() => onReedit(task)}>
           <RotateCcw className="size-4 mr-1.5" /> Reedit
@@ -269,21 +246,15 @@ export default function LeaderPage() {
   const { data, isLoading } = useLeaderQueue();
   const [tab, setTab] = useState<Tab>("review");
   const [reeditTask, setReeditTask] = useState<Task | null>(null);
+  const [approveTask, setApproveTask] = useState<Task | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState("");
-  // Pipeline branch picker state
-  const [branchTask, setBranchTask]       = useState<Task | null>(null);
-  const [branchOptions, setBranchOptions] = useState<PipelineBranchOption[]>([]);
 
-  // teamsById — for looking up team name on each card
   const teamsById = useMemo(() => {
     const m = new Map<string, LeaderTeam>();
     (data?.teams ?? []).forEach((t) => m.set(t.id, t));
     return m;
   }, [data]);
 
-  // teamsList — backend already scopes this to what the caller may see:
-  //   SA / Admin / Coordinator → all teams
-  //   Team Leader              → only their led teams
   const teamsList = data?.teams ?? [];
 
   const review = useMemo(() => {
@@ -341,7 +312,7 @@ export default function LeaderPage() {
         ))}
       </div>
 
-      {/* Team filter — visible to all roles when multiple teams are available */}
+      {/* Team filter */}
       {tab === "review" && teamsList.length > 1 && (
         <div className="flex items-center gap-2.5">
           <span className="text-sm text-muted-foreground shrink-0">Team</span>
@@ -381,7 +352,7 @@ export default function LeaderPage() {
                 task={t}
                 teamName={teamsById.get(t.team_id || "")?.name ?? ""}
                 onReedit={setReeditTask}
-                onBranchPick={(task, branches) => { setBranchTask(task); setBranchOptions(branches); }}
+                onApprove={setApproveTask}
               />
             ))}
           </div>
@@ -403,12 +374,10 @@ export default function LeaderPage() {
 
       <AnimatePresence>
         {reeditTask && <ReeditModal task={reeditTask} onClose={() => setReeditTask(null)} />}
-        {branchTask && branchOptions.length > 0 && (
-          <BranchPickerModal
-            task={branchTask}
-            branches={branchOptions}
-            onPick={() => {}}
-            onClose={() => { setBranchTask(null); setBranchOptions([]); }}
+        {approveTask && (
+          <ApproveRouteModal
+            task={approveTask}
+            onClose={() => setApproveTask(null)}
           />
         )}
       </AnimatePresence>

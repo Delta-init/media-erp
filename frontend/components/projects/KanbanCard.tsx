@@ -10,6 +10,7 @@ import { useCanApprove } from "@/hooks/useCanApprove";
 import type { Task, TaskStatus } from "@/types/project";
 import { BOARD_COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel, allowedColumns } from "@/types/project";
 import { useTaskTimer, formatSeconds } from "@/hooks/useTaskTimer";
+import { TaskDetailModal } from "./TaskDetailModal";
 
 interface Props {
   task: Task;
@@ -38,6 +39,7 @@ export function KanbanCard({ task, overlay = false }: Props) {
   const updateTask = useUpdateTask();
   const canApprove = useCanApprove();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
   const { seconds, isRunning, isCompleted, hasTimer, pauseCount } = useTaskTimer(task);
 
   // In Pending Review only a team leader / admin may move the task
@@ -102,10 +104,16 @@ export function KanbanCard({ task, overlay = false }: Props) {
         </div>
       </div>
 
-      {/* Title */}
-      <p className="text-sm font-medium leading-snug text-foreground mb-1.5 pl-6">
-        {task.title}
-      </p>
+      {/* Title — click to open detail modal */}
+      <button
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); setDetailOpen(true); }}
+        className="block text-left w-full pl-6"
+      >
+        <p className="text-sm font-medium leading-snug text-foreground mb-1.5 hover:underline cursor-pointer">
+          {task.title}
+        </p>
+      </button>
 
       {/* Description */}
       {task.description && (
@@ -223,6 +231,10 @@ export function KanbanCard({ task, overlay = false }: Props) {
       >
         <Trash2 className="size-3" />
       </button>
+
+      {detailOpen && (
+        <TaskDetailModal task={task} onClose={() => setDetailOpen(false)} />
+      )}
     </div>
   );
 }

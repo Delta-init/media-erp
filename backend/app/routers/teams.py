@@ -50,7 +50,10 @@ def _has_perm(user: dict, module: str, action: str) -> bool:
 
 
 def _can_see_all_teams(user: dict) -> bool:
-    """True for all roles with teams.view (Super Admin, Admin, Coordinator, Team Leader)."""
+    """True for elevated roles and Team Leaders (they need to see all teams)."""
+    role_name = (user.get("_role") or {}).get("role_name", "")
+    if role_name in ("Super Admin", "Admin", "Coordinator", "Team Leader"):
+        return True
     return _has_perm(user, "teams", "view")
 
 
@@ -131,15 +134,9 @@ async def list_all_teams(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    """Super Admin / Admin / Coordinator: list every team."""
-    if not _can_see_all_teams(current_user):
-        return error_response("Insufficient permissions to view all teams", status_code=403)
-    docs = await db["teams"].find({}).sort("created_at", -1).to_list(500)
-    teams = []
-    for d in docs:
-        t = _serialize_team(d)
-        t["member_count"] = len(d.get("members", []))
-        teams.append(t)
+    """Return all teams for any authenticated user — team names are not sensitive."""
+    docs = await db["teams"].find({}).sort("name", 1).to_list(500)
+    teams = [{"id": str(d["_id"]), "name": d.get("name", ""), "color": d.get("color", "#6366f1")} for d in docs]
     return success_response(data=teams, message="All teams retrieved")
 
 

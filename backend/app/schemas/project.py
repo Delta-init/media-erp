@@ -21,9 +21,6 @@ class CreateTaskRequest(BaseModel):
     due_date: Optional[str] = None    # ISO date string YYYY-MM-DD
     team_id: Optional[str] = None     # optional team association
     attachments: Optional[list[Attachment]] = None
-    # Pipeline assignment (optional — only for tasks entering a pipeline)
-    pipeline_id: Optional[str] = None
-    pipeline_node_id: Optional[str] = None
 
 
 class UpdateTaskRequest(BaseModel):
@@ -36,4 +33,6 @@ class UpdateTaskRequest(BaseModel):
     due_date: Optional[str] = None
     team_id: Optional[str] = None
     attachments: Optional[list[Attachment]] = None
-    reedit_reason: Optional[str] = None   # why a review was sent back to reedit
+    reedit_reason: Optional[str] = None       # why a review was sent back to reedit
+    destination_team_id: Optional[str] = None # route a copy to this team on approve
+    caption: Optional[str] = None             # submission note added when sending to pending_review

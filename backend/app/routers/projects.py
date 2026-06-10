@@ -218,119 +218,6 @@ async def leader_queue(
     )
 
 
-# ── Pipeline child-task helper ─────────────────────────────────────────────────
-
-async def _create_pipeline_child(
-    db,
-    parent_task: dict,
-    pipeline_id: str,
-    target_node_id: str,
-    target_team_id: str,
-) -> None:
-    """Create a new pending task in the next pipeline team."""
-    from datetime import datetime, timezone as tz
-    now = datetime.now(tz.utc)
-    doc = {
-        "title": parent_task["title"],
-        "description": parent_task.get("description", ""),
-        "priority": parent_task.get("priority", "medium"),
-        "status": "pending",
-        "assigned_to": "",
-        "assigned_to_name": "",
-        "due_date": None,
-        "team_id": target_team_id,
-        "attachments": [],
-        "created_by": parent_task.get("created_by", ""),
-        "created_at": now,
-        "updated_at": now,
-        "timing": {"intervals": [], "total_seconds": None},
-        "pipeline_id": pipeline_id,
-        "pipeline_node_id": target_node_id,
-        "pipeline_parent_task_id": parent_task.get("id") or str(parent_task.get("_id", "")),
-    }
-    await db["project_tasks"].insert_one(doc)
-
-
-# ── Manual pipeline-advance (branch selection) ─────────────────────────────────
-
-@router.post("/{task_id}/pipeline-advance")
-async def pipeline_advance(
-    task_id: str,
-    body: dict,
-    current_user: dict = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
-):
-    """
-    Called after the approver picks a branch in a multi-branch pipeline node.
-    body: { "target_node_id": "n-xxx" }
-    """
-    from bson import ObjectId
-    from bson.errors import InvalidId
-    from app.services import workflow
-
-    target_node_id = body.get("target_node_id")
-    if not target_node_id:
-        return error_response("target_node_id is required", status_code=400)
-
-    try:
-        oid = ObjectId(task_id)
-    except InvalidId:
-        return error_response("Invalid task ID", status_code=422)
-
-    task = await db["project_tasks"].find_one({"_id": oid})
-    if not task:
-        return error_response("Task not found", status_code=404)
-
-    if task.get("status") != "approved":
-        return error_response("Task must be approved before advancing.", status_code=400)
-
-    if not task.get("pipeline_id"):
-        return error_response("Task is not part of a pipeline.", status_code=400)
-
-    # Auth check — only leaders/admins may advance pipeline
-    if not await workflow.can_approve(current_user, task, db):
-        return error_response("Only a team leader can advance a pipeline task.", status_code=403)
-
-    pipeline = await db["pipelines"].find_one({"_id": ObjectId(task["pipeline_id"])})
-    if not pipeline:
-        return error_response("Pipeline not found", status_code=404)
-
-    target_node = next(
-        (n for n in pipeline.get("nodes", []) if n["id"] == target_node_id), None
-    )
-    if not target_node:
-        return error_response("Target node not found in pipeline.", status_code=404)
-
-    # Create child task in chosen team
-    from app.services.project_service import _serialize
-    from datetime import datetime, timezone as tz
-    now = datetime.now(tz.utc)
-    child_doc = {
-        "title": task["title"],
-        "description": task.get("description", ""),
-        "priority": task.get("priority", "medium"),
-        "status": "pending",
-        "assigned_to": "",
-        "assigned_to_name": "",
-        "due_date": None,
-        "team_id": target_node["team_id"],
-        "attachments": [],
-        "created_by": task.get("created_by", ""),
-        "created_at": now,
-        "updated_at": now,
-        "timing": {"intervals": [], "total_seconds": None},
-        "pipeline_id": task["pipeline_id"],
-        "pipeline_node_id": target_node_id,
-        "pipeline_parent_task_id": str(task["_id"]),
-    }
-    result = await db["project_tasks"].insert_one(child_doc)
-    child_doc["_id"] = result.inserted_id
-
-    return success_response(
-        data={"child_task": _serialize(child_doc)},
-        message="Task advanced in pipeline",
-    )
-
 
 @router.put("/{task_id}")
 async def edit_task(
@@ -345,6 +232,7 @@ async def edit_task(
 
     updates = body.model_dump(exclude_none=True)
     new_status = updates.get("status")
+    destination_team_id = updates.pop("destination_team_id", None)
 
     try:
         oid = ObjectId(task_id)
@@ -392,58 +280,25 @@ async def edit_task(
     if not task:
         return error_response("Task not found", status_code=404)
 
-    # ── Pipeline advancement (only on approve) ────────────────────────────────
-    if new_status == "approved" and task.get("pipeline_id"):
-        try:
-            pipeline = await db["pipelines"].find_one(
-                {"_id": ObjectId(task["pipeline_id"])}
-            )
-        except Exception:
-            pipeline = None
-
-        if pipeline:
-            cur_node_id = task.get("pipeline_node_id")
-            outgoing = [
-                e for e in pipeline.get("edges", [])
-                if e["source"] == cur_node_id
-            ]
-
-            if len(outgoing) == 1:
-                # ── Single branch → auto-advance silently ─────────────────────
-                tgt_nid  = outgoing[0]["target"]
-                tgt_node = next(
-                    (n for n in pipeline.get("nodes", []) if n["id"] == tgt_nid), None
-                )
-                if tgt_node:
-                    await _create_pipeline_child(
-                        db, task, str(pipeline["_id"]), tgt_nid, tgt_node["team_id"]
-                    )
-                task["_pipeline_auto_advanced"] = True
-
-            elif len(outgoing) > 1:
-                # ── Multiple branches → return options for approver to pick ───
-                branches = []
-                for edge in outgoing:
-                    tgt_nid  = edge["target"]
-                    tgt_node = next(
-                        (n for n in pipeline.get("nodes", []) if n["id"] == tgt_nid), None
-                    )
-                    if not tgt_node:
-                        continue
-                    try:
-                        team = await db["teams"].find_one(
-                            {"_id": ObjectId(tgt_node["team_id"])}
-                        )
-                    except Exception:
-                        team = None
-                    branches.append({
-                        "edge_id": edge["id"],
-                        "target_node_id": tgt_nid,
-                        "target_team_id": tgt_node["team_id"],
-                        "target_team_name": team["name"] if team else "Unknown Team",
-                        "edge_label": edge.get("label") or "",
-                    })
-                task["_pipeline_branches"] = branches
+    # ── Destination routing (only on approve) ─────────────────────────────────
+    if new_status == "approved" and destination_team_id:
+        from datetime import datetime, timezone as tz
+        now = datetime.now(tz.utc)
+        await db["project_tasks"].insert_one({
+            "title": task["title"],
+            "description": task.get("description", ""),
+            "priority": task.get("priority", "medium"),
+            "status": "pending",
+            "assigned_to": "",
+            "assigned_to_name": "",
+            "due_date": None,
+            "team_id": destination_team_id,
+            "attachments": task.get("attachments", []),
+            "created_by": task.get("created_by", ""),
+            "created_at": now,
+            "updated_at": now,
+            "timing": {"intervals": [], "total_seconds": None},
+        })
 
     return success_response(data=task, message="Task updated")
 

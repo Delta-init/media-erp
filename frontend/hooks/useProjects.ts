@@ -111,26 +111,6 @@ export function useUpdateTask() {
   });
 }
 
-export function usePipelineAdvance() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ taskId, targetNodeId }: { taskId: string; targetNodeId: string }) => {
-      const { data } = await api.post<{ success: boolean; data: { child_task: Task } }>(
-        `/projects/${taskId}/pipeline-advance`,
-        { target_node_id: targetNodeId }
-      );
-      return data.data;
-    },
-    onSuccess() {
-      qc.invalidateQueries({ queryKey: ["projects"] });
-      toast.success("Task advanced to next team");
-    },
-    onError() {
-      toast.error("Failed to advance pipeline task");
-    },
-  });
-}
-
 export function useDeleteTask() {
   const qc = useQueryClient();
   return useMutation({

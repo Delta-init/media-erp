@@ -90,6 +90,19 @@ export function useTeams() {
   });
 }
 
+/** Returns ALL teams (id + name + color only) for any authenticated user.
+ *  Used in routing dropdowns where every team must be visible. */
+export function useAllTeams() {
+  return useQuery({
+    queryKey: ["teams", "all"],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: { id: string; name: string; color: string }[] }>("/teams/all");
+      return data.data;
+    },
+    staleTime: 30_000,
+  });
+}
+
 export function useTeam(teamId: string) {
   return useQuery({
     queryKey: QK.detail(teamId),
