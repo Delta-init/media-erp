@@ -39,8 +39,32 @@ VALID_ROLES = {"member", "leader"}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _is_admin(user: dict) -> bool:
-    return user.get("role") == "admin"
+def _has_perm(user: dict, module: str, action: str) -> bool:
+    """Check RBAC permission via the attached _role document."""
+    role = user.get("_role") or {}
+    # Super Admin always has full access
+    if role.get("role_name") == "Super Admin":
+        return True
+    perms = role.get("permissions") or {}
+    return bool(perms.get(module, {}).get(action, False))
+
+
+def _can_see_all_teams(user: dict) -> bool:
+    """True for all roles with teams.view (Super Admin, Admin, Coordinator, Team Leader)."""
+    return _has_perm(user, "teams", "view")
+
+
+def _can_manage_any_team(user: dict) -> bool:
+    """
+    True only for Super Admin, Admin, and Coordinator.
+    Team Leaders can manage their OWN team but NOT every team.
+    Uses teams.create as the proxy (Team Leader doesn't have it).
+    """
+    role = user.get("_role") or {}
+    if role.get("role_name") == "Super Admin":
+        return True
+    perms = role.get("permissions") or {}
+    return bool(perms.get("teams", {}).get("create", False))
 
 
 def _is_leader_of(team: dict, user_id: str) -> bool:
@@ -51,8 +75,9 @@ def _is_leader_of(team: dict, user_id: str) -> bool:
 
 
 def _can_manage(team: dict, user: dict) -> bool:
+    """Elevated users (Super Admin/Admin/Coordinator) OR the team's own leader."""
     uid = str(user["_id"])
-    return _is_admin(user) or _is_leader_of(team, uid)
+    return _can_manage_any_team(user) or _is_leader_of(team, uid)
 
 
 def _serialize_team(doc: dict) -> dict:
@@ -106,9 +131,9 @@ async def list_all_teams(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    """Admin-only: list every team."""
-    if not _is_admin(current_user):
-        return error_response("Admin access required", status_code=403)
+    """Super Admin / Admin / Coordinator: list every team."""
+    if not _can_see_all_teams(current_user):
+        return error_response("Insufficient permissions to view all teams", status_code=403)
     docs = await db["teams"].find({}).sort("created_at", -1).to_list(500)
     teams = []
     for d in docs:
@@ -123,9 +148,9 @@ async def list_my_teams(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    """List teams the current user is a member of (admin sees all)."""
+    """List teams. Elevated roles (Super Admin/Admin/Coordinator) see all; others see only their own."""
     uid = str(current_user["_id"])
-    if _is_admin(current_user):
+    if _can_see_all_teams(current_user):
         query = {}
     else:
         query = {"members.user_id": uid}
@@ -145,7 +170,7 @@ async def list_my_teams(
                 t["my_role"] = m["role"]
                 break
         else:
-            t["my_role"] = "admin" if _is_admin(current_user) else "member"
+            t["my_role"] = "admin" if _can_manage_any_team(current_user) else "member"
         teams.append(t)
     return success_response(data=teams, message="Teams retrieved")
 
@@ -168,8 +193,17 @@ async def list_assignable_users(
             {"email": {"$regex": search, "$options": "i"}},
         ]
     docs = await db["users"].find(
-        query, {"name": 1, "email": 1, "designation": 1, "avatar": 1, "status": 1}
+        query, {"name": 1, "email": 1, "designation": 1, "avatar": 1, "status": 1, "role_id": 1}
     ).sort("name", 1).to_list(500)
+
+    # Resolve role names in a single batch query
+    raw_role_ids = {u.get("role_id") for u in docs if u.get("role_id")}
+    valid_role_ids = [ObjectId(rid) for rid in raw_role_ids if ObjectId.is_valid(rid)]
+    role_docs = await db["roles"].find(
+        {"_id": {"$in": valid_role_ids}}, {"_id": 1, "role_name": 1}
+    ).to_list(100) if valid_role_ids else []
+    role_map = {str(r["_id"]): r.get("role_name", "") for r in role_docs}
+
     users = [{
         "id":          str(u["_id"]),
         "name":        u.get("name", ""),
@@ -177,6 +211,7 @@ async def list_assignable_users(
         "designation": u.get("designation", ""),
         "avatar":      u.get("avatar", ""),
         "status":      u.get("status", "active"),
+        "role_name":   role_map.get(u.get("role_id", ""), ""),
     } for u in docs]
     return success_response(data=users, message="Users retrieved")
 
@@ -187,6 +222,8 @@ async def create_team(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
+    if not _has_perm(current_user, "teams", "create"):
+        return error_response("Insufficient permissions to create teams", status_code=403)
     uid = str(current_user["_id"])
     now = datetime.now(timezone.utc)
 
@@ -246,14 +283,16 @@ async def get_team(
 
     uid = str(current_user["_id"])
     member_ids = [m["user_id"] for m in team.get("members", [])]
-    if not _is_admin(current_user) and uid not in member_ids:
+    if not _can_see_all_teams(current_user) and uid not in member_ids:
         return error_response("Not a member of this team", status_code=403)
 
     t = _serialize_team(team)
     t["members"] = await _enrich_members(db, team.get("members", []))
 
     # Caller's role in this team (drives frontend UI: member selector, scope note)
-    my_role = "admin" if _is_admin(current_user) else "member"
+    # Only truly elevated roles (SA/Admin/Coordinator) get "admin"; Team Leader
+    # gets "leader" (from the loop below) or "member" if they merely view the team.
+    my_role = "admin" if _can_manage_any_team(current_user) else "member"
     for m in team.get("members", []):
         if m["user_id"] == uid:
             my_role = m["role"]
@@ -302,8 +341,8 @@ async def delete_team(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    if not _is_admin(current_user):
-        return error_response("Admin access required", status_code=403)
+    if not _has_perm(current_user, "teams", "delete"):
+        return error_response("Insufficient permissions to delete teams", status_code=403)
     try:
         oid = ObjectId(team_id)
     except InvalidId:
@@ -335,6 +374,26 @@ async def add_member(
     user = await db["users"].find_one({"_id": ObjectId(body.user_id)})
     if not user:
         return error_response("User not found", status_code=404)
+
+    # ── Team Leader restrictions ───────────────────────────────────────────────
+    if not _can_manage_any_team(current_user):
+        # Team Leaders may not assign the team "leader" seat to a new member
+        if body.role == "leader":
+            return error_response(
+                "Team Leaders cannot add new team leaders — contact an Admin or Coordinator.",
+                status_code=403,
+            )
+        # Team Leaders may only add users whose system role is "Employee"
+        target_role_id = user.get("role_id", "")
+        target_role_name = ""
+        if target_role_id and ObjectId.is_valid(target_role_id):
+            target_role_doc = await db["roles"].find_one({"_id": ObjectId(target_role_id)})
+            target_role_name = (target_role_doc or {}).get("role_name", "")
+        if target_role_name != "Employee":
+            return error_response(
+                "Team Leaders can only add Employees to their team.",
+                status_code=403,
+            )
 
     # Check not already a member
     existing_ids = [m["user_id"] for m in team.get("members", [])]
@@ -402,6 +461,12 @@ async def update_member_role(
         return err
     if not _can_manage(team, current_user):
         return error_response("Leader or admin access required", status_code=403)
+    # Team Leaders can demote existing leaders but cannot promote members to leader
+    if not _can_manage_any_team(current_user) and body.role == "leader":
+        return error_response(
+            "Team Leaders cannot promote members to team leader — contact an Admin or Coordinator.",
+            status_code=403,
+        )
     if body.role not in VALID_ROLES:
         return error_response(f"Invalid role. Must be one of: {', '.join(VALID_ROLES)}", status_code=400)
 
@@ -431,7 +496,7 @@ async def member_report(
         return err
 
     caller_id = str(current_user["_id"])
-    is_admin   = _is_admin(current_user)
+    is_admin   = _can_see_all_teams(current_user)
     is_leader  = _is_leader_of(team, caller_id)
     is_self    = caller_id == user_id
 

@@ -3,10 +3,10 @@
   "configurations": [
     {
       "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "start-preview.bat",
+      "runtimeArgs": [],
       "port": 3000,
-      "autoPort": false
+      "autoPort": true
     }
   ]
 }

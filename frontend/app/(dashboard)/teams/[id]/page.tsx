@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAuthStore } from "@/stores/authStore";
 import {
   useTeam, useAddTeamMember, useRemoveTeamMember,
   useUpdateMemberRole, useUpdateTeam, useAssignableUsers,
@@ -53,15 +54,21 @@ function RoleBadge({ role }: { role: "leader" | "member" | "admin" }) {
 
 // ── Add Member Modal ──────────────────────────────────────────────────────────
 
-function AddMemberModal({ teamId, existingIds, onClose }: {
+function AddMemberModal({ teamId, existingIds, onClose, isTeamLeaderCaller = false }: {
   teamId: string;
   existingIds: string[];
   onClose: () => void;
+  isTeamLeaderCaller?: boolean;
 }) {
   const [role, setRole]           = useState<"member" | "leader">("member");
   const [selectedIds, setSelected] = useState<string[]>([]);
   const add = useAddTeamMember(teamId);
-  const { data: users = [], isLoading } = useAssignableUsers();
+  const { data: allUsers = [], isLoading } = useAssignableUsers();
+
+  // Team Leaders can only add Employees — filter the picker list accordingly
+  const users = isTeamLeaderCaller
+    ? allUsers.filter((u) => u.role_name === "Employee")
+    : allUsers;
 
   function toggle(id: string) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -107,19 +114,22 @@ function AddMemberModal({ teamId, existingIds, onClose }: {
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Add as</label>
               <div className="flex gap-2">
-                {(["member", "leader"] as const).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setRole(r)}
-                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium transition-all ${
-                      role === r ? "border-primary bg-primary/5 text-primary" : "hover:border-muted-foreground/40"
-                    }`}
-                  >
-                    {r === "leader" ? <Crown className="size-3.5" /> : <User className="size-3.5" />}
-                    {r === "leader" ? "Team Leader" : "Team Member"}
-                  </button>
-                ))}
+                {(["member", "leader"] as const)
+                  // Team Leaders can only add as "member" — hide the Leader option
+                  .filter((r) => !(isTeamLeaderCaller && r === "leader"))
+                  .map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setRole(r)}
+                      className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium transition-all ${
+                        role === r ? "border-primary bg-primary/5 text-primary" : "hover:border-muted-foreground/40"
+                      }`}
+                    >
+                      {r === "leader" ? <Crown className="size-3.5" /> : <User className="size-3.5" />}
+                      {r === "leader" ? "Team Leader" : "Team Member"}
+                    </button>
+                  ))}
               </div>
             </div>
 
@@ -153,10 +163,11 @@ function AddMemberModal({ teamId, existingIds, onClose }: {
 
 // ── Member row ────────────────────────────────────────────────────────────────
 
-function MemberRow({ member, teamId, canManage }: {
+function MemberRow({ member, teamId, canManage, isTeamLeaderCaller = false }: {
   member: TeamMember;
   teamId: string;
   canManage: boolean;
+  isTeamLeaderCaller?: boolean;
 }) {
   const router       = useRouter();
   const remove       = useRemoveTeamMember(teamId);
@@ -192,16 +203,19 @@ function MemberRow({ member, teamId, canManage }: {
         </Button>
         {canManage && (
           <>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs"
-              onClick={toggleRole}
-              disabled={updateRole.isPending}
-            >
-              {member.role === "leader" ? <User className="size-3.5 mr-1" /> : <Crown className="size-3.5 mr-1" />}
-              {member.role === "leader" ? "Demote" : "Promote"}
-            </Button>
+            {/* Team Leaders can demote existing leaders but cannot promote members */}
+            {(member.role === "leader" || !isTeamLeaderCaller) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={toggleRole}
+                disabled={updateRole.isPending}
+              >
+                {member.role === "leader" ? <User className="size-3.5 mr-1" /> : <Crown className="size-3.5 mr-1" />}
+                {member.role === "leader" ? "Demote" : "Promote"}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="ghost"
@@ -238,6 +252,8 @@ export default function TeamDetailPage() {
   const [showAdd, setShowAdd]     = useState(false);
 
   const { data: team, isLoading, isError } = useTeam(teamId);
+  const { user: currentUser } = useAuthStore();
+  const isTeamLeaderCaller = currentUser?.role?.role_name === "Team Leader";
 
   if (isLoading) return (
     <div className="flex items-center justify-center py-32">
@@ -383,7 +399,7 @@ export default function TeamDetailPage() {
               </p>
               <div className="space-y-2">
                 {leaders.map((m) => (
-                  <MemberRow key={m.user_id} member={m} teamId={teamId} canManage={canManage} />
+                  <MemberRow key={m.user_id} member={m} teamId={teamId} canManage={canManage} isTeamLeaderCaller={isTeamLeaderCaller} />
                 ))}
               </div>
             </div>
@@ -396,7 +412,7 @@ export default function TeamDetailPage() {
               </p>
               <div className="space-y-2">
                 {regular.map((m) => (
-                  <MemberRow key={m.user_id} member={m} teamId={teamId} canManage={canManage} />
+                  <MemberRow key={m.user_id} member={m} teamId={teamId} canManage={canManage} isTeamLeaderCaller={isTeamLeaderCaller} />
                 ))}
               </div>
             </div>
@@ -408,7 +424,7 @@ export default function TeamDetailPage() {
                 <p className="text-sm text-muted-foreground py-8 text-center">No members match.</p>
               ) : (
                 filtered.map((m) => (
-                  <MemberRow key={m.user_id} member={m} teamId={teamId} canManage={canManage} />
+                  <MemberRow key={m.user_id} member={m} teamId={teamId} canManage={canManage} isTeamLeaderCaller={isTeamLeaderCaller} />
                 ))
               )}
             </div>
@@ -456,6 +472,7 @@ export default function TeamDetailPage() {
             teamId={teamId}
             existingIds={members.map((m) => m.user_id)}
             onClose={() => setShowAdd(false)}
+            isTeamLeaderCaller={isTeamLeaderCaller}
           />
         )}
       </AnimatePresence>

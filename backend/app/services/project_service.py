@@ -22,6 +22,21 @@ def _serialize(doc: dict) -> dict:
         out["created_at"] = out["created_at"].isoformat()
     if "updated_at" in out and hasattr(out["updated_at"], "isoformat"):
         out["updated_at"] = out["updated_at"].isoformat()
+    # Serialize nested datetime objects inside timing intervals
+    if out.get("timing"):
+        timing = out["timing"]
+        serialized_intervals = []
+        for iv in timing.get("intervals", []):
+            sa = iv.get("started_at")
+            ea = iv.get("ended_at")
+            serialized_intervals.append({
+                "started_at": sa.isoformat() if hasattr(sa, "isoformat") else sa,
+                "ended_at": ea.isoformat() if hasattr(ea, "isoformat") else ea,
+            })
+        out["timing"] = {
+            "intervals": serialized_intervals,
+            "total_seconds": timing.get("total_seconds"),
+        }
     return out
 
 
@@ -34,9 +49,10 @@ async def list_tasks(
     date_from: str = "",
     date_to: str = "",
     team_id: str = "",
-    # Visibility: "all" (admin), "team" (leader sees team tasks), "own" (member sees own only)
+    # Visibility: "all" | "team" | "leader_teams" | "own"
     visibility: str = "all",
     user_id: str = "",
+    leader_team_ids: list = None,  # set when visibility == "leader_teams"
 ) -> list[dict]:
     query: dict[str, Any] = {}
 
@@ -60,8 +76,11 @@ async def list_tasks(
     # Visibility filter (role-based)
     if visibility == "own" and user_id:
         query["assigned_to"] = user_id
-    # "team" visibility is already handled by team_id filter above (leader sees all team tasks)
-    # "all" = no additional filter (admin)
+    elif visibility == "leader_teams" and leader_team_ids:
+        # Team Leader with no explicit team_id — scope to all teams they lead
+        query["team_id"] = {"$in": leader_team_ids}
+    # "team"  → team_id already applied above (leader sees all tasks in that specific team)
+    # "all"   → no additional filter (Super Admin / Admin / Coordinator)
 
     # Date filtering on created_at
     now = datetime.now(timezone.utc)
@@ -108,6 +127,11 @@ async def create_task(db: AsyncIOMotorDatabase, data: dict) -> dict:
         "created_by": data.get("created_by", ""),
         "created_at": now,
         "updated_at": now,
+        "timing": {"intervals": [], "total_seconds": None},
+        # Pipeline tracing (optional)
+        "pipeline_id": data.get("pipeline_id") or None,
+        "pipeline_node_id": data.get("pipeline_node_id") or None,
+        "pipeline_parent_task_id": data.get("pipeline_parent_task_id") or None,
     }
     result = await db["project_tasks"].insert_one(doc)
     doc["_id"] = result.inserted_id

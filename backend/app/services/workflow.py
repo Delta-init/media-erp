@@ -60,7 +60,9 @@ def transition_error(current: str, target: str) -> str:
 
 async def can_approve(current_user: dict, task: dict, db: AsyncIOMotorDatabase) -> bool:
     """True if the user may approve / rework a pending_review task."""
-    if current_user.get("role") == "admin":
+    role_doc  = current_user.get("_role") or {}
+    role_name = role_doc.get("role_name", "")
+    if role_name in ("Super Admin", "Admin", "Coordinator"):
         return True
     team_id = task.get("team_id")
     if not team_id:
@@ -81,10 +83,12 @@ async def can_approve(current_user: dict, task: dict, db: AsyncIOMotorDatabase) 
 async def can_assign_to_others(current_user: dict, team_id, db: AsyncIOMotorDatabase) -> bool:
     """
     True if the user may assign a task to someone else.
-    Allowed for: Super Admin, or the leader of the given team.
+    Allowed for: Super Admin / Admin / Coordinator, or the leader of the given team.
     Regular members (and anyone on a personal/no-team task) may only self-assign.
     """
-    if current_user.get("role") == "admin":
+    role_doc  = current_user.get("_role") or {}
+    role_name = role_doc.get("role_name", "")
+    if role_name in ("Super Admin", "Admin", "Coordinator"):
         return True
     if not team_id:
         return False
@@ -101,10 +105,51 @@ async def can_assign_to_others(current_user: dict, team_id, db: AsyncIOMotorData
     )
 
 
+def apply_timing(
+    current_status: str,
+    new_status: str,
+    timing: dict | None,
+    now: datetime,
+) -> dict:
+    """
+    Return an updated timing dict for a status transition.
+
+    intervals: list of {started_at, ended_at} — ended_at is None while running.
+    total_seconds: set only when the task reaches 'approved'.
+    """
+    timing = timing or {"intervals": [], "total_seconds": None}
+    intervals = [dict(iv) for iv in timing.get("intervals", [])]
+
+    if new_status == "started":
+        intervals.append({"started_at": now, "ended_at": None})
+
+    elif new_status in ("break", "pending_review", "reedit"):
+        # Pause — close the most recent open interval
+        for i in reversed(range(len(intervals))):
+            if intervals[i].get("ended_at") is None:
+                intervals[i]["ended_at"] = now
+                break
+
+    elif new_status == "approved":
+        # End — close open interval then sum all
+        for i in reversed(range(len(intervals))):
+            if intervals[i].get("ended_at") is None:
+                intervals[i]["ended_at"] = now
+                break
+        total = 0
+        for iv in intervals:
+            s, e = iv.get("started_at"), iv.get("ended_at")
+            if s and e:
+                total += int((e - s).total_seconds())
+        return {"intervals": intervals, "total_seconds": total}
+
+    return {"intervals": intervals, "total_seconds": timing.get("total_seconds")}
+
+
 async def bump_other_started(db: AsyncIOMotorDatabase, task: dict) -> None:
     """
     Enforce "one started task per person": move the assignee's OTHER started
-    task(s) to break. Scope by assignee when set, else by team.
+    task(s) to break and pause their timers.
     """
     q: dict = {"status": "started", "_id": {"$ne": task["_id"]}}
     assignee = (task.get("assigned_to") or "").strip()
@@ -114,6 +159,12 @@ async def bump_other_started(db: AsyncIOMotorDatabase, task: dict) -> None:
         q["team_id"] = task["team_id"]
     else:
         return  # no scope to enforce against
-    await db["project_tasks"].update_many(
-        q, {"$set": {"status": "break", "updated_at": datetime.now(timezone.utc)}}
-    )
+
+    now = datetime.now(timezone.utc)
+    bumped = await db["project_tasks"].find(q).to_list(50)
+    for t in bumped:
+        timing = apply_timing("started", "break", t.get("timing"), now)
+        await db["project_tasks"].update_one(
+            {"_id": t["_id"]},
+            {"$set": {"status": "break", "updated_at": now, "timing": timing}},
+        )

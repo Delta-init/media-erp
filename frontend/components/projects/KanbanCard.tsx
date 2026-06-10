@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, Calendar, GripVertical, Paperclip, Trash2 } from "lucide-react";
+import { AlertTriangle, Calendar, GripVertical, Paperclip, PauseCircle, Timer, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import type { Task, TaskStatus } from "@/types/project";
 import { BOARD_COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel, allowedColumns } from "@/types/project";
+import { useTaskTimer, formatSeconds } from "@/hooks/useTaskTimer";
 
 interface Props {
   task: Task;
@@ -37,6 +38,7 @@ export function KanbanCard({ task, overlay = false }: Props) {
   const updateTask = useUpdateTask();
   const canApprove = useCanApprove();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const { seconds, isRunning, isCompleted, hasTimer, pauseCount } = useTaskTimer(task);
 
   // In Pending Review only a team leader / admin may move the task
   // (approve or rework). Everyone else sees it locked.
@@ -121,7 +123,7 @@ export function KanbanCard({ task, overlay = false }: Props) {
       )}
 
       {/* Meta chips — wrap, never overlap */}
-      {(assignee || task.due_date || attachmentCount > 0) && (
+      {(assignee || task.due_date || attachmentCount > 0 || hasTimer) && (
         <div className="flex items-center flex-wrap gap-x-2 gap-y-1 pl-6 mt-2">
           {/* Assignee */}
           {assignee && (
@@ -149,6 +151,33 @@ export function KanbanCard({ task, overlay = false }: Props) {
             <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0">
               <Paperclip className="size-3" />
               {attachmentCount}
+            </div>
+          )}
+
+          {/* Task timer + pause count */}
+          {hasTimer && (
+            <div className="flex items-center gap-1.5">
+              <div className={cn(
+                "flex items-center gap-0.5 text-[10px] shrink-0 font-medium",
+                isRunning   ? "text-blue-500"                :
+                isCompleted ? "text-green-600 dark:text-green-400" :
+                              "text-muted-foreground"
+              )}>
+                {isRunning && (
+                  <span className="inline-block size-1.5 rounded-full bg-blue-500 animate-pulse mr-0.5" />
+                )}
+                <Timer className="size-3" />
+                <span>{formatSeconds(seconds)}</span>
+              </div>
+              {pauseCount > 0 && (
+                <div
+                  className="flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0"
+                  title={`Paused ${pauseCount} time${pauseCount !== 1 ? "s" : ""}`}
+                >
+                  <PauseCircle className="size-3" />
+                  <span>{pauseCount}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

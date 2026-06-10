@@ -11,6 +11,48 @@ from app.schemas.user_admin import CreateUserRequest, UpdateUserRequest
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Roles that only a Super Admin may assign
+_ELEVATED_ROLES = {"Super Admin", "Admin"}
+
+
+async def _check_role_assignment(db: AsyncIOMotorDatabase, caller: dict, target_role_id: str) -> dict:
+    """
+    Validate that `caller` is allowed to assign `target_role_id`.
+    Returns the resolved role document so callers don't have to fetch it again.
+
+    Rules
+    -----
+    - Super Admin  → can assign any role
+    - Admin        → can assign Coordinator, Team Leader, Employee only
+    - Others       → blocked by the users.create/edit permission check upstream;
+                     still guarded here as a safety net
+    """
+    try:
+        role_oid = ObjectId(target_role_id)
+    except InvalidId:
+        raise ValueError("Invalid role ID")
+
+    role_doc = await db["roles"].find_one({"_id": role_oid})
+    if not role_doc:
+        raise ValueError("Role not found")
+
+    target_name = role_doc.get("role_name", "")
+
+    caller_role = caller.get("_role") or {}
+    caller_name = caller_role.get("role_name", "")
+
+    # Super Admin can do anything
+    if caller_name == "Super Admin":
+        return role_doc
+
+    # Admin cannot assign Super Admin or Admin
+    if target_name in _ELEVATED_ROLES:
+        raise ValueError(
+            f"Admin cannot assign the '{target_name}' role — only Super Admin can."
+        )
+
+    return role_doc
+
 
 def _serialize_user(doc: dict, role_doc: Optional[dict] = None) -> dict:
     from app.services.role_service import _serialize_role
@@ -94,19 +136,15 @@ async def get_user(db: AsyncIOMotorDatabase, user_id: str) -> dict:
     return await _with_role(db, doc)
 
 
-async def create_user(db: AsyncIOMotorDatabase, data: CreateUserRequest) -> dict:
+async def create_user(
+    db: AsyncIOMotorDatabase, data: CreateUserRequest, caller: Optional[dict] = None
+) -> dict:
     existing = await db["users"].find_one({"email": data.email.lower()})
     if existing:
         raise ValueError("Email already in use")
 
-    # Validate role_id
-    try:
-        role_oid = ObjectId(data.role_id)
-    except InvalidId:
-        raise ValueError("Invalid role ID")
-    role_doc = await db["roles"].find_one({"_id": role_oid})
-    if not role_doc:
-        raise ValueError("Role not found")
+    # Validate role_id + enforce assignment rules
+    role_doc = await _check_role_assignment(db, caller or {}, data.role_id)
 
     now = datetime.now(timezone.utc)
     doc = {
@@ -128,7 +166,9 @@ async def create_user(db: AsyncIOMotorDatabase, data: CreateUserRequest) -> dict
     return _serialize_user(doc, role_doc)
 
 
-async def update_user(db: AsyncIOMotorDatabase, user_id: str, data: UpdateUserRequest) -> dict:
+async def update_user(
+    db: AsyncIOMotorDatabase, user_id: str, data: UpdateUserRequest, caller: Optional[dict] = None
+) -> dict:
     try:
         oid = ObjectId(user_id)
     except InvalidId:
@@ -150,13 +190,8 @@ async def update_user(db: AsyncIOMotorDatabase, user_id: str, data: UpdateUserRe
     if data.password is not None:
         patch["hashed_password"] = _pwd.hash(data.password)
     if data.role_id is not None:
-        try:
-            role_oid = ObjectId(data.role_id)
-        except InvalidId:
-            raise ValueError("Invalid role ID")
-        role_doc = await db["roles"].find_one({"_id": role_oid})
-        if not role_doc:
-            raise ValueError("Role not found")
+        # Validate role exists AND caller is allowed to assign it
+        await _check_role_assignment(db, caller or {}, data.role_id)
         patch["role_id"] = data.role_id
     if data.designation is not None:
         patch["designation"] = data.designation

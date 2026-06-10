@@ -2,10 +2,9 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Search, ShieldCheck, Pencil, Trash2, X } from "lucide-react";
+import { Search, ShieldCheck, Pencil, X, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RoleDialog } from "@/components/roles/RoleDialog";
-import { DeleteRoleDialog } from "@/components/roles/DeleteRoleDialog";
 import { PermissionMatrix } from "@/components/roles/PermissionMatrix";
 import { useRoles } from "@/hooks/useRoles";
 import type { Role } from "@/types/role";
@@ -16,7 +15,6 @@ export default function RolesPage() {
   const [page, setPage]             = useState(1);
   const [dialogOpen, setDialog]     = useState(false);
   const [editRole, setEditRole]     = useState<Role | null>(null);
-  const [deleteRole, setDeleteRole] = useState<Role | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data, isLoading } = useRoles({ search, page, limit: 15 });
@@ -24,7 +22,6 @@ export default function RolesPage() {
   const total = data?.total ?? 0;
   const pages = data?.pages ?? 1;
 
-  function openCreate() { setEditRole(null); setDialog(true); }
   function openEdit(role: Role) { setEditRole(role); setDialog(true); }
 
   return (
@@ -32,13 +29,13 @@ export default function RolesPage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Roles</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{total} role{total !== 1 ? "s" : ""}</p>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <ShieldCheck className="size-6 text-primary" /> Roles
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {total} system role{total !== 1 ? "s" : ""} · Click a role to view its permissions · Edit to customise access
+          </p>
         </div>
-        <Button size="sm" onClick={openCreate} className="gap-1.5">
-          <Plus className="size-3.5" />
-          New Role
-        </Button>
       </div>
 
       {/* Search */}
@@ -118,20 +115,17 @@ export default function RolesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openEdit(role); }}
-                            className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                            title="Edit"
-                          >
-                            <Pencil className="size-3.5" />
-                          </button>
-                          {!role.is_system_role && (
+                          {role.role_name === "Super Admin" ? (
+                            <span className="flex items-center gap-1 text-xs text-muted-foreground px-1.5">
+                              <Lock className="size-3" /> Locked
+                            </span>
+                          ) : (
                             <button
-                              onClick={(e) => { e.stopPropagation(); setDeleteRole(role); }}
-                              className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                              title="Delete"
+                              onClick={(e) => { e.stopPropagation(); openEdit(role); }}
+                              className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                              title="Edit permissions"
                             >
-                              <Trash2 className="size-3.5" />
+                              <Pencil className="size-3.5" />
                             </button>
                           )}
                         </div>
@@ -176,7 +170,6 @@ export default function RolesPage() {
 
       {/* Dialogs */}
       <RoleDialog open={dialogOpen} onClose={() => setDialog(false)} role={editRole} />
-      <DeleteRoleDialog open={!!deleteRole} onClose={() => setDeleteRole(null)} role={deleteRole} />
     </div>
   );
 }

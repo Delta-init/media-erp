@@ -27,6 +27,14 @@ export const MODULES = [
   "users",
   "roles",
   "settings",
+  // ── new modules ──────────────────
+  "schedule",
+  "rules",
+  "email_reports",
+  "social",
+  "chat",
+  "clients",
+  "pipeline",
 ] as const;
 
 export type ModuleKey = (typeof MODULES)[number];
@@ -35,16 +43,24 @@ export const ACTIONS = ["view", "create", "edit", "delete", "export"] as const;
 export type ActionKey = (typeof ACTIONS)[number];
 
 export const MODULE_LABELS: Record<ModuleKey, string> = {
-  dashboard: "Overview",
-  connectors: "Connectors",
-  reports: "Reports",
-  campaigns: "Campaigns",
-  projects: "Projects",
-  teams: "Teams",
-  ai: "AI Queries",
-  users: "Users",
-  roles: "Roles",
-  settings: "Settings",
+  dashboard:    "Overview",
+  connectors:   "Connectors",
+  reports:      "Reports",
+  campaigns:    "Campaigns",
+  projects:     "Projects",
+  teams:        "Teams",
+  ai:           "AI Queries",
+  users:        "Users",
+  roles:        "Roles",
+  settings:     "Settings",
+  // new modules
+  schedule:     "Schedule",
+  rules:        "Rules",
+  email_reports: "Email Reports",
+  social:       "Publish / DM",
+  chat:         "Chat",
+  clients:      "Clients",
+  pipeline:     "Pipelines",
 };
 
 export function emptyPermissions(): Record<string, ModulePermissions> {

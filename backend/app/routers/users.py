@@ -35,12 +35,13 @@ async def get_users(
 async def create_user_endpoint(
     body: CreateUserRequest,
     db: AsyncIOMotorDatabase = Depends(get_db),
-    _: dict = Depends(check_permission("users", "create")),
+    current_user: dict = Depends(check_permission("users", "create")),
 ):
     try:
-        user = await create_user(db, body)
+        user = await create_user(db, body, caller=current_user)
     except ValueError as exc:
-        return error_response(str(exc), status_code=409)
+        status_code = 403 if "cannot assign" in str(exc).lower() else 409
+        return error_response(str(exc), status_code=status_code)
     return success_response(user, "User created", status_code=201)
 
 
@@ -69,12 +70,17 @@ async def update_user_endpoint(
     user_id: str,
     body: UpdateUserRequest,
     db: AsyncIOMotorDatabase = Depends(get_db),
-    _: dict = Depends(check_permission("users", "edit")),
+    current_user: dict = Depends(check_permission("users", "edit")),
 ):
     try:
-        user = await update_user(db, user_id, body)
+        user = await update_user(db, user_id, body, caller=current_user)
     except ValueError as exc:
-        code = 404 if "not found" in str(exc) else 409
+        if "cannot assign" in str(exc).lower():
+            code = 403
+        elif "not found" in str(exc).lower():
+            code = 404
+        else:
+            code = 409
         return error_response(str(exc), status_code=code)
     return success_response(user, "User updated")
 

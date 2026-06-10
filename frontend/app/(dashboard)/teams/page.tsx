@@ -14,6 +14,7 @@ import {
   type Team,
 } from "@/hooks/useTeams";
 import { UserPicker } from "@/components/teams/UserPicker";
+import { useAuthStore } from "@/stores/authStore";
 
 // ── Colour palette for teams ──────────────────────────────────────────────────
 
@@ -211,7 +212,7 @@ function TeamCard({ team, onDelete }: { team: Team; onDelete: (id: string) => vo
               )}
             </div>
           </div>
-          {(isAdmin || isLeader) && (
+          {isAdmin && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onDelete(team.id); }}
@@ -269,7 +270,9 @@ export default function TeamsPage() {
   const [search, setSearch]       = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const { data: teams = [], isLoading, isError } = useTeams();
-  const deleteTeam = useDeleteTeam();
+  const deleteTeam    = useDeleteTeam();
+  const { hasPermission } = useAuthStore();
+  const canCreateTeam = hasPermission("teams", "create");
 
   const filtered = teams.filter((t) =>
     t.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -291,9 +294,11 @@ export default function TeamsPage() {
             Organise your people into focused teams.
           </p>
         </div>
-        <Button onClick={() => setShowCreate(true)} size="sm">
-          <Plus className="size-4 mr-1.5" /> New Team
-        </Button>
+        {canCreateTeam && (
+          <Button onClick={() => setShowCreate(true)} size="sm">
+            <Plus className="size-4 mr-1.5" /> New Team
+          </Button>
+        )}
       </div>
 
       {/* Search */}

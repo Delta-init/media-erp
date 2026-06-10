@@ -39,6 +39,7 @@ export interface AssignableUser {
   designation: string;
   avatar?: string;
   status: string;
+  role_name?: string;   // system role name e.g. "Employee", "Team Leader"
 }
 
 export interface MemberReport {

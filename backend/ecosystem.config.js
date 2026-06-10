@@ -72,7 +72,7 @@ module.exports = {
       cwd:         BACKEND,
       interpreter: "none",
 
-      instances:                1,
+     
       autorestart:              true,
       watch:                    false,
       max_memory_restart:       "512M",
@@ -142,31 +142,31 @@ module.exports = {
     //  • Beat is separated from the worker (unlike Dockerfile.worker's -B flag)
     //    so PM2 can restart them independently.
     // ─────────────────────────────────────────────────────────────────────────
-    {
-      name:   "mediaerp-beat",
-      script: `${PY_BIN}/celery`,
-      args: [
-        "-A", "app.tasks.celery_app",
-        "beat",
-        "--loglevel=info",
-        `--schedule=${BACKEND}/celerybeat-schedule`,
-      ].join(" "),
-      cwd:         BACKEND,
-      interpreter: "none",
+    // {
+    //   name:   "mediaerp-beat",
+    //   script: `${PY_BIN}/celery`,
+    //   args: [
+    //     "-A", "app.tasks.celery_app",
+    //     "beat",
+    //     "--loglevel=info",
+    //     `--schedule=${BACKEND}/celerybeat-schedule`,
+    //   ].join(" "),
+    //   cwd:         BACKEND,
+    //   interpreter: "none",
 
-      instances:           1,   // ← NEVER increase; one beat per deployment
-      autorestart:         true,
-      watch:               false,
-      max_memory_restart:  "128M",
-      restart_delay:       5000,
+    //   instances:           1,   // ← NEVER increase; one beat per deployment
+    //   autorestart:         true,
+    //   watch:               false,
+    //   max_memory_restart:  "128M",
+    //   restart_delay:       5000,
 
-      out_file:        "./logs/beat-out.log",
-      error_file:      "./logs/beat-err.log",
-      log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-      merge_logs:      true,
+    //   out_file:        "./logs/beat-out.log",
+    //   error_file:      "./logs/beat-err.log",
+    //   log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+    //   merge_logs:      true,
 
-      env: { ...BASE_ENV },
-    },
+    //   env: { ...BASE_ENV },
+    // },
 
   ],
 };

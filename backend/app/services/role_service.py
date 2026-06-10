@@ -100,7 +100,11 @@ async def update_role(db: AsyncIOMotorDatabase, role_id: str, data: UpdateRoleRe
         raise ValueError("Role not found")
 
     if doc.get("is_system_role") and data.role_name and data.role_name != doc["role_name"]:
-        raise ValueError("Cannot rename a system role")
+        raise ValueError("Cannot rename a system role.")
+
+    # Super Admin role is fully immutable — no permission edits either
+    if doc["role_name"] == "Super Admin" and data.permissions is not None:
+        raise ValueError("Super Admin permissions cannot be modified.")
 
     patch: dict = {"updated_at": datetime.now(timezone.utc)}
 

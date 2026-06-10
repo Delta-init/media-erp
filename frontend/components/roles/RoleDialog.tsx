@@ -17,6 +17,7 @@ interface Props {
 
 export function RoleDialog({ open, onClose, role }: Props) {
   const isEdit = !!role;
+  const isSuperAdminRole = role?.role_name === "Super Admin";
   const createRole = useCreateRole();
   const updateRole = useUpdateRole();
 
@@ -137,11 +138,18 @@ export function RoleDialog({ open, onClose, role }: Props) {
 
                 {/* Permission Matrix */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Permissions</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Permissions</label>
+                    {isSuperAdminRole && (
+                      <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                        Super Admin permissions are locked
+                      </span>
+                    )}
+                  </div>
                   <PermissionMatrix
                     permissions={permissions}
                     onChange={setPerms}
-                    readOnly={!!(isEdit && role?.is_system_role)}
+                    readOnly={isSuperAdminRole}
                   />
                 </div>
               </div>
@@ -149,11 +157,13 @@ export function RoleDialog({ open, onClose, role }: Props) {
               {/* Footer */}
               <div className="flex justify-end gap-2 border-t px-6 py-4">
                 <Button type="button" variant="outline" onClick={close}>
-                  Cancel
+                  {isSuperAdminRole ? "Close" : "Cancel"}
                 </Button>
-                <Button type="submit" disabled={isPending || !name.trim()}>
-                  {isPending ? "Saving…" : isEdit ? "Save Changes" : "Create Role"}
-                </Button>
+                {!isSuperAdminRole && (
+                  <Button type="submit" disabled={isPending || !name.trim()}>
+                    {isPending ? "Saving…" : isEdit ? "Save Changes" : "Create Role"}
+                  </Button>
+                )}
               </div>
             </form>
           </motion.div>

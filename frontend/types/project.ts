@@ -43,6 +43,16 @@ export interface Attachment {
   backend: string;
 }
 
+export interface TaskTimingInterval {
+  started_at: string;   // ISO datetime
+  ended_at: string | null;
+}
+
+export interface TaskTiming {
+  intervals: TaskTimingInterval[];
+  total_seconds: number | null;  // populated when approved
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -55,9 +65,17 @@ export interface Task {
   team_id?: string | null;
   attachments?: Attachment[];
   reedit_reason?: string;
+  timing?: TaskTiming;
   created_by: string;
   created_at: string;
   updated_at: string;
+  // Pipeline tracing (optional)
+  pipeline_id?: string | null;
+  pipeline_node_id?: string | null;
+  pipeline_parent_task_id?: string | null;
+  // Pipeline response extras (not stored — added by backend on approve)
+  _pipeline_branches?: import("@/types/pipeline").PipelineBranchOption[];
+  _pipeline_auto_advanced?: boolean;
 }
 
 export interface CreateTaskPayload {
@@ -70,6 +88,8 @@ export interface CreateTaskPayload {
   due_date?: string | null;
   team_id?: string | null;
   attachments?: Attachment[];
+  pipeline_id?: string | null;
+  pipeline_node_id?: string | null;
 }
 
 export interface UpdateTaskPayload {

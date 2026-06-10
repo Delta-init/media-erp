@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ClipboardCheck,
   Calculator,
+  GitBranch,
   Kanban,
   Key,
   LayoutDashboard,
@@ -47,19 +48,20 @@ const NAV_ITEMS = [
   { label: "Connectors", href: "/connectors", icon: Cable,           module: "connectors" },
   { label: "Reports",    href: "/reports",    icon: TrendingUp,      module: "reports" },
   { label: "Campaigns",  href: "/campaigns",  icon: Target,          module: "campaigns" },
-  { label: "Schedule",      href: "/schedule",      icon: CalendarDays },
-  { label: "Rules",         href: "/rules",         icon: Zap },
-  { label: "Email Reports", href: "/email-reports",  icon: Mail },
+  { label: "Schedule",      href: "/schedule",      icon: CalendarDays,    module: "schedule" },
+  { label: "Rules",         href: "/rules",         icon: Zap,             module: "rules" },
+  { label: "Email Reports", href: "/email-reports",  icon: Mail,            module: "email_reports" },
   { label: "Projects",      href: "/projects",      icon: Kanban,          module: "projects" },
   { label: "Teams",         href: "/teams",         icon: UsersRound,      module: "teams" },
+  { label: "Pipelines",     href: "/pipeline",      icon: GitBranch,       module: "pipeline" },
   { label: "Leader Desk",   href: "/leader",        icon: ClipboardCheck },
   { label: "AI Queries", href: "/ai",         icon: Sparkles,        module: "ai" },
-  { label: "Publish",    href: "/social",     icon: Share2 },
-  { label: "Send DM",    href: "/social/dm",  icon: Send },
-  { label: "Chat",       href: "/chat",       icon: MessageCircle },
-  { label: "Clients",    href: "/clients",    icon: Building2 },
+  { label: "Publish",    href: "/social",     icon: Share2,          module: "social" },
+  { label: "Send DM",    href: "/social/dm",  icon: Send,            module: "social" },
+  { label: "Chat",       href: "/chat",       icon: MessageCircle,   module: "chat" },
+  { label: "Clients",    href: "/clients",    icon: Building2,       module: "clients" },
   { label: "Users",      href: "/users",      icon: Users,           module: "users" },
-  { label: "Roles",      href: "/roles",      icon: ShieldCheck,     module: "roles" },
+  { label: "Roles",      href: "/roles",      icon: ShieldCheck,     superAdminOnly: true },
 ];
 
 const BOTTOM_ITEMS = [
@@ -76,6 +78,7 @@ interface NavItemProps {
   collapsed: boolean;
   onClick?: () => void;
   module?: string;
+  superAdminOnly?: boolean;
   badge?: number;
 }
 
@@ -170,6 +173,7 @@ function SidebarContent({
   // Filter nav items the user can see
   const visibleNav = NAV_ITEMS.filter((item) =>
     (!item.module || hasPermission(item.module, "view")) &&
+    (!item.superAdminOnly || isSuperAdmin) &&
     (item.href !== "/leader" || showLeaderDesk)
   );
   const visibleBottom = BOTTOM_ITEMS.filter((item) =>

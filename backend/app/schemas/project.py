@@ -21,6 +21,9 @@ class CreateTaskRequest(BaseModel):
     due_date: Optional[str] = None    # ISO date string YYYY-MM-DD
     team_id: Optional[str] = None     # optional team association
     attachments: Optional[list[Attachment]] = None
+    # Pipeline assignment (optional — only for tasks entering a pipeline)
+    pipeline_id: Optional[str] = None
+    pipeline_node_id: Optional[str] = None
 
 
 class UpdateTaskRequest(BaseModel):

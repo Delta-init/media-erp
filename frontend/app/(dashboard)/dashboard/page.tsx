@@ -1,375 +1,382 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useMemo } from "react";
+import { motion } from "framer-motion";
 import {
-  AlertTriangle, BarChart2, CheckCircle2, DollarSign, Eye,
-  MousePointerClick, RefreshCw, Settings2, TrendingDown,
-  TrendingUp, Users, X,
+  AlertTriangle, Calendar, CheckCircle2, Circle,
+  ClipboardCheck, Clock, FileClock, Kanban,
+  Layers, Loader2, PauseCircle, RotateCcw, Users, Zap,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-
 import Link from "next/link";
-import { DateRangePicker } from "@/components/shared/DateRangePicker";
-import { KpiCard } from "@/components/reports/KpiCard";
-import { SpendTrendChart } from "@/components/reports/SpendTrendChart";
-import { PlatformDonut } from "@/components/reports/PlatformDonut";
-import { DataTable } from "@/components/reports/DataTable";
-import { Pagination } from "@/components/reports/Pagination";
-import { useOverview, useTrend, useCampaigns, useCustomReport } from "@/hooks/useReports";
-import { useBudgetAlerts, useBudgetPacing } from "@/hooks/useBudget";
-import { useKpiTargets } from "@/hooks/useKpiTargets";
+import { useTasks } from "@/hooks/useProjects";
+import { useTeams } from "@/hooks/useTeams";
 import { useAuthStore } from "@/stores/authStore";
-import { kpiContainerVariants } from "@/lib/animations";
-import type { OverviewKpis, ReportMetric } from "@/types/report";
+import { BOARD_COLUMNS, isTaskOverdue, assigneeLabel } from "@/types/project";
+import type { Task } from "@/types/project";
+import { useTaskTimer, formatSeconds } from "@/hooks/useTaskTimer";
+import { cn } from "@/lib/utils";
 
-// ── Widget config ─────────────────────────────────────────────────────────────
-const WIDGET_KEYS = ["kpis","trend","donut","campaigns","budget"] as const;
-type WidgetKey = typeof WIDGET_KEYS[number];
-const WIDGET_LABELS: Record<WidgetKey, string> = {
-  kpis: "KPI Cards", trend: "Performance Trend",
-  donut: "Spend by Platform", campaigns: "Top Campaigns", budget: "Budget Pacing",
-};
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function useWidgetPrefs() {
-  const [prefs, setPrefs] = useState<Record<WidgetKey, boolean>>(() => {
-    try {
-      const raw = localStorage.getItem("dashboard_widgets");
-      if (raw) return JSON.parse(raw);
-    } catch {}
-    return { kpis: true, trend: true, donut: true, campaigns: true, budget: true };
-  });
-  function toggle(key: WidgetKey) {
-    setPrefs(p => {
-      const next = { ...p, [key]: !p[key] };
-      localStorage.setItem("dashboard_widgets", JSON.stringify(next));
-      return next;
-    });
-  }
-  return { prefs, toggle };
-}
-
-// ── Pacing status badge ───────────────────────────────────────────────────────
-const PACING_BADGE: Record<string, { label: string; className: string }> = {
-  on_track:    { label: "On Track",    className: "bg-emerald-500/10 text-emerald-600" },
-  overpacing:  { label: "Overpacing",  className: "bg-amber-500/10 text-amber-600" },
-  underpacing: { label: "Underpacing", className: "bg-blue-500/10 text-blue-600" },
-  exceeded:    { label: "Exceeded",    className: "bg-red-500/10 text-red-600" },
-};
-
-// ── Default date range: last 30 days ─────────────────────────────────────────
-function today()         { return new Date().toISOString().slice(0, 10); }
-function daysAgo(n: number) {
-  const d = new Date(); d.setDate(d.getDate() - n + 1);
+function today() { return new Date().toISOString().slice(0, 10); }
+function daysFromNow(n: number) {
+  const d = new Date(); d.setDate(d.getDate() + n);
   return d.toISOString().slice(0, 10);
 }
 
-// ── KPI card config ───────────────────────────────────────────────────────────
-interface KpiConf { metric: keyof OverviewKpis; label: string; icon: LucideIcon; color: string; bg: string; }
-const KPI_CONF: KpiConf[] = [
-  { metric: "spend",       label: "Ad Spend",    icon: DollarSign,        color: "text-amber-500",   bg: "bg-amber-500/10"   },
-  { metric: "impressions", label: "Impressions",  icon: Eye,               color: "text-blue-500",    bg: "bg-blue-500/10"    },
-  { metric: "clicks",      label: "Clicks",       icon: MousePointerClick, color: "text-sky-500",     bg: "bg-sky-500/10"     },
-  { metric: "conversions", label: "Conversions",  icon: Users,             color: "text-emerald-500", bg: "bg-emerald-500/10" },
-  { metric: "revenue",     label: "Revenue",      icon: TrendingUp,        color: "text-green-500",   bg: "bg-green-500/10"   },
-  { metric: "ctr",         label: "CTR",          icon: BarChart2,         color: "text-violet-500",  bg: "bg-violet-500/10"  },
-  { metric: "roas",        label: "ROAS",         icon: TrendingUp,        color: "text-indigo-500",  bg: "bg-indigo-500/10"  },
-];
+const STATUS_ICON: Record<string, React.ReactNode> = {
+  pending:        <Circle        className="size-3.5 text-amber-500" />,
+  started:        <Zap           className="size-3.5 text-blue-500" />,
+  break:          <Clock         className="size-3.5 text-orange-500" />,
+  reedit:         <RotateCcw     className="size-3.5 text-rose-500" />,
+  pending_review: <ClipboardCheck className="size-3.5 text-purple-500" />,
+  approved:       <CheckCircle2  className="size-3.5 text-green-500" />,
+};
 
-const TREND_METRICS: ReportMetric[] = ["spend", "clicks", "impressions", "conversions", "revenue"];
+const STATUS_BAR_COLOR: Record<string, string> = {
+  pending:        "bg-amber-400",
+  started:        "bg-blue-500",
+  break:          "bg-orange-400",
+  reedit:         "bg-rose-500",
+  pending_review: "bg-purple-500",
+  approved:       "bg-green-500",
+};
 
+const PRIORITY_DOT: Record<string, string> = {
+  high:   "bg-red-500",
+  medium: "bg-amber-400",
+  low:    "bg-slate-400",
+};
+
+// ── Stat card ─────────────────────────────────────────────────────────────────
+function StatCard({
+  label, value, icon, color, bg, sub, href,
+}: {
+  label: string; value: number; icon: React.ReactNode;
+  color: string; bg: string; sub?: string; href?: string;
+}) {
+  const inner = (
+    <div className={cn(
+      "flex flex-col gap-3 rounded-xl border bg-card p-5 shadow-sm transition-shadow",
+      href && "hover:shadow-md cursor-pointer"
+    )}>
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+        <div className={cn("flex size-8 items-center justify-center rounded-lg", bg)}>{icon}</div>
+      </div>
+      <div>
+        <p className={cn("text-3xl font-bold tabular-nums", color)}>{value}</p>
+        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+      </div>
+    </div>
+  );
+  return href ? <Link href={href}>{inner}</Link> : inner;
+}
+
+// ── Task timer chip ───────────────────────────────────────────────────────────
+function TaskTimerChip({ task }: { task: Task }) {
+  const { seconds, isRunning, isCompleted, hasTimer, pauseCount } = useTaskTimer(task);
+  if (!hasTimer) return null;
+  return (
+    <div className="flex items-center gap-1.5 shrink-0">
+      <div className={cn(
+        "flex items-center gap-1 text-[10px] font-medium tabular-nums",
+        isRunning   ? "text-blue-500"  :
+        isCompleted ? "text-green-600" :
+                      "text-muted-foreground"
+      )}>
+        {isRunning && <span className="size-1.5 rounded-full bg-blue-500 animate-pulse" />}
+        <Clock className="size-3" />
+        {formatSeconds(seconds)}
+      </div>
+      {pauseCount > 0 && (
+        <div
+          className="flex items-center gap-0.5 text-[10px] text-muted-foreground"
+          title={`Paused ${pauseCount} time${pauseCount !== 1 ? "s" : ""}`}
+        >
+          <PauseCircle className="size-3" />
+          {pauseCount}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Task row ──────────────────────────────────────────────────────────────────
+function TaskRow({ task }: { task: Task }) {
+  const col    = BOARD_COLUMNS.find(c => c.key === task.status);
+  const overdue = isTaskOverdue(task);
+  return (
+    <div className="flex items-center gap-3 py-2.5 border-b last:border-0">
+      <div className="shrink-0">{STATUS_ICON[task.status] ?? <Circle className="size-3.5 text-muted-foreground" />}</div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{task.title}</p>
+        <div className="flex items-center gap-2 mt-0.5">
+          {assigneeLabel(task) && (
+            <span className="text-[10px] text-muted-foreground">{assigneeLabel(task)}</span>
+          )}
+          {col && (
+            <span className="text-[10px] font-medium rounded-full px-1.5 py-px"
+              style={{ background: `${col.color}20`, color: col.color }}>
+              {col.label}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <TaskTimerChip task={task} />
+        <span className={cn("size-2 rounded-full", PRIORITY_DOT[task.priority])} title={task.priority} />
+        {task.due_date && (
+          <span className={cn("text-[10px] tabular-nums", overdue ? "text-red-500 font-semibold" : "text-muted-foreground")}>
+            {new Date(task.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const user = useAuthStore((s) => s.user);
+  const user      = useAuthStore(s => s.user);
   const firstName = user?.name?.split(" ")[0] ?? "there";
 
-  const [dateFrom, setDateFrom] = useState(daysAgo(30));
-  const [dateTo,   setDateTo]   = useState(today());
-  const [trendMetric, setTrendMetric] = useState<ReportMetric>("spend");
-  const [page, setPage] = useState(1);
-  const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
-  const [showWidgetMenu, setShowWidgetMenu] = useState(false);
+  const { data: tasks = [], isLoading } = useTasks({});
+  const { data: teams = [] } = useTeams();
 
-  const { prefs, toggle } = useWidgetPrefs();
-
-  // ── Data ──────────────────────────────────────────────────────────────────
-  const overview     = useOverview(dateFrom, dateTo);
-  const trend        = useTrend(trendMetric, "daily", dateFrom, dateTo);
-  const campaigns    = useCampaigns({ page, limit: 5, sort_by: "spend", sort_dir: "desc", date_from: dateFrom, date_to: dateTo });
-  const budgetAlerts = useBudgetAlerts();
-  const budgetPacing = useBudgetPacing();
-  const { data: kpiTargets } = useKpiTargets();
-
-  // Platform breakdown via custom report
-  const platformMut = useCustomReport();
-  const [platformData, setPlatformData] = useState<{ platform: string; value: number }[]>([]);
-  const [platformLoading, setPlatformLoading] = useState(false);
-
-  // Fetch platform data whenever dates change
-  useState(() => {
-    setPlatformLoading(true);
-    platformMut.mutate(
-      { metrics: ["spend"], dimensions: ["platform"], filters: { date_from: dateFrom, date_to: dateTo }, chart_type: "donut" },
-      {
-        onSuccess(data) {
-          const rows = data.data as { platform?: string; spend?: number }[];
-          setPlatformData(rows.filter((r) => r.platform && r.spend != null).map((r) => ({ platform: r.platform!, value: r.spend! })));
-          setPlatformLoading(false);
-        },
-        onError() { setPlatformLoading(false); },
-      }
-    );
-  });
-
-  const campRows  = campaigns.data?.campaigns ?? [];
-  const campTotal = campaigns.data?.total  ?? 0;
-  const campPages = campaigns.data?.pages  ?? 0;
-
-  // ── Greeting ──────────────────────────────────────────────────────────────
-  const hour = new Date().getHours();
+  const hour     = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
-  const activeAlerts = (budgetAlerts.data ?? []).filter(a => !dismissedAlerts.includes(a.campaign_id));
-  const pacingGoals  = budgetPacing.data ?? [];
+  // ── Computed stats ────────────────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const now  = today();
+    const week = daysFromNow(7);
 
-  // Build metric → target_value lookup from KPI targets (first matching target per metric)
-  const kpiTargetMap = (kpiTargets ?? []).reduce<Record<string, number>>((acc, t) => {
-    if (!(t.metric in acc)) acc[t.metric] = t.target_value;
-    return acc;
-  }, {});
+    const approvedWithTime = tasks.filter(
+      t => t.status === "approved" && t.timing?.total_seconds != null
+    );
+    const avgSeconds = approvedWithTime.length > 0
+      ? Math.round(approvedWithTime.reduce((s, t) => s + (t.timing!.total_seconds ?? 0), 0) / approvedWithTime.length)
+      : null;
+
+    return {
+      total:         tasks.length,
+      active:        tasks.filter(t => t.status === "started").length,
+      inProgress:    tasks.filter(t => t.status === "started" || t.status === "break").length,
+      pendingReview: tasks.filter(t => t.status === "pending_review").length,
+      reedit:        tasks.filter(t => t.status === "reedit").length,
+      approved:      tasks.filter(t => t.status === "approved").length,
+      overdue:       tasks.filter(t => isTaskOverdue(t)).length,
+      dueSoon:       tasks.filter(t => t.due_date && t.due_date >= now && t.due_date <= week && t.status !== "approved"),
+      avgSeconds,
+      avgLabel:      avgSeconds != null ? formatSeconds(avgSeconds) : null,
+    };
+  }, [tasks]);
+
+  // Pipeline: count per status
+  const pipeline = useMemo(() => {
+    return BOARD_COLUMNS.map(col => ({
+      ...col,
+      count: tasks.filter(t => t.status === col.key).length,
+    }));
+  }, [tasks]);
+
+  // Recent activity (last 8 updated)
+  const recentTasks = useMemo(() =>
+    [...tasks].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()).slice(0, 8),
+    [tasks]
+  );
+
+  // Upcoming deadlines (due in next 7 days, not approved)
+  const upcomingDeadlines = useMemo(() =>
+    stats.dueSoon.slice().sort((a, b) => (a.due_date ?? "").localeCompare(b.due_date ?? "")).slice(0, 8),
+    [stats.dueSoon]
+  );
+
+  const totalForBar = Math.max(tasks.length, 1);
 
   return (
-    <div className="space-y-6">
-      {/* Welcome + date range */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25, ease: "easeOut" }}
-        >
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {greeting}, {firstName} 👋
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Here&apos;s what&apos;s happening across your marketing channels.
-          </p>
-        </motion.div>
+    <div className="space-y-6 pb-6">
 
-        <div className="flex items-center gap-2">
-          <DateRangePicker
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            onFromChange={(v) => { setDateFrom(v); setPage(1); }}
-            onToChange={(v)   => { setDateTo(v);   setPage(1); }}
-          />
-          {/* Widget customization */}
-          <div className="relative">
-            <motion.button
-              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-              onClick={() => setShowWidgetMenu(v => !v)}
-              className="flex size-8 items-center justify-center rounded-lg border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Customize widgets"
-            >
-              <Settings2 className="size-4" />
-            </motion.button>
-            <AnimatePresence>
-              {showWidgetMenu && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                  className="absolute right-0 top-10 z-50 w-52 rounded-xl border bg-card p-3 shadow-xl"
-                >
-                  <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Show Widgets</p>
-                  {WIDGET_KEYS.map(k => (
-                    <label key={k} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-muted transition-colors">
-                      <input
-                        type="checkbox" checked={prefs[k]}
-                        onChange={() => toggle(k)}
-                        className="size-3.5 accent-primary rounded"
-                      />
-                      <span className="text-sm">{WIDGET_LABELS[k]}</span>
-                    </label>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: "easeOut" }}
+      >
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {greeting}, {firstName} 👋
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Here&apos;s what&apos;s happening across your media projects today.
+        </p>
+      </motion.div>
+
+      {/* ── KPI Cards ──────────────────────────────────────────────────────── */}
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-muted-foreground py-4">
+          <Loader2 className="size-4 animate-spin" /> Loading overview…
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <StatCard label="Total Tasks"     value={stats.total}         icon={<Layers        className="size-4 text-slate-600 dark:text-slate-300" />} color="text-foreground"    bg="bg-slate-100 dark:bg-slate-800"    href="/projects" />
+          <StatCard label="In Progress"     value={stats.inProgress}    icon={<Zap           className="size-4 text-blue-600" />}                      color="text-blue-600"      bg="bg-blue-500/10"    href="/projects" />
+          <StatCard label="Pending Review"  value={stats.pendingReview} icon={<ClipboardCheck className="size-4 text-purple-600" />}                   color="text-purple-600"    bg="bg-purple-500/10"  href="/leader"   />
+          <StatCard label="Approved"        value={stats.approved}      icon={<CheckCircle2  className="size-4 text-green-600" />}                      color="text-green-600"     bg="bg-green-500/10"   href="/projects" />
+          <StatCard label="Overdue"         value={stats.overdue}       icon={<AlertTriangle className="size-4 text-red-600" />}                        color={stats.overdue > 0 ? "text-red-600" : "text-foreground"} bg="bg-red-500/10" href="/projects" sub={stats.overdue > 0 ? "Needs attention" : "All on time"} />
+          {/* Avg completion time — text card (no numeric value prop) */}
+          <div className="flex flex-col gap-3 rounded-xl border bg-card p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Avg Completion</span>
+              <div className="flex size-8 items-center justify-center rounded-lg bg-indigo-500/10">
+                <Clock className="size-4 text-indigo-600" />
+              </div>
+            </div>
+            <div>
+              <p className="text-3xl font-bold text-indigo-600 tabular-nums">
+                {stats.avgLabel ?? "—"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {stats.avgSeconds != null ? `across ${stats.approved} approved task${stats.approved !== 1 ? "s" : ""}` : "No completed tasks yet"}
+              </p>
+            </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Pipeline bar ───────────────────────────────────────────────────── */}
+      {!isLoading && tasks.length > 0 && (
+        <div className="rounded-xl border bg-card p-5 shadow-sm">
+          <p className="text-sm font-semibold mb-4 flex items-center gap-2">
+            <Kanban className="size-4 text-primary" /> Task Pipeline
+          </p>
+          {/* Segmented bar */}
+          <div className="flex h-3 w-full rounded-full overflow-hidden gap-0.5 mb-4">
+            {pipeline.map(col =>
+              col.count > 0 ? (
+                <div
+                  key={col.key}
+                  className={cn("h-full transition-all", STATUS_BAR_COLOR[col.key] ?? "bg-muted")}
+                  style={{ width: `${(col.count / totalForBar) * 100}%` }}
+                  title={`${col.label}: ${col.count}`}
+                />
+              ) : null
+            )}
+          </div>
+          {/* Legend */}
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {pipeline.map(col => (
+              <div key={col.key} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className={cn("size-2.5 rounded-full shrink-0", STATUS_BAR_COLOR[col.key] ?? "bg-muted")} />
+                <span>{col.label}</span>
+                <span className="font-semibold text-foreground">{col.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Two-column section ─────────────────────────────────────────────── */}
+      <div className="grid gap-4 lg:grid-cols-2">
+
+        {/* Recent Activity */}
+        <div className="rounded-xl border bg-card p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-semibold flex items-center gap-2">
+              <FileClock className="size-4 text-primary" /> Recent Activity
+            </p>
+            <Link href="/projects" className="text-xs text-primary hover:underline">View all →</Link>
+          </div>
+          {isLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+          ) : recentTasks.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">No tasks yet.</p>
+          ) : (
+            <div>{recentTasks.map(t => <TaskRow key={t.id} task={t} />)}</div>
+          )}
+        </div>
+
+        {/* Upcoming Deadlines */}
+        <div className="rounded-xl border bg-card p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-semibold flex items-center gap-2">
+              <Calendar className="size-4 text-primary" /> Upcoming Deadlines
+              <span className="text-[10px] text-muted-foreground font-normal">(next 7 days)</span>
+            </p>
+            <Link href="/projects" className="text-xs text-primary hover:underline">View all →</Link>
+          </div>
+          {isLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+          ) : upcomingDeadlines.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
+              <CheckCircle2 className="size-8 opacity-30" />
+              <p className="text-sm">No deadlines in the next 7 days.</p>
+            </div>
+          ) : (
+            <div>{upcomingDeadlines.map(t => <TaskRow key={t.id} task={t} />)}</div>
+          )}
         </div>
       </div>
 
-      {/* Budget Alerts Banner */}
-      <AnimatePresence>
-        {activeAlerts.slice(0, 3).map(alert => (
-          <motion.div
-            key={alert.campaign_id}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-              <AlertTriangle className="size-4 shrink-0 text-amber-500" />
-              <p className="flex-1 text-sm text-amber-700 dark:text-amber-400">
-                <strong>Budget Alert:</strong> &quot;{alert.campaign_name}&quot; has used{" "}
-                <strong>{alert.spend_pct.toFixed(0)}%</strong> of its{" "}
-                ${alert.total_budget.toLocaleString()} budget (${alert.actual_spend.toFixed(0)} spent)
-              </p>
-              <button
-                onClick={() => setDismissedAlerts(d => [...d, alert.campaign_id])}
-                className="shrink-0 rounded-md p-1 text-amber-600 hover:bg-amber-500/20 transition-colors"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          </motion.div>
-        ))}
-      </AnimatePresence>
-
-      {/* KPI grid */}
-      {prefs.kpis && (
-        <motion.div
-          variants={kpiContainerVariants}
-          initial="initial"
-          animate="animate"
-          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-        >
-          {KPI_CONF.map((conf) => (
-            <KpiCard
-              key={conf.metric}
-              metric={conf.metric}
-              label={conf.label}
-              icon={conf.icon}
-              color={conf.color}
-              bg={conf.bg}
-              data={overview.data?.kpis[conf.metric]}
-              loading={overview.isLoading}
-              target={kpiTargetMap[conf.metric]}
-            />
-          ))}
-        </motion.div>
-      )}
-
-      {/* Trend + Donut */}
-      {(prefs.trend || prefs.donut) && (
-        <div className="grid gap-4 lg:grid-cols-3">
-          {prefs.trend && (
-            <div className="lg:col-span-2 rounded-xl border bg-card p-5 shadow-sm">
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium">Performance Trend</span>
-                <div className="ml-auto flex gap-1">
-                  {TREND_METRICS.map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setTrendMetric(m)}
-                      className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
-                        trendMetric === m
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <SpendTrendChart
-                data={trend.data?.data ?? []}
-                metric={trendMetric}
-                loading={trend.isLoading}
-              />
-            </div>
-          )}
-          {prefs.donut && (
-            <div className={`rounded-xl border bg-card p-5 shadow-sm ${!prefs.trend ? "lg:col-span-3" : ""}`}>
-              <p className="mb-4 text-sm font-medium">Spend by Platform</p>
-              <PlatformDonut data={platformData} metric="spend" loading={platformLoading} />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Budget Pacing */}
-      {prefs.budget && pacingGoals.length > 0 && (
+      {/* ── Team summary (shows if user has teams) ─────────────────────────── */}
+      {teams.length > 0 && (
         <div className="rounded-xl border bg-card p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <p className="text-sm font-medium">Budget Pacing</p>
-            <Link href="/campaigns" className="text-xs text-primary hover:underline">Manage →</Link>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  {["Campaign","Platform","Budget","Spent","Expected","Pacing","Status"].map(h => (
-                    <th key={h} className="pb-2 text-left text-xs font-medium text-muted-foreground">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {pacingGoals.map(g => {
-                  const badge = PACING_BADGE[g.status] ?? PACING_BADGE.on_track;
-                  const pct   = g.total_budget > 0 ? (g.actual_spend / g.total_budget) * 100 : 0;
-                  return (
-                    <tr key={g.campaign_id} className="border-b last:border-0">
-                      <td className="py-2.5 pr-4 max-w-[160px] truncate font-medium" title={g.campaign_name}>{g.campaign_name}</td>
-                      <td className="py-2.5 pr-4 text-muted-foreground capitalize">{g.platform.replace(/_/g, " ")}</td>
-                      <td className="py-2.5 pr-4 tabular-nums">${g.total_budget.toLocaleString()}</td>
-                      <td className="py-2.5 pr-4 tabular-nums">
-                        <div className="flex flex-col gap-1">
-                          <span>${g.actual_spend.toFixed(0)}</span>
-                          <div className="h-1 w-24 rounded-full bg-muted overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500"}`}
-                              style={{ width: `${Math.min(pct, 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-2.5 pr-4 tabular-nums text-muted-foreground">${g.expected_spend.toFixed(0)}</td>
-                      <td className="py-2.5 pr-4 tabular-nums">
-                        <span className={`flex items-center gap-1 text-xs font-medium ${g.pacing_ratio > 1 ? "text-amber-600" : "text-blue-600"}`}>
-                          {g.pacing_ratio > 1 ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
-                          {(g.pacing_ratio * 100).toFixed(0)}%
-                        </span>
-                      </td>
-                      <td className="py-2.5">
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}>
-                          {g.status === "on_track" && <CheckCircle2 className="size-3" />}
-                          {badge.label}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {prefs.budget && pacingGoals.length === 0 && !budgetPacing.isLoading && (
-        <div className="rounded-xl border border-dashed bg-card p-5">
-          <p className="text-sm text-muted-foreground text-center">
-            No budget goals set.{" "}
-            <Link href="/campaigns" className="text-primary hover:underline">
-              Set budget goals in Campaigns →
-            </Link>
+          <p className="text-sm font-semibold mb-4 flex items-center gap-2">
+            <Users className="size-4 text-primary" /> My Teams
           </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {teams.slice(0, 6).map(team => {
+              const teamTasks   = tasks.filter(t => t.team_id === team.id);
+              const teamApproved = teamTasks.filter(t => t.status === "approved").length;
+              const teamActive   = teamTasks.filter(t => t.status === "started").length;
+              const pct = teamTasks.length > 0 ? Math.round((teamApproved / teamTasks.length) * 100) : 0;
+              return (
+                <div key={team.id} className="rounded-lg border p-3.5 hover:bg-muted/30 transition-colors">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="size-2.5 rounded-full shrink-0" style={{ background: team.color ?? "#6366f1" }} />
+                    <p className="text-sm font-medium truncate">{team.name}</p>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+                    <span>{teamTasks.length} task{teamTasks.length !== 1 ? "s" : ""}</span>
+                    <span>{teamActive} active · {teamApproved} done</span>
+                  </div>
+                  {/* Completion bar */}
+                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-green-500 transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">{pct}% complete</p>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Top campaigns */}
-      {prefs.campaigns && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">Top Campaigns by Spend</p>
-            {campaigns.isFetching && <RefreshCw className="size-3.5 animate-spin text-muted-foreground" />}
-          </div>
-          <DataTable
-            rows={campRows} sortBy="spend" sortDir="desc" onSort={() => {}} loading={campaigns.isLoading}
-          />
-          <Pagination page={page} pages={campPages} total={campTotal} limit={5} onPage={setPage} />
-        </div>
-      )}
+      {/* ── Quick links ────────────────────────────────────────────────────── */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { label: "Projects Board",  href: "/projects", icon: <Kanban        className="size-4" />, desc: "View & manage all tasks" },
+          { label: "Leader Desk",     href: "/leader",   icon: <ClipboardCheck className="size-4" />, desc: "Review pending submissions" },
+          { label: "Teams",           href: "/teams",    icon: <Users          className="size-4" />, desc: "Manage your teams" },
+          { label: "Campaigns",       href: "/campaigns",icon: <Zap            className="size-4" />, desc: "Track media campaigns" },
+        ].map(item => (
+          <Link key={item.href} href={item.href}
+            className="flex items-center gap-3 rounded-xl border bg-card p-4 shadow-sm hover:shadow-md hover:border-primary/30 transition-all group"
+          >
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+              {item.icon}
+            </div>
+            <div>
+              <p className="text-sm font-medium">{item.label}</p>
+              <p className="text-[11px] text-muted-foreground">{item.desc}</p>
+            </div>
+          </Link>
+        ))}
+      </div>
+
     </div>
   );
 }

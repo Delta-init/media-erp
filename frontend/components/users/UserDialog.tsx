@@ -6,6 +6,7 @@ import { X, UserCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCreateUser, useUpdateUser } from "@/hooks/useUsers";
 import { useRolesSimple } from "@/hooks/useRoles";
+import { useAuthStore } from "@/stores/authStore";
 import type { User } from "@/types/user";
 
 interface Props {
@@ -19,6 +20,16 @@ export function UserDialog({ open, onClose, user }: Props) {
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const { data: roles = [] } = useRolesSimple();
+  const { user: currentUser } = useAuthStore();
+
+  const isSuperAdmin =
+    currentUser?.role?.is_system_role &&
+    currentUser?.role?.role_name === "Super Admin";
+
+  // Super Admin can assign any role; Admin can only assign non-elevated roles
+  const assignableRoles = isSuperAdmin
+    ? roles
+    : roles.filter((r) => r.role_name !== "Super Admin" && r.role_name !== "Admin");
 
   const [name, setName]           = useState("");
   const [email, setEmail]         = useState("");
@@ -37,9 +48,9 @@ export function UserDialog({ open, onClose, user }: Props) {
       setStatus(user.status ?? "active");
     } else {
       setName(""); setEmail(""); setPassword("");
-      setRoleId(roles[0]?.id ?? ""); setDesg(""); setStatus("active");
+      setRoleId(assignableRoles[0]?.id ?? ""); setDesg(""); setStatus("active");
     }
-  }, [user, open, roles]);
+  }, [user, open, assignableRoles]);
 
   function close() { onClose(); }
 
@@ -148,7 +159,7 @@ export function UserDialog({ open, onClose, user }: Props) {
                       required
                     >
                       <option value="">Select role…</option>
-                      {roles.map((r) => (
+                      {assignableRoles.map((r) => (
                         <option key={r.id} value={r.id}>{r.role_name}</option>
                       ))}
                     </select>

@@ -2,34 +2,17 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "App",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
-      "port": 3000
-    },
-    {
-      "name": "Frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "-p", "3001"],
-      "port": 3001
+      "name": "frontend",
+      "runtimeExecutable": "start-preview.bat",
+      "runtimeArgs": [],
+      "port": 3000,
+      "autoPort": true
     },
     {
       "name": "Backend",
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "backend"],
       "port": 8000
-    },
-    {
-      "name": "MongoDB",
-      "runtimeExecutable": "docker",
-      "runtimeArgs": ["run", "--rm", "-p", "27017:27017", "mongo:7.0"],
-      "port": 27017
-    },
-    {
-      "name": "Full Stack",
-      "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up"],
-      "port": 3000
     }
   ]
 }

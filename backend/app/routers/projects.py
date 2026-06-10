@@ -32,41 +32,57 @@ router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
 
 async def _resolve_visibility(current_user: dict, team_id: str, db: AsyncIOMotorDatabase):
-    """Return visibility level based on user's role and team membership."""
-    uid = str(current_user["_id"])
+    """
+    Return (visibility, uid, leader_team_ids).
 
-    # Super admin sees everything
-    if current_user.get("role") == "admin":
-        return "all", uid
+    visibility levels
+    -----------------
+    "all"          → no restriction (Super Admin / Admin / Coordinator)
+    "team"         → all tasks in one specific team (Team Leader of that team)
+    "leader_teams" → tasks in every team the caller leads (Team Leader, no team_id filter)
+    "own"          → only tasks assigned to uid (Employee / member)
 
-    # If a specific team is requested, check membership
-    if team_id:
-        team = await db["teams"].find_one({"_id_str": team_id})
-        if not team:
-            # Try by string id matching
-            from bson import ObjectId
-            from bson.errors import InvalidId
+    leader_team_ids is set only when visibility == "leader_teams".
+    """
+    from bson import ObjectId
+    from bson.errors import InvalidId
+
+    uid       = str(current_user["_id"])
+    role_doc  = current_user.get("_role") or {}
+    role_name = role_doc.get("role_name", "")
+
+    # ── Elevated roles see everything ─────────────────────────────────────────
+    if role_name in ("Super Admin", "Admin", "Coordinator"):
+        return "all", uid, None
+
+    # ── Team Leader — scoped to teams they lead ───────────────────────────────
+    if role_name == "Team Leader":
+        if team_id:
+            # Specific team requested — check whether they lead it
             try:
                 team = await db["teams"].find_one({"_id": ObjectId(team_id)})
-            except InvalidId:
+            except (InvalidId, Exception):
                 team = None
-        if team:
-            for m in team.get("members", []):
-                if m["user_id"] == uid:
-                    if m["role"] == "leader":
-                        return "team", uid   # leader sees all team tasks
-                    else:
-                        return "own", uid    # member sees only own tasks
-        return "own", uid
+            if team:
+                for m in team.get("members", []):
+                    if m["user_id"] == uid:
+                        if m["role"] == "leader":
+                            return "team", uid, None    # sees all tasks in that team
+                        else:
+                            return "own", uid, None     # member → own tasks only
+            return "own", uid, None
+        else:
+            # No team filter — collect all teams where they are leader
+            leader_teams = await db["teams"].find(
+                {"members": {"$elemMatch": {"user_id": uid, "role": "leader"}}}
+            ).to_list(500)
+            if leader_teams:
+                ids = [str(t["_id"]) for t in leader_teams]
+                return "leader_teams", uid, ids
+            return "own", uid, None
 
-    # No team filter — check if user is leader in ANY team
-    is_leader_somewhere = await db["teams"].find_one(
-        {"members": {"$elemMatch": {"user_id": uid, "role": "leader"}}}
-    )
-    if is_leader_somewhere:
-        return "all", uid   # leaders see all tasks across their teams (filtered further by team_id)
-
-    return "own", uid
+    # ── Employee / other — own tasks only ─────────────────────────────────────
+    return "own", uid, None
 
 
 @router.get("")
@@ -82,13 +98,14 @@ async def get_tasks(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    visibility, uid = await _resolve_visibility(current_user, team_id, db)
+    visibility, uid, leader_team_ids = await _resolve_visibility(current_user, team_id, db)
 
-    # Member filter — only allowed for admins or team leaders.
+    # Member filter — only allowed for elevated roles or team leaders.
     # A regular member is locked to their own tasks regardless of this param.
-    if member_id and visibility in ("all", "team"):
-        visibility = "own"      # reuse own-filter logic
-        uid = member_id         # but scope to the requested member
+    if member_id and visibility in ("all", "team", "leader_teams"):
+        visibility       = "own"   # reuse own-filter logic
+        uid              = member_id
+        leader_team_ids  = None    # clear team scope
 
     tasks = await list_tasks(
         db,
@@ -101,6 +118,7 @@ async def get_tasks(
         team_id=team_id,
         visibility=visibility,
         user_id=uid,
+        leader_team_ids=leader_team_ids or [],
     )
     return success_response(data=tasks, message="Tasks retrieved")
 
@@ -143,9 +161,12 @@ async def leader_queue(
     from app.services.project_service import _serialize
 
     uid = str(current_user["_id"])
-    is_admin = current_user.get("role") == "admin"
+    role_doc   = current_user.get("_role") or {}
+    role_name  = role_doc.get("role_name", "")
+    # SA / Admin / Coordinator see all teams' queues; Team Leaders see only their led teams
+    is_elevated = role_name in ("Super Admin", "Admin", "Coordinator")
 
-    if is_admin:
+    if is_elevated:
         teams = await db["teams"].find({}).to_list(500)
     else:
         teams = await db["teams"].find(
@@ -154,7 +175,7 @@ async def leader_queue(
 
     if not teams:
         return success_response(
-            data={"is_leader": is_admin, "review": [], "incoming": [], "teams": []},
+            data={"is_leader": is_elevated, "review": [], "incoming": [], "teams": []},
             message="Leader queue",
         )
 
@@ -194,6 +215,120 @@ async def leader_queue(
             "teams":    teams_out,
         },
         message="Leader queue",
+    )
+
+
+# ── Pipeline child-task helper ─────────────────────────────────────────────────
+
+async def _create_pipeline_child(
+    db,
+    parent_task: dict,
+    pipeline_id: str,
+    target_node_id: str,
+    target_team_id: str,
+) -> None:
+    """Create a new pending task in the next pipeline team."""
+    from datetime import datetime, timezone as tz
+    now = datetime.now(tz.utc)
+    doc = {
+        "title": parent_task["title"],
+        "description": parent_task.get("description", ""),
+        "priority": parent_task.get("priority", "medium"),
+        "status": "pending",
+        "assigned_to": "",
+        "assigned_to_name": "",
+        "due_date": None,
+        "team_id": target_team_id,
+        "attachments": [],
+        "created_by": parent_task.get("created_by", ""),
+        "created_at": now,
+        "updated_at": now,
+        "timing": {"intervals": [], "total_seconds": None},
+        "pipeline_id": pipeline_id,
+        "pipeline_node_id": target_node_id,
+        "pipeline_parent_task_id": parent_task.get("id") or str(parent_task.get("_id", "")),
+    }
+    await db["project_tasks"].insert_one(doc)
+
+
+# ── Manual pipeline-advance (branch selection) ─────────────────────────────────
+
+@router.post("/{task_id}/pipeline-advance")
+async def pipeline_advance(
+    task_id: str,
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Called after the approver picks a branch in a multi-branch pipeline node.
+    body: { "target_node_id": "n-xxx" }
+    """
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    from app.services import workflow
+
+    target_node_id = body.get("target_node_id")
+    if not target_node_id:
+        return error_response("target_node_id is required", status_code=400)
+
+    try:
+        oid = ObjectId(task_id)
+    except InvalidId:
+        return error_response("Invalid task ID", status_code=422)
+
+    task = await db["project_tasks"].find_one({"_id": oid})
+    if not task:
+        return error_response("Task not found", status_code=404)
+
+    if task.get("status") != "approved":
+        return error_response("Task must be approved before advancing.", status_code=400)
+
+    if not task.get("pipeline_id"):
+        return error_response("Task is not part of a pipeline.", status_code=400)
+
+    # Auth check — only leaders/admins may advance pipeline
+    if not await workflow.can_approve(current_user, task, db):
+        return error_response("Only a team leader can advance a pipeline task.", status_code=403)
+
+    pipeline = await db["pipelines"].find_one({"_id": ObjectId(task["pipeline_id"])})
+    if not pipeline:
+        return error_response("Pipeline not found", status_code=404)
+
+    target_node = next(
+        (n for n in pipeline.get("nodes", []) if n["id"] == target_node_id), None
+    )
+    if not target_node:
+        return error_response("Target node not found in pipeline.", status_code=404)
+
+    # Create child task in chosen team
+    from app.services.project_service import _serialize
+    from datetime import datetime, timezone as tz
+    now = datetime.now(tz.utc)
+    child_doc = {
+        "title": task["title"],
+        "description": task.get("description", ""),
+        "priority": task.get("priority", "medium"),
+        "status": "pending",
+        "assigned_to": "",
+        "assigned_to_name": "",
+        "due_date": None,
+        "team_id": target_node["team_id"],
+        "attachments": [],
+        "created_by": task.get("created_by", ""),
+        "created_at": now,
+        "updated_at": now,
+        "timing": {"intervals": [], "total_seconds": None},
+        "pipeline_id": task["pipeline_id"],
+        "pipeline_node_id": target_node_id,
+        "pipeline_parent_task_id": str(task["_id"]),
+    }
+    result = await db["project_tasks"].insert_one(child_doc)
+    child_doc["_id"] = result.inserted_id
+
+    return success_response(
+        data={"child_task": _serialize(child_doc)},
+        message="Task advanced in pipeline",
     )
 
 
@@ -242,6 +377,12 @@ async def edit_task(
         if new_status == "started":
             await workflow.bump_other_started(db, current)
 
+        # Apply timing update for this transition
+        from datetime import datetime, timezone as tz
+        updates["timing"] = workflow.apply_timing(
+            cur_status, new_status, current.get("timing"), datetime.now(tz.utc)
+        )
+
     # Reassigning a task to someone else is a leader/admin action
     if "assigned_to" in updates and updates["assigned_to"] != current.get("assigned_to"):
         if not await workflow.can_assign_to_others(current_user, current.get("team_id"), db):
@@ -250,6 +391,60 @@ async def edit_task(
     task = await update_task(db, task_id, updates)
     if not task:
         return error_response("Task not found", status_code=404)
+
+    # ── Pipeline advancement (only on approve) ────────────────────────────────
+    if new_status == "approved" and task.get("pipeline_id"):
+        try:
+            pipeline = await db["pipelines"].find_one(
+                {"_id": ObjectId(task["pipeline_id"])}
+            )
+        except Exception:
+            pipeline = None
+
+        if pipeline:
+            cur_node_id = task.get("pipeline_node_id")
+            outgoing = [
+                e for e in pipeline.get("edges", [])
+                if e["source"] == cur_node_id
+            ]
+
+            if len(outgoing) == 1:
+                # ── Single branch → auto-advance silently ─────────────────────
+                tgt_nid  = outgoing[0]["target"]
+                tgt_node = next(
+                    (n for n in pipeline.get("nodes", []) if n["id"] == tgt_nid), None
+                )
+                if tgt_node:
+                    await _create_pipeline_child(
+                        db, task, str(pipeline["_id"]), tgt_nid, tgt_node["team_id"]
+                    )
+                task["_pipeline_auto_advanced"] = True
+
+            elif len(outgoing) > 1:
+                # ── Multiple branches → return options for approver to pick ───
+                branches = []
+                for edge in outgoing:
+                    tgt_nid  = edge["target"]
+                    tgt_node = next(
+                        (n for n in pipeline.get("nodes", []) if n["id"] == tgt_nid), None
+                    )
+                    if not tgt_node:
+                        continue
+                    try:
+                        team = await db["teams"].find_one(
+                            {"_id": ObjectId(tgt_node["team_id"])}
+                        )
+                    except Exception:
+                        team = None
+                    branches.append({
+                        "edge_id": edge["id"],
+                        "target_node_id": tgt_nid,
+                        "target_team_id": tgt_node["team_id"],
+                        "target_team_name": team["name"] if team else "Unknown Team",
+                        "edge_label": edge.get("label") or "",
+                    })
+                task["_pipeline_branches"] = branches
+
     return success_response(data=task, message="Task updated")
 
 

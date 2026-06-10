@@ -21,7 +21,13 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 
 from app.config import settings
-from app.models.role import all_permissions, viewer_permissions, manager_permissions
+from app.models.role import (
+    all_permissions,
+    admin_permissions,
+    coordinator_permissions,
+    team_leader_permissions,
+    employee_permissions,
+)
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -33,21 +39,33 @@ ADMIN_NAME = os.getenv("ADMIN_NAME", "Super Admin")
 SEED_ROLES = [
     {
         "role_name": "Super Admin",
-        "description": "Full access to everything",
+        "description": "Unrestricted access to all modules including role management.",
         "is_system_role": True,
         "permissions": all_permissions(),
     },
     {
-        "role_name": "Manager",
-        "description": "Can manage connectors, projects, and view reports",
-        "is_system_role": False,
-        "permissions": manager_permissions(),
+        "role_name": "Admin",
+        "description": "Full operational access; cannot manage roles.",
+        "is_system_role": True,
+        "permissions": admin_permissions(),
     },
     {
-        "role_name": "Viewer",
-        "description": "Read-only access to reports and main modules",
-        "is_system_role": False,
-        "permissions": viewer_permissions(),
+        "role_name": "Coordinator",
+        "description": "Manages campaigns, reports, and projects. Read-only on users.",
+        "is_system_role": True,
+        "permissions": coordinator_permissions(),
+    },
+    {
+        "role_name": "Team Leader",
+        "description": "Full project & task management within their teams.",
+        "is_system_role": True,
+        "permissions": team_leader_permissions(),
+    },
+    {
+        "role_name": "Employee",
+        "description": "Works on assigned tasks; view access to most modules.",
+        "is_system_role": True,
+        "permissions": employee_permissions(),
     },
 ]
 

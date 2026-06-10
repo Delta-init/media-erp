@@ -10,6 +10,7 @@ import { AddTaskModal } from "@/components/projects/AddTaskModal";
 import { ProjectFiltersBar } from "@/components/projects/ProjectFilters";
 import { useTasks } from "@/hooks/useProjects";
 import { useTeams, useTeam } from "@/hooks/useTeams";
+import { useAuthStore } from "@/stores/authStore";
 import { cn } from "@/lib/utils";
 import type { ProjectFilters } from "@/types/project";
 
@@ -39,8 +40,17 @@ export default function ProjectsPage() {
     return EMPTY_FILTERS;
   });
 
-  // Teams the current user belongs to
-  const { data: teams = [] } = useTeams();
+  const { user: currentUser } = useAuthStore();
+  const isTeamLeader = currentUser?.role?.role_name === "Team Leader";
+
+  // All teams the current user can see
+  const { data: allTeams = [] } = useTeams();
+  // Team Leaders only see the teams they actually lead in the Projects dropdown.
+  // Other roles see all their teams.
+  const teams = isTeamLeader
+    ? allTeams.filter(t => t.my_role === "leader")
+    : allTeams;
+
   // Enriched detail (members + my_role) for the selected team
   const { data: teamDetail } = useTeam(filters.team_id || "");
 
