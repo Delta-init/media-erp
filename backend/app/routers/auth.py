@@ -1,7 +1,9 @@
 import base64
 import hmac as _hmac
 import hashlib
+import httpx
 import logging
+import os
 import secrets
 import struct
 import time
@@ -354,3 +356,44 @@ async def onboarding_status(current_user: dict = Depends(get_current_user)):
         {"onboarding_complete": bool(current_user.get("onboarding_complete", False))},
         "Onboarding status retrieved",
     )
+
+
+# ── Root ERP SSO Login ────────────────────────────────────────────────────────
+
+class SsoLoginRequest(BaseModel):
+    ssoToken: str
+
+@router.post("/sso-login")
+async def sso_login(body: SsoLoginRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """Exchange a Root ERP SSO token for a local Media ERP access token."""
+    root_erp_url = os.environ.get("ROOT_ERP_API_URL", "http://localhost:5001")
+    try:
+        async with httpx.AsyncClient(timeout=5) as http:
+            resp = await http.get(
+                f"{root_erp_url}/api/auth/verify-sso-token",
+                params={"token": body.ssoToken},
+            )
+        if resp.status_code != 200:
+            return error_response("Invalid or expired SSO token", 401)
+        admin = resp.json().get("data", {})
+        if not admin.get("email"):
+            return error_response("Invalid SSO payload", 401)
+    except httpx.RequestError:
+        return error_response("Could not reach Root ERP", 503)
+
+    # Find or create user
+    user = await db["users"].find_one({"email": admin["email"]})
+    if not user:
+        from app.utils.hash import hash_password as _hash_password
+        new_user = {
+            "email": admin["email"],
+            "name": admin.get("name", "Super Admin"),
+            "password": _hash_password(secrets.token_hex(32)),
+            "is_active": True,
+            "role_id": "",
+        }
+        result = await db["users"].insert_one(new_user)
+        user = await db["users"].find_one({"_id": result.inserted_id})
+
+    payload = await _token_payload(user, db)
+    return success_response(payload, "SSO sign-in successful")
