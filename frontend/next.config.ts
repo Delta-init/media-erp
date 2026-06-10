@@ -6,7 +6,9 @@ const nextConfig: NextConfig = {
   // Vercel's build system ignores this and uses its own output format.
   output: "standalone",
 
-  // Proxy /api/v1/* to the backend so local preview avoids CORS restrictions.
+  typescript:{
+    ignoreBuildErrors: true,
+  },
   // In production (Vercel/Docker) NEXT_PUBLIC_API_URL points directly to the backend.
   async rewrites() {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";

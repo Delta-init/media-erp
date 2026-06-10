@@ -43,6 +43,12 @@ export interface Attachment {
   backend: string;
 }
 
+export interface TaskTiming {
+  total_seconds: number | null;
+  started_at?: string | null;
+  approved_at?: string | null;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -61,6 +67,7 @@ export interface Task {
   created_by: string;
   created_at: string;
   updated_at: string;
+  timing?: TaskTiming | null;
 }
 
 export interface CreateTaskPayload {
