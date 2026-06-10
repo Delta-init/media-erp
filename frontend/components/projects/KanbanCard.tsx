@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, Calendar, GripVertical, Paperclip, PauseCircle, Timer, Trash2 } from "lucide-react";
+import { GripVertical, PauseCircle, Timer, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import type { Task, TaskStatus } from "@/types/project";
-import { BOARD_COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel, allowedColumns } from "@/types/project";
+import { BOARD_COLUMNS, PRIORITY_META, allowedColumns } from "@/types/project";
 import { useTaskTimer, formatSeconds } from "@/hooks/useTaskTimer";
 import { TaskDetailModal } from "./TaskDetailModal";
 
@@ -29,43 +29,43 @@ export function KanbanCard({ task, overlay = false }: Props) {
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
-    // Suppress transition while actively dragging — prevents rubber-band jitter
-    transition: isDragging ? "none" : transition,
+    transition: isDragging ? "none" : transition ?? "transform 200ms ease",
     touchAction: "none",
     willChange: "transform",
   };
 
-  const deleteTask = useDeleteTask();
-  const updateTask = useUpdateTask();
-  const canApprove = useCanApprove();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const { seconds, isRunning, isCompleted, hasTimer, pauseCount } = useTaskTimer(task);
+  const deleteTask  = useDeleteTask();
+  const updateTask  = useUpdateTask();
+  const canApprove  = useCanApprove();
 
-  // In Pending Review only a team leader / admin may move the task
-  // (approve or rework). Everyone else sees it locked.
-  const reviewLocked = task.status === "pending_review" && !canApprove(task);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [detailOpen,    setDetailOpen]    = useState(false);
+
+  const { seconds, isRunning, isCompleted, hasTimer, pauseCount } =
+    useTaskTimer(task);
+
+  const reviewLocked =
+    task.status === "pending_review" && !canApprove(task);
+
   const statusOptions = reviewLocked
     ? BOARD_COLUMNS.filter((c) => c.key === "pending_review")
     : allowedColumns(task.status);
 
-  const meta = PRIORITY_META[task.priority];
-  const isOverdue = isTaskOverdue(task);
-  const attachmentCount = task.attachments?.length ?? 0;
-  const assignee = assigneeLabel(task);
+  const meta       = PRIORITY_META[task.priority] ?? PRIORITY_META.medium;
+  const col        = BOARD_COLUMNS.find((c) => c.key === task.status);
+  const accentColor = col?.color ?? "#64748b";
 
   function handleStatusChange(s: TaskStatus) {
     updateTask.mutate({ id: task.id, payload: { status: s } });
   }
 
-  // ── Dragging: render a clean placeholder slot so the column keeps its shape ──
-  // The actual card travels with the cursor via DragOverlay in KanbanBoard.
+  // Ghost placeholder while dragging
   if (isDragging && !overlay) {
     return (
       <div
         ref={setNodeRef}
         style={style}
-        className="min-h-[104px] rounded-xl border-2 border-dashed border-primary/25 bg-primary/[0.04] dark:bg-primary/[0.06]"
+        className="h-[76px] rounded-xl border-2 border-dashed border-primary/20 bg-primary/[0.03]"
         aria-hidden="true"
       />
     );
@@ -74,163 +74,138 @@ export function KanbanCard({ task, overlay = false }: Props) {
   return (
     <div
       ref={setNodeRef}
-      style={style}
-      // Entire card surface is the drag handle — much more ergonomic than grip-only
+      style={{
+        ...style,
+        borderLeft: `3px solid ${accentColor}70`,
+      }}
       {...attributes}
       {...listeners}
       className={cn(
-        "group relative rounded-xl border bg-card p-3.5 shadow-sm select-none",
-        "cursor-grab active:cursor-grabbing transition-shadow duration-150",
+        "group relative rounded-xl border bg-card px-3 py-2.5 shadow-sm select-none",
+        "cursor-grab active:cursor-grabbing",
+        "transition-[box-shadow,border-color] duration-150",
         overlay
-          ? "shadow-2xl rotate-[1.5deg] scale-[1.04] ring-2 ring-primary/30 cursor-grabbing"
-          : "hover:shadow-md hover:border-primary/20",
-        // Overdue tasks get a red border + subtle red wash
-        isOverdue && !overlay &&
-          "border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20 hover:border-red-400"
+          ? "shadow-2xl rotate-[1deg] scale-[1.03] ring-2 ring-primary/30 cursor-grabbing"
+          : "hover:shadow-md hover:border-primary/25",
       )}
     >
-      {/* Priority badge + grip icon (visual only — listeners are on the outer div) */}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <GripVertical className="mt-0.5 size-4 shrink-0 text-muted-foreground/25 pointer-events-none" />
-        <div className="flex items-center gap-1.5">
-          {isOverdue && (
-            <span className="flex items-center gap-0.5 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:bg-red-900/50 dark:text-red-400">
-              <AlertTriangle className="size-2.5" /> Overdue
-            </span>
+      {/* ── Row 1: grip · title · priority · delete ── */}
+      <div className="flex items-center gap-1.5 min-w-0">
+        <GripVertical
+          className="size-3.5 shrink-0 text-muted-foreground/20 pointer-events-none"
+        />
+
+        {/* Title — click opens detail modal */}
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); setDetailOpen(true); }}
+          className="flex-1 min-w-0 text-left"
+          title="View task details"
+        >
+          <p className="text-[13px] font-semibold leading-snug text-foreground truncate hover:text-primary transition-colors">
+            {task.title}
+          </p>
+        </button>
+
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+            meta.color
           )}
-          <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", meta.color)}>
-            {meta.label}
-          </span>
-        </div>
+        >
+          {meta.label}
+        </span>
+
+        {/* Delete — appears on hover */}
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirmDelete) {
+              deleteTask.mutate(task.id);
+              setConfirmDelete(false);
+            } else {
+              setConfirmDelete(true);
+              setTimeout(() => setConfirmDelete(false), 2500);
+            }
+          }}
+          className={cn(
+            "shrink-0 rounded-md p-1 opacity-0 group-hover:opacity-100 transition-all",
+            confirmDelete
+              ? "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400 opacity-100"
+              : "text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10"
+          )}
+          title={confirmDelete ? "Click again to confirm delete" : "Delete task"}
+        >
+          <Trash2 className="size-3" />
+        </button>
       </div>
 
-      {/* Title — click to open detail modal */}
-      <button
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => { e.stopPropagation(); setDetailOpen(true); }}
-        className="block text-left w-full pl-6"
-      >
-        <p className="text-sm font-medium leading-snug text-foreground mb-1.5 hover:underline cursor-pointer">
-          {task.title}
-        </p>
-      </button>
+      {/* ── Row 2: timer · pause count ── */}
+      {hasTimer && (
+        <div className="flex items-center gap-2.5 pl-5 mt-1.5">
+          <div
+            className={cn(
+              "flex items-center gap-1 text-[11px] font-medium tabular-nums",
+              isRunning    ? "text-blue-500"
+              : isCompleted ? "text-green-600 dark:text-green-400"
+              :               "text-muted-foreground"
+            )}
+          >
+            {isRunning && (
+              <span className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
+            )}
+            <Timer className="size-3" />
+            <span>{formatSeconds(seconds)}</span>
+          </div>
 
-      {/* Description */}
-      {task.description && (
-        <p className="text-[11px] text-muted-foreground line-clamp-2 pl-6 mb-2">
-          {task.description}
-        </p>
+          {pauseCount > 0 && (
+            <div
+              className="flex items-center gap-1 text-[11px] text-muted-foreground"
+              title={`Paused ${pauseCount} time${pauseCount !== 1 ? "s" : ""}`}
+            >
+              <PauseCircle className="size-3" />
+              <span>{pauseCount}</span>
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Reedit reason — visible to the assignee so they know what to fix */}
+      {/* ── Reedit reason — shown so member knows what to fix ── */}
       {task.status === "reedit" && task.reedit_reason && (
-        <div className="ml-6 mb-2 rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-1.5">
-          <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400">Sent to reedit</p>
-          <p className="text-[11px] text-foreground/80 leading-snug">{task.reedit_reason}</p>
+        <div className="ml-5 mt-1.5 rounded-md border border-rose-400/30 bg-rose-500/10 px-2 py-1">
+          <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 mb-0.5">
+            Sent to reedit
+          </p>
+          <p className="text-[11px] text-foreground/70 leading-snug line-clamp-2">
+            {task.reedit_reason}
+          </p>
         </div>
       )}
 
-      {/* Meta chips — wrap, never overlap */}
-      {(assignee || task.due_date || attachmentCount > 0 || hasTimer) && (
-        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 pl-6 mt-2">
-          {/* Assignee */}
-          {assignee && (
-            <div className="flex items-center gap-1 text-[10px] text-muted-foreground min-w-0">
-              <div className="flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[9px]">
-                {assignee[0]?.toUpperCase()}
-              </div>
-              <span className="truncate max-w-[70px]">{assignee}</span>
-            </div>
-          )}
-
-          {/* Due date */}
-          {task.due_date && (
-            <div className={cn(
-              "flex items-center gap-0.5 text-[10px] shrink-0",
-              isOverdue ? "text-red-500 font-semibold" : "text-muted-foreground"
-            )}>
-              <Calendar className="size-3" />
-              {new Date(task.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-            </div>
-          )}
-
-          {/* Attachments count */}
-          {attachmentCount > 0 && (
-            <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0">
-              <Paperclip className="size-3" />
-              {attachmentCount}
-            </div>
-          )}
-
-          {/* Task timer + pause count */}
-          {hasTimer && (
-            <div className="flex items-center gap-1.5">
-              <div className={cn(
-                "flex items-center gap-0.5 text-[10px] shrink-0 font-medium",
-                isRunning   ? "text-blue-500"                :
-                isCompleted ? "text-green-600 dark:text-green-400" :
-                              "text-muted-foreground"
-              )}>
-                {isRunning && (
-                  <span className="inline-block size-1.5 rounded-full bg-blue-500 animate-pulse mr-0.5" />
-                )}
-                <Timer className="size-3" />
-                <span>{formatSeconds(seconds)}</span>
-              </div>
-              {pauseCount > 0 && (
-                <div
-                  className="flex items-center gap-0.5 text-[10px] text-muted-foreground shrink-0"
-                  title={`Paused ${pauseCount} time${pauseCount !== 1 ? "s" : ""}`}
-                >
-                  <PauseCircle className="size-3" />
-                  <span>{pauseCount}</span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Status quick-switch on its own row — full width, no overlap */}
-      <div className="pl-6 mt-2">
+      {/* ── Status quick-switch ── */}
+      <div className="pl-5 mt-2">
         <select
           value={task.status}
-          onChange={e => handleStatusChange(e.target.value as TaskStatus)}
-          onPointerDown={e => e.stopPropagation()}
-          onClick={e => e.stopPropagation()}
+          onChange={(e) => handleStatusChange(e.target.value as TaskStatus)}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
           disabled={reviewLocked}
-          title={reviewLocked ? "Only a team leader can approve or rework this" : undefined}
-          className="w-full rounded-md border-0 bg-muted/50 px-2 py-1 text-[10px] font-medium outline-none cursor-pointer hover:bg-muted transition-colors disabled:cursor-not-allowed disabled:opacity-70"
+          title={
+            reviewLocked
+              ? "Only a team leader can approve or rework this task"
+              : undefined
+          }
+          style={{ color: accentColor }}
+          className="w-full rounded-md border-0 bg-muted/50 px-2 py-1 text-[10px] font-semibold outline-none cursor-pointer hover:bg-muted transition-colors disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {statusOptions.map(c => (
-            <option key={c.key} value={c.key}>{c.label}</option>
+          {statusOptions.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.label}
+            </option>
           ))}
         </select>
       </div>
-
-      {/* Delete button — stopPropagation so it doesn't trigger a drag */}
-      <button
-        onPointerDown={e => e.stopPropagation()}
-        onClick={e => {
-          e.stopPropagation();
-          if (confirmDelete) {
-            deleteTask.mutate(task.id);
-            setConfirmDelete(false);
-          } else {
-            setConfirmDelete(true);
-            setTimeout(() => setConfirmDelete(false), 2500);
-          }
-        }}
-        className={cn(
-          "absolute top-2 right-2 rounded-md p-1 opacity-0 group-hover:opacity-100 transition-all",
-          confirmDelete
-            ? "bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400 opacity-100"
-            : "text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10"
-        )}
-        title={confirmDelete ? "Click again to confirm" : "Delete task"}
-      >
-        <Trash2 className="size-3" />
-      </button>
 
       {detailOpen && (
         <TaskDetailModal task={task} onClose={() => setDetailOpen(false)} />

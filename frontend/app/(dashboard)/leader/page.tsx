@@ -4,11 +4,13 @@ import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ClipboardCheck, CheckCircle2, RotateCcw, Inbox, UserPlus,
-  Loader2, X, Calendar, Crown, ChevronDown,
+  Loader2, X, Calendar, Crown, ChevronDown, Paperclip,
+  MessageSquare, Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLeaderQueue, useUpdateTask, type LeaderTeam } from "@/hooks/useProjects";
 import { useAllTeams } from "@/hooks/useTeams";
+import { TaskDetailModal } from "@/components/projects/TaskDetailModal";
 import type { Task } from "@/types/project";
 import { PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
 import { cn } from "@/lib/utils";
@@ -40,7 +42,9 @@ function ReeditModal({ task, onClose }: { task: Task; onClose: () => void }) {
             <RotateCcw className="size-4 text-rose-500" />
             <h2 className="text-sm font-semibold">Send to Reedit</h2>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors"><X className="size-4" /></button>
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
+            <X className="size-4" />
+          </button>
         </div>
         <form onSubmit={submit} className="p-5 space-y-4">
           <p className="text-xs text-muted-foreground">
@@ -69,7 +73,6 @@ function ReeditModal({ task, onClose }: { task: Task; onClose: () => void }) {
 }
 
 // ── Approve + route modal ─────────────────────────────────────────────────────
-// Fetches ALL teams so the leader can route to any team, not just their own.
 
 function ApproveRouteModal({ task, onClose }: { task: Task; onClose: () => void }) {
   const [destTeamId, setDestTeamId] = useState("");
@@ -130,11 +133,7 @@ function ApproveRouteModal({ task, onClose }: { task: Task; onClose: () => void 
         </div>
         <div className="flex justify-end gap-3 border-t px-5 py-4">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button
-            onClick={confirm}
-            disabled={update.isPending}
-            className="bg-green-600 hover:bg-green-700 text-white"
-          >
+          <Button onClick={confirm} disabled={update.isPending} className="bg-green-600 hover:bg-green-700 text-white">
             {update.isPending
               ? <Loader2 className="size-4 animate-spin mr-1.5" />
               : <CheckCircle2 className="size-4 mr-1.5" />}
@@ -156,45 +155,102 @@ function ReviewCard({
   onReedit: (t: Task) => void;
   onApprove: (t: Task) => void;
 }) {
+  const [detailOpen, setDetailOpen] = useState(false);
   const pri = PRIORITY_META[task.priority];
   const overdue = isTaskOverdue(task);
+  const attachmentCount = task.attachments?.length ?? 0;
 
   return (
-    <div className="rounded-xl border bg-card p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3 mb-1.5">
-        <p className="text-sm font-semibold leading-snug truncate flex-1">{task.title}</p>
-        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0", pri.color)}>{pri.label}</span>
-      </div>
-      {task.description && <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{task.description}</p>}
-      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground mb-3">
-        {assigneeLabel(task) && (
-          <span className="flex items-center gap-1">
-            <span className="flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[9px]">
-              {assigneeLabel(task)[0]?.toUpperCase()}
-            </span>
-            {assigneeLabel(task)}
-          </span>
-        )}
-        {teamName && <span className="rounded-full bg-muted px-2 py-0.5">{teamName}</span>}
-        {task.due_date && (
-          <span className={cn("flex items-center gap-0.5", overdue && "text-red-500 font-semibold")}>
-            <Calendar className="size-3" />
-            {new Date(task.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-          </span>
-        )}
-      </div>
-      <div className="flex gap-2">
-        <Button
-          size="sm" className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-          onClick={() => onApprove(task)}
+    <>
+      <div className="rounded-xl border bg-card shadow-sm overflow-hidden flex flex-col">
+        {/* Clickable body */}
+        <button
+          type="button"
+          onClick={() => setDetailOpen(true)}
+          className="flex-1 text-left px-4 pt-4 pb-3 hover:bg-muted/20 transition-colors group/card"
         >
-          <CheckCircle2 className="size-4 mr-1.5" /> Approve
-        </Button>
-        <Button size="sm" variant="outline" className="flex-1 border-rose-400/40 text-rose-600 hover:bg-rose-500/10" onClick={() => onReedit(task)}>
-          <RotateCcw className="size-4 mr-1.5" /> Reedit
-        </Button>
+          <div className="flex items-start justify-between gap-3 mb-1.5">
+            <p className="text-sm font-semibold leading-snug flex-1 group-hover/card:text-primary transition-colors">
+              {task.title}
+            </p>
+            <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0", pri.color)}>
+              {pri.label}
+            </span>
+          </div>
+
+          {task.description && (
+            <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{task.description}</p>
+          )}
+
+          {task.caption && (
+            <div className="mb-2 rounded-md border border-purple-400/30 bg-purple-500/5 px-2.5 py-1.5">
+              <p className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 flex items-center gap-1 mb-0.5">
+                <MessageSquare className="size-3" /> Submission Note
+              </p>
+              <p className="text-xs text-foreground/80 line-clamp-2">{task.caption}</p>
+            </div>
+          )}
+
+          <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            {assigneeLabel(task) && (
+              <span className="flex items-center gap-1">
+                <span className="flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-[9px]">
+                  {assigneeLabel(task)[0]?.toUpperCase()}
+                </span>
+                {assigneeLabel(task)}
+              </span>
+            )}
+            {teamName && <span className="rounded-full bg-muted px-2 py-0.5">{teamName}</span>}
+            {task.due_date && (
+              <span className={cn("flex items-center gap-0.5", overdue && "text-red-500 font-semibold")}>
+                <Calendar className="size-3" />
+                {new Date(task.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+              </span>
+            )}
+            {attachmentCount > 0 && (
+              <span className="flex items-center gap-0.5">
+                <Paperclip className="size-3" /> {attachmentCount}
+              </span>
+            )}
+          </div>
+        </button>
+
+        {/* Action bar */}
+        <div className="border-t px-4 py-3 flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setDetailOpen(true)}
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
+          >
+            <Eye className="size-3.5" /> View Task
+          </Button>
+          <Button
+            size="sm"
+            className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+            onClick={() => onApprove(task)}
+          >
+            <CheckCircle2 className="size-4 mr-1.5" /> Approve
+          </Button>
+          <Button
+            size="sm" variant="outline"
+            className="flex-1 border-rose-400/40 text-rose-600 hover:bg-rose-500/10"
+            onClick={() => onReedit(task)}
+          >
+            <RotateCcw className="size-4 mr-1.5" /> Reedit
+          </Button>
+        </div>
       </div>
-    </div>
+
+      {detailOpen && (
+        <TaskDetailModal
+          task={task}
+          teamName={teamName}
+          readOnly
+          onClose={() => setDetailOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -203,6 +259,7 @@ function ReviewCard({
 function AssignCard({ task, team }: { task: Task; team?: LeaderTeam }) {
   const update = useUpdateTask();
   const [memberId, setMemberId] = useState("");
+  const [detailOpen, setDetailOpen] = useState(false);
   const pri = PRIORITY_META[task.priority];
 
   function assign() {
@@ -212,31 +269,78 @@ function AssignCard({ task, team }: { task: Task; team?: LeaderTeam }) {
   }
 
   return (
-    <div className="rounded-xl border bg-card p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3 mb-1.5">
-        <p className="text-sm font-semibold leading-snug">{task.title}</p>
-        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0", pri.color)}>{pri.label}</span>
-      </div>
-      {task.description && <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{task.description}</p>}
-      <div className="flex items-center gap-2 text-[11px] text-muted-foreground mb-3">
-        {team?.name && <span className="rounded-full bg-muted px-2 py-0.5">{team.name}</span>}
-        {assigneeLabel(task) ? <span>Currently: {assigneeLabel(task)}</span> : <span>Unassigned</span>}
-      </div>
-      <div className="flex gap-2">
-        <select
-          value={memberId} onChange={(e) => setMemberId(e.target.value)}
-          className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+    <>
+      <div className="rounded-xl border bg-card shadow-sm overflow-hidden flex flex-col">
+        {/* Clickable body */}
+        <button
+          type="button"
+          onClick={() => setDetailOpen(true)}
+          className="flex-1 text-left px-4 pt-4 pb-3 hover:bg-muted/20 transition-colors group/card"
         >
-          <option value="">Assign to…</option>
-          {team?.members.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}{m.role === "leader" ? " (leader)" : ""}</option>
-          ))}
-        </select>
-        <Button size="sm" onClick={assign} disabled={!memberId || update.isPending}>
-          {update.isPending ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
-        </Button>
+          <div className="flex items-start justify-between gap-3 mb-1.5">
+            <p className="text-sm font-semibold leading-snug flex-1 group-hover/card:text-primary transition-colors">
+              {task.title}
+            </p>
+            <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0", pri.color)}>
+              {pri.label}
+            </span>
+          </div>
+          {task.description && (
+            <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{task.description}</p>
+          )}
+          {/* Former team provenance */}
+          {task.former_team_name && (
+            <div className="mb-2 rounded-md border border-amber-400/30 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+              Routed from <span className="font-semibold">{task.former_team_name}</span>
+              {task.former_assigned_to_name && (
+                <> · worked by <span className="font-semibold">{task.former_assigned_to_name}</span></>
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            {team?.name && <span className="rounded-full bg-muted px-2 py-0.5">{team.name}</span>}
+            {assigneeLabel(task)
+              ? <span>Assigned: {assigneeLabel(task)}</span>
+              : <span className="italic text-muted-foreground/60">Unassigned</span>
+            }
+          </div>
+        </button>
+
+        {/* Action bar */}
+        <div className="border-t px-4 py-3 flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setDetailOpen(true)}
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
+          >
+            <Eye className="size-3.5" /> View Task
+          </Button>
+          <select
+            value={memberId}
+            onChange={(e) => setMemberId(e.target.value)}
+            className="flex-1 rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+          >
+            <option value="">Assign to…</option>
+            {team?.members.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}{m.role === "leader" ? " (leader)" : ""}</option>
+            ))}
+          </select>
+          <Button size="sm" onClick={assign} disabled={!memberId || update.isPending}>
+            {update.isPending ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
+          </Button>
+        </div>
       </div>
-    </div>
+
+      {detailOpen && (
+        <TaskDetailModal
+          task={task}
+          teamName={team?.name}
+          readOnly
+          onClose={() => setDetailOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -266,7 +370,11 @@ export default function LeaderPage() {
   const incoming = data?.incoming ?? [];
 
   if (isLoading) {
-    return <div className="flex items-center justify-center py-32"><Loader2 className="size-8 animate-spin text-muted-foreground" /></div>;
+    return (
+      <div className="flex items-center justify-center py-32">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
 
   if (!data?.is_leader) {
@@ -306,13 +414,17 @@ export default function LeaderPage() {
             )}
           >
             {icon} {label}
-            <span className={cn("flex h-5 min-w-5 px-1 items-center justify-center rounded-full text-[10px] font-bold",
-              tab === id ? "bg-primary/15 text-primary" : "bg-muted-foreground/15")}>{count}</span>
+            <span className={cn(
+              "flex h-5 min-w-5 px-1 items-center justify-center rounded-full text-[10px] font-bold",
+              tab === id ? "bg-primary/15 text-primary" : "bg-muted-foreground/15"
+            )}>
+              {count}
+            </span>
           </button>
         ))}
       </div>
 
-      {/* Team filter */}
+      {/* Team filter (review tab) */}
       {tab === "review" && teamsList.length > 1 && (
         <div className="flex items-center gap-2.5">
           <span className="text-sm text-muted-foreground shrink-0">Team</span>
@@ -343,7 +455,11 @@ export default function LeaderPage() {
       {/* Review tab */}
       {tab === "review" && (
         review.length === 0 ? (
-          <Empty icon={<CheckCircle2 className="size-10" />} title="No pending reviews" sub="Submissions from your team will appear here." />
+          <Empty
+            icon={<CheckCircle2 className="size-10" />}
+            title="No pending reviews"
+            sub="Submissions from your team will appear here."
+          />
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {review.map((t) => (
@@ -362,7 +478,11 @@ export default function LeaderPage() {
       {/* Assign tab */}
       {tab === "assign" && (
         incoming.length === 0 ? (
-          <Empty icon={<Inbox className="size-10" />} title="No new work to assign" sub="New unassigned tasks in your teams show up here." />
+          <Empty
+            icon={<Inbox className="size-10" />}
+            title="No new work to assign"
+            sub="New unassigned tasks in your teams show up here."
+          />
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {incoming.map((t) => (
@@ -375,10 +495,7 @@ export default function LeaderPage() {
       <AnimatePresence>
         {reeditTask && <ReeditModal task={reeditTask} onClose={() => setReeditTask(null)} />}
         {approveTask && (
-          <ApproveRouteModal
-            task={approveTask}
-            onClose={() => setApproveTask(null)}
-          />
+          <ApproveRouteModal task={approveTask} onClose={() => setApproveTask(null)} />
         )}
       </AnimatePresence>
     </div>

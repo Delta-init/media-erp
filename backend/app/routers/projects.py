@@ -283,7 +283,17 @@ async def edit_task(
     # ── Destination routing (only on approve) ─────────────────────────────────
     if new_status == "approved" and destination_team_id:
         from datetime import datetime, timezone as tz
+        from bson import ObjectId
         now = datetime.now(tz.utc)
+        # Look up the former team name so the receiving leader can see provenance
+        former_team_name = ""
+        if task.get("team_id"):
+            try:
+                former_team_doc = await db["teams"].find_one({"_id": ObjectId(task["team_id"])})
+                if former_team_doc:
+                    former_team_name = former_team_doc.get("name", "")
+            except Exception:
+                pass
         await db["project_tasks"].insert_one({
             "title": task["title"],
             "description": task.get("description", ""),
@@ -294,10 +304,14 @@ async def edit_task(
             "due_date": None,
             "team_id": destination_team_id,
             "attachments": task.get("attachments", []),
+            "caption": task.get("caption", ""),
             "created_by": task.get("created_by", ""),
             "created_at": now,
             "updated_at": now,
             "timing": {"intervals": [], "total_seconds": None},
+            # Provenance: who worked on this in the originating team
+            "former_assigned_to_name": task.get("assigned_to_name", "") or task.get("assigned_to", ""),
+            "former_team_name": former_team_name,
         })
 
     return success_response(data=task, message="Task updated")

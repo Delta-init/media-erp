@@ -56,6 +56,8 @@ export interface Task {
   attachments?: Attachment[];
   reedit_reason?: string;
   caption?: string;
+  former_assigned_to_name?: string;
+  former_team_name?: string;
   created_by: string;
   created_at: string;
   updated_at: string;

@@ -167,7 +167,11 @@ async def list_my_teams(
                 t["my_role"] = m["role"]
                 break
         else:
-            t["my_role"] = "admin" if _can_manage_any_team(current_user) else "member"
+            # Global admins (Super Admin / Admin / Coordinator) get "admin" on every team.
+            # Team Leaders can see all teams but are only members of their own —
+            # leave my_role unset so the frontend can filter to membership only.
+            if _can_manage_any_team(current_user):
+                t["my_role"] = "admin"
         teams.append(t)
     return success_response(data=teams, message="Teams retrieved")
 

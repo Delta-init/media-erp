@@ -49,8 +49,10 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
   const [dueDate, setDueDate]       = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
 
-  // Teams the current user belongs to
-  const { data: teams = [] } = useTeams();
+  // Only teams the current user actually belongs to (my_role is set).
+  // useTeams() may return all teams for leaders; filter to membership only.
+  const { data: allTeams = [] } = useTeams();
+  const teams = allTeams.filter((t) => !!t.my_role);
   // When a team is picked, fetch enriched member list for the assignee dropdown
   const { data: teamDetail } = useTeam(teamId);
   // Fallback: all users when no team selected

@@ -8,8 +8,7 @@ import {
   DragOverlay,
   DragStartEvent,
   KeyboardSensor,
-  MouseSensor,
-  TouchSensor,
+  PointerSensor,
   closestCenter,
   defaultDropAnimationSideEffects,
   useSensor,
@@ -23,7 +22,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUpdateTask } from "@/hooks/useProjects";
@@ -34,16 +33,16 @@ import { useCanApprove } from "@/hooks/useCanApprove";
 import type { Task, TaskStatus, BoardColumn } from "@/types/project";
 import { BOARD_COLUMNS, statusStyles, canTransition } from "@/types/project";
 
-// ── Drop animation — spring-like easing ──────────────────────────────────────
+// ── Drop animation ─────────────────────────────────────────────────────────────
 const dropAnimation: DropAnimation = {
-  duration: 220,
-  easing: "cubic-bezier(0.2, 0, 0, 1)",
+  duration: 180,
+  easing: "cubic-bezier(0.18, 0.67, 0.6, 1.22)",
   sideEffects: defaultDropAnimationSideEffects({
     styles: { active: { opacity: "0" } },
   }),
 };
 
-// ── Column ────────────────────────────────────────────────────────────────────
+// ── Column ─────────────────────────────────────────────────────────────────────
 interface ColumnProps {
   column: BoardColumn;
   tasks: Task[];
@@ -57,14 +56,17 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
 
   return (
     <div className="flex flex-col flex-1 min-w-[200px] h-full min-h-0">
-      {/* Header — solid top accent in the column colour */}
+      {/* Header */}
       <div
         className="rounded-t-xl border border-b-0 px-3 py-2.5 flex items-center justify-between"
         style={{ ...s.headerBg, borderTop: `2px solid ${column.color}` }}
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="size-2.5 rounded-full shrink-0" style={s.dot} />
-          <span className="text-[11px] font-bold uppercase tracking-wider truncate" style={s.text}>
+          <span className="size-2 rounded-full shrink-0" style={s.dot} />
+          <span
+            className="text-[11px] font-bold uppercase tracking-wider truncate"
+            style={s.text}
+          >
             {column.label}
           </span>
           <span
@@ -75,43 +77,50 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
           </span>
         </div>
 
-        {/* New work only enters at Pending — only that column gets a + */}
         {column.key === "pending" && (
           <button
             onClick={onAdd}
-            className="rounded-md p-1 opacity-80 hover:opacity-100 hover:bg-white/40 dark:hover:bg-black/25 transition-all"
+            className="rounded-md p-1 opacity-70 hover:opacity-100 hover:bg-white/30 dark:hover:bg-black/20 transition-all"
             style={s.text}
-            title="Add task to Pending"
+            title="Add task"
           >
             <Plus className="size-3.5" />
           </button>
         )}
       </div>
 
-      {/* Drop zone — fills the column height, scrolls internally, no scrollbar */}
+      {/* Drop zone */}
       <div
         ref={setNodeRef}
         className={cn(
-          "no-scrollbar flex flex-col gap-2 rounded-b-xl border border-t-0 p-1.5 transition-colors duration-150",
+          "no-scrollbar flex flex-col gap-2 rounded-b-xl border border-t-0 p-1.5",
           "flex-1 min-h-0 overflow-y-auto overflow-x-hidden",
-          isOver ? "ring-2 ring-inset" : ""
+          "transition-colors duration-150",
+          isOver && "ring-2 ring-inset"
         )}
         style={{
-          backgroundColor: isOver ? `${column.color}14` : `${column.color}07`,
+          backgroundColor: isOver
+            ? `${column.color}18`
+            : `${column.color}07`,
           borderColor: `${column.color}33`,
+          ringColor: column.color,
         }}
       >
-        <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext
+          items={tasks.map((t) => t.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          {/* No framer-motion layout/layoutId on sortable items —
+              those conflict with dnd-kit's CSS transforms and cause jitter.
+              Only use initial/animate/exit for mount/unmount transitions. */}
           <AnimatePresence initial={false}>
             {tasks.map((task) => (
               <motion.div
                 key={task.id}
-                layout
-                layoutId={task.id}
                 initial={{ opacity: 0, y: -8, scale: 0.97 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.12 } }}
-                transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.1 } }}
+                transition={{ type: "spring", stiffness: 420, damping: 32 }}
               >
                 <KanbanCard task={task} />
               </motion.div>
@@ -122,12 +131,15 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
         {tasks.length === 0 && (
           <div
             className={cn(
-              "flex flex-1 items-center justify-center rounded-lg border border-dashed p-6 transition-colors duration-150",
-              isOver ? "border-primary/40 bg-primary/5" : "border-muted-foreground/15"
+              "flex flex-1 items-center justify-center rounded-lg border border-dashed p-6",
+              "transition-colors duration-150",
+              isOver
+                ? "border-primary/40 bg-primary/5"
+                : "border-muted-foreground/12"
             )}
           >
-            <p className="text-[11px] text-muted-foreground/50 text-center whitespace-pre-line">
-              {isOver ? "Drop here" : "No tasks yet\nclick + to add"}
+            <p className="text-[11px] text-muted-foreground/40 text-center whitespace-pre-line">
+              {isOver ? "Drop here" : "No tasks\nclick + to add"}
             </p>
           </div>
         )}
@@ -136,35 +148,41 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
   );
 }
 
-// ── Board ─────────────────────────────────────────────────────────────────────
-interface Props { tasks: Task[] }
+// ── Board ──────────────────────────────────────────────────────────────────────
+interface Props {
+  tasks: Task[];
+}
 
 export function KanbanBoard({ tasks }: Props) {
   const updateTask = useUpdateTask();
   const canApprove = useCanApprove();
 
-  const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
-  const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const [localTasks,   setLocalTasks]   = useState<Task[]>(tasks);
+  const [activeTask,   setActiveTask]   = useState<Task | null>(null);
   const [overColumnId, setOverColumnId] = useState<TaskStatus | null>(null);
-  const [addStatus, setAddStatus]     = useState<TaskStatus>(BOARD_COLUMNS[0].key);
-  const [addOpen, setAddOpen]         = useState(false);
+  const [addStatus,    setAddStatus]    = useState<TaskStatus>(BOARD_COLUMNS[0].key);
+  const [addOpen,      setAddOpen]      = useState(false);
 
+  // Sync server state only when not dragging
   useEffect(() => {
     if (!activeTask) setLocalTasks(tasks);
   }, [tasks, activeTask]);
 
+  // PointerSensor handles mouse + touch with a single sensor (no double-firing)
   const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
   );
 
   const validStatuses = BOARD_COLUMNS.map((c) => c.key);
 
   function resolveColumn(overId: string): TaskStatus | null {
     if (validStatuses.includes(overId)) return overId;
-    const overTask = localTasks.find((t) => t.id === overId);
-    return overTask?.status ?? null;
+    return localTasks.find((t) => t.id === overId)?.status ?? null;
   }
 
   function onDragStart({ active }: DragStartEvent) {
@@ -173,62 +191,74 @@ export function KanbanBoard({ tasks }: Props) {
     setOverColumnId(t?.status ?? null);
   }
 
-  const onDragOver = useCallback(({ active, over }: DragOverEvent) => {
-    if (!over) { setOverColumnId(null); return; }
-    const activeId = String(active.id);
-    const overId   = String(over.id);
-    if (activeId === overId) return;
+  const onDragOver = useCallback(
+    ({ active, over }: DragOverEvent) => {
+      if (!over) { setOverColumnId(null); return; }
 
-    const targetColumn = resolveColumn(overId);
-    if (!targetColumn) return;
+      const activeId = String(active.id);
+      const overId   = String(over.id);
+      if (activeId === overId) return;
 
-    // Block invalid workflow moves while dragging — keep the card in place.
-    const dragged = localTasks.find((t) => t.id === activeId);
-    if (dragged && dragged.status !== targetColumn) {
-      if (!canTransition(dragged.status, targetColumn)) return;
-      // Pending Review can only be moved by a team leader / admin
-      if (dragged.status === "pending_review" && !canApprove(dragged)) return;
-    }
-    setOverColumnId(targetColumn);
+      const targetColumn = resolveColumn(overId);
+      if (!targetColumn) return;
 
-    setLocalTasks((prev) => {
-      const activeIdx = prev.findIndex((t) => t.id === activeId);
-      if (activeIdx === -1) return prev;
-      const activeItem = prev[activeIdx];
-      const isCrossColumn = activeItem.status !== targetColumn;
-
-      if (isCrossColumn) {
-        const overIdx = prev.findIndex((t) => t.id === overId);
-        const insertAt = overIdx === -1 ? prev.length : overIdx;
-        const updated = prev.map((t) => (t.id === activeId ? { ...t, status: targetColumn } : t));
-        const withoutActive = updated.filter((t) => t.id !== activeId);
-        const newInsertAt = Math.min(insertAt, withoutActive.length);
-        return [
-          ...withoutActive.slice(0, newInsertAt),
-          { ...activeItem, status: targetColumn },
-          ...withoutActive.slice(newInsertAt),
-        ];
-      } else {
-        const overIdx = prev.findIndex((t) => t.id === overId);
-        if (overIdx === -1) return prev;
-        return arrayMove(prev, activeIdx, overIdx);
+      const dragged = localTasks.find((t) => t.id === activeId);
+      if (dragged && dragged.status !== targetColumn) {
+        // Block invalid workflow transitions
+        if (!canTransition(dragged.status, targetColumn)) return;
+        // Pending Review locked for non-leaders
+        if (dragged.status === "pending_review" && !canApprove(dragged)) return;
       }
-    });
-  }, [localTasks, validStatuses]);
+
+      setOverColumnId(targetColumn);
+
+      setLocalTasks((prev) => {
+        const activeIdx = prev.findIndex((t) => t.id === activeId);
+        if (activeIdx === -1) return prev;
+
+        const activeItem = prev[activeIdx];
+        const isCrossColumn = activeItem.status !== targetColumn;
+
+        if (isCrossColumn) {
+          const overIdx    = prev.findIndex((t) => t.id === overId);
+          const updated    = prev.map((t) =>
+            t.id === activeId ? { ...t, status: targetColumn } : t
+          );
+          const withoutActive = updated.filter((t) => t.id !== activeId);
+          const insertAt = overIdx === -1 ? withoutActive.length : Math.min(overIdx, withoutActive.length);
+          return [
+            ...withoutActive.slice(0, insertAt),
+            { ...activeItem, status: targetColumn },
+            ...withoutActive.slice(insertAt),
+          ];
+        } else {
+          const overIdx = prev.findIndex((t) => t.id === overId);
+          if (overIdx === -1) return prev;
+          return arrayMove(prev, activeIdx, overIdx);
+        }
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localTasks]
+  );
 
   function onDragEnd({ active }: DragEndEvent) {
-    const activeId = String(active.id);
-    const movedTask = localTasks.find((t) => t.id === activeId);
-    const original  = tasks.find((t) => t.id === activeId);
+    const activeId   = String(active.id);
+    const movedTask  = localTasks.find((t) => t.id === activeId);
+    const original   = tasks.find((t) => t.id === activeId);
+
     if (movedTask && original && movedTask.status !== original.status) {
-      // Safety net — should already be prevented in onDragOver
       if (!canTransition(original.status, movedTask.status)) {
         setLocalTasks(tasks);
         toast.error("That move isn't allowed by the workflow.");
       } else {
-        updateTask.mutate({ id: activeId, payload: { status: movedTask.status } });
+        updateTask.mutate({
+          id: activeId,
+          payload: { status: movedTask.status },
+        });
       }
     }
+
     setActiveTask(null);
     setOverColumnId(null);
   }
@@ -239,7 +269,8 @@ export function KanbanBoard({ tasks }: Props) {
     setOverColumnId(null);
   }
 
-  const tasksByColumn = (key: string) => localTasks.filter((t) => t.status === key);
+  const tasksByColumn = (key: string) =>
+    localTasks.filter((t) => t.status === key);
 
   function openAdd(status: TaskStatus) {
     setAddStatus(status);
@@ -256,15 +287,16 @@ export function KanbanBoard({ tasks }: Props) {
         onDragEnd={onDragEnd}
         onDragCancel={onDragCancel}
       >
-        {/* Equal-width columns fill the board; horizontal scroll (hidden bar)
-            only kicks in on very narrow screens. */}
         <div className="no-scrollbar flex h-full min-h-0 gap-3 pt-1 pb-1 select-none overflow-x-auto">
           {BOARD_COLUMNS.map((col) => (
             <KanbanColumn
               key={col.key}
               column={col}
               tasks={tasksByColumn(col.key)}
-              isOver={overColumnId === col.key && activeTask?.status !== col.key}
+              isOver={
+                overColumnId === col.key &&
+                activeTask?.status !== col.key
+              }
               onAdd={() => openAdd(col.key)}
             />
           ))}
@@ -275,7 +307,11 @@ export function KanbanBoard({ tasks }: Props) {
         </DragOverlay>
       </DndContext>
 
-      <AddTaskModal open={addOpen} onClose={() => setAddOpen(false)} defaultStatus={addStatus} />
+      <AddTaskModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        defaultStatus={addStatus}
+      />
     </>
   );
 }
