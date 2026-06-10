@@ -16,7 +16,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { api } from "@/lib/axios";
+import api from "@/lib/axios";
 
 const schema = z.object({
   email: z.string().email("Invalid email address"),
