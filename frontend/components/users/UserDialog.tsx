@@ -15,6 +15,19 @@ interface Props {
   user?: User | null;
 }
 
+const inputCls = "w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
+
+function Field({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium">
+        {label} {required && <span className="text-destructive">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
 export function UserDialog({ open, onClose, user }: Props) {
   const isEdit = !!user;
   const createUser = useCreateUser();
@@ -71,17 +84,6 @@ export function UserDialog({ open, onClose, user }: Props) {
   }
 
   const isPending = createUser.isPending || updateUser.isPending;
-
-  const Field = ({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) => (
-    <div className="space-y-1.5">
-      <label className="text-sm font-medium">
-        {label} {required && <span className="text-destructive">*</span>}
-      </label>
-      {children}
-    </div>
-  );
-
-  const inputCls = "w-full rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30";
 
   return (
     <AnimatePresence>
