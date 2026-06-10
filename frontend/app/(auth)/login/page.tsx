@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -28,7 +28,6 @@ type LoginFormData = z.infer<typeof schema>;
 export default function LoginPage() {
   const login        = useLogin();
   const router       = useRouter();
-  const searchParams = useSearchParams();
   const [ssoLoading, setSsoLoading] = useState(false);
   const [ssoError,   setSsoError]   = useState<string | null>(null);
 
@@ -39,8 +38,10 @@ export default function LoginPage() {
   } = useForm<LoginFormData>({ resolver: zodResolver(schema) });
 
   // SSO auto-login from Root ERP
+  // Read from window.location.search directly — useSearchParams() requires a
+  // Suspense boundary and returns empty on initial render without one.
   useEffect(() => {
-    const ssoToken = searchParams.get("sso");
+    const ssoToken = new URLSearchParams(window.location.search).get("sso");
     if (!ssoToken) return;
     setSsoLoading(true);
     api.post("/auth/sso-login", { ssoToken })
@@ -56,7 +57,7 @@ export default function LoginPage() {
         }
       })
       .catch(() => { setSsoLoading(false); setSsoError("SSO login failed. Please sign in manually."); });
-  }, [searchParams, router]);
+  }, [router]);
 
   if (ssoLoading) {
     return (
