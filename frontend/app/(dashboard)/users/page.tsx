@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Search, Users, Pencil, Trash2, X } from "lucide-react";
+import { Plus, Search, Users, Pencil, Trash2, X, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserDialog } from "@/components/users/UserDialog";
 import { DeleteUserDialog } from "@/components/users/DeleteUserDialog";
 import { useUsersList } from "@/hooks/useUsers";
 import { useRolesSimple } from "@/hooks/useRoles";
+import { useImpersonate } from "@/hooks/useAuth";
+import { useAuthStore } from "@/stores/authStore";
 import type { User } from "@/types/user";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +24,9 @@ export default function UsersPage() {
 
   const { data, isLoading } = useUsersList({ search, status: statusFilter, role_id: roleFilter, page, limit: 15 });
   const { data: roles = [] } = useRolesSimple();
+  const currentUser  = useAuthStore((s) => s.user);
+  const isSuperAdmin = !!(currentUser?.role?.is_system_role && currentUser?.role?.role_name === "Super Admin");
+  const impersonate  = useImpersonate();
 
   const users = data?.users ?? [];
   const total = data?.total ?? 0;
@@ -176,6 +181,16 @@ export default function UsersPage() {
                     {/* Actions */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {isSuperAdmin && !(user.role?.is_system_role && user.role?.role_name === "Super Admin") && user.id !== currentUser?.id && (
+                          <button
+                            onClick={() => impersonate.mutate(user.id)}
+                            disabled={impersonate.isPending}
+                            className="rounded-md p-1.5 text-muted-foreground hover:text-amber-600 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors"
+                            title="View as this user"
+                          >
+                            <UserCheck className="size-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => openEdit(user)}
                           className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"

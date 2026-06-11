@@ -358,6 +358,42 @@ async def onboarding_status(current_user: dict = Depends(get_current_user)):
     )
 
 
+# ── Impersonation ─────────────────────────────────────────────────────────────
+
+@router.post("/impersonate/{user_id}")
+async def impersonate_user(
+    user_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    role = current_user.get("_role") or {}
+    if not (role.get("is_system_role") and role.get("role_name") == "Super Admin"):
+        return error_response("Only Super Admin can impersonate users", status_code=403)
+
+    try:
+        oid = ObjectId(user_id)
+    except Exception:
+        return error_response("Invalid user ID", status_code=400)
+
+    if str(current_user["_id"]) == user_id:
+        return error_response("Cannot impersonate yourself", status_code=400)
+
+    target = await db["users"].find_one({"_id": oid})
+    if not target:
+        return error_response("User not found", status_code=404)
+
+    # Block impersonating another Super Admin
+    try:
+        t_role = await db["roles"].find_one({"_id": ObjectId(target.get("role_id", ""))})
+        if t_role and t_role.get("is_system_role") and t_role.get("role_name") == "Super Admin":
+            return error_response("Cannot impersonate another Super Admin", status_code=403)
+    except Exception:
+        pass
+
+    payload = await _token_payload(target, db)
+    return success_response(payload, f"Impersonating {target.get('name', target.get('email', ''))}")
+
+
 # ── Root ERP SSO Login ────────────────────────────────────────────────────────
 
 class SsoLoginRequest(BaseModel):

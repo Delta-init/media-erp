@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
+import { Glasses, LogOut } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
-import { useOnboardingStatus, useCompleteOnboarding } from "@/hooks/useAuth";
+import { useOnboardingStatus, useCompleteOnboarding, useStopImpersonation } from "@/hooks/useAuth";
 
 export default function DashboardLayout({
   children,
@@ -15,12 +16,15 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user            = useAuthStore((s) => s.user);
+  const originalAuth    = useAuthStore((s) => s.originalAuth);
   const router = useRouter();
   const pathname = usePathname();
   const [hydrated, setHydrated] = useState(false);
 
   const { data: onboardingData, isLoading: onboardingLoading } = useOnboardingStatus();
   const completeOnboarding = useCompleteOnboarding();
+  const stopImpersonation  = useStopImpersonation();
 
   useEffect(() => {
     setHydrated(true);
@@ -48,23 +52,59 @@ export default function DashboardLayout({
   const showOnboarding = !onboardingLoading && onboardingData?.onboarding_complete === false;
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <Sidebar />
+    <div className="flex flex-col min-h-screen bg-background">
+      {/* Impersonation banner — full-width amber strip when active */}
+      <AnimatePresence>
+        {originalAuth && (
+          <motion.div
+            key="impersonation-banner"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden shrink-0 z-50"
+          >
+            <div className="flex items-center justify-between gap-4 bg-amber-500 px-4 py-2 text-sm font-medium text-white">
+              <div className="flex items-center gap-2">
+                <Glasses className="size-4 shrink-0" />
+                <span>
+                  Viewing as <strong>{user?.name}</strong>
+                  {user?.role?.role_name && (
+                    <span className="opacity-80 ml-1">({user.role.role_name})</span>
+                  )}
+                </span>
+              </div>
+              <button
+                onClick={stopImpersonation}
+                className="flex items-center gap-1.5 rounded-md bg-white/20 px-3 py-1 text-xs font-semibold hover:bg-white/30 transition-colors"
+              >
+                <LogOut className="size-3.5" />
+                Exit Impersonation
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Header />
+      {/* Main layout */}
+      <div className="flex flex-1 min-h-0">
+        <Sidebar />
 
-        {/* Keyed mount animation only — no exit-wait, so client navigations
-            always render the new page immediately (no "needs reload" bug). */}
-        <motion.main
-          key={pathname}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className="flex-1 overflow-y-auto p-6"
-        >
-          {children}
-        </motion.main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Header />
+
+          {/* Keyed mount animation only — no exit-wait, so client navigations
+              always render the new page immediately (no "needs reload" bug). */}
+          <motion.main
+            key={pathname}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="flex-1 overflow-y-auto p-6"
+          >
+            {children}
+          </motion.main>
+        </div>
       </div>
 
       {/* Onboarding wizard overlay */}

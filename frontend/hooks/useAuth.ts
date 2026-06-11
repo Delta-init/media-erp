@@ -265,3 +265,43 @@ export function useCompleteOnboarding() {
     },
   });
 }
+
+// ── Impersonation hooks ───────────────────────────────────────────────────────
+
+export function useImpersonate() {
+  const startImpersonation = useAuthStore((s) => s.startImpersonation);
+  const router = useRouter();
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      const { data } = await api.post<{ success: boolean; data: AuthResponse }>(
+        `/auth/impersonate/${userId}`
+      );
+      return data.data;
+    },
+    onSuccess(data) {
+      startImpersonation(data.user, data.access_token, data.refresh_token);
+      qc.clear();
+      router.push("/dashboard");
+      toast.success(`Now viewing as ${data.user.name}`);
+    },
+    onError(err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? "Failed to impersonate user.");
+    },
+  });
+}
+
+export function useStopImpersonation() {
+  const stopImpersonation = useAuthStore((s) => s.stopImpersonation);
+  const router = useRouter();
+  const qc = useQueryClient();
+
+  return () => {
+    stopImpersonation();
+    qc.clear();
+    toast.success("Returned to your account");
+    router.push("/users");
+  };
+}
