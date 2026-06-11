@@ -1,25 +1,26 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   DndContext,
   DragEndEvent,
   DragOverEvent,
   DragOverlay,
   DragStartEvent,
-  KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
+  pointerWithin,
   defaultDropAnimationSideEffects,
   useSensor,
   useSensors,
   useDroppable,
   type DropAnimation,
+  type CollisionDetection,
 } from "@dnd-kit/core";
 import {
   SortableContext,
   arrayMove,
-  sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { AnimatePresence, motion } from "framer-motion";
@@ -33,24 +34,44 @@ import { useCanApprove } from "@/hooks/useCanApprove";
 import type { Task, TaskStatus, BoardColumn } from "@/types/project";
 import { BOARD_COLUMNS, statusStyles, canTransition } from "@/types/project";
 
-// ── Drop animation ─────────────────────────────────────────────────────────────
 const dropAnimation: DropAnimation = {
-  duration: 180,
-  easing: "cubic-bezier(0.18, 0.67, 0.6, 1.22)",
+  duration: 200,
+  easing: "cubic-bezier(0.2, 0, 0, 1)",
   sideEffects: defaultDropAnimationSideEffects({
     styles: { active: { opacity: "0" } },
   }),
 };
 
-// ── Column ─────────────────────────────────────────────────────────────────────
-interface ColumnProps {
-  column: BoardColumn;
-  tasks: Task[];
-  isOver: boolean;
-  onAdd: () => void;
+const COL_KEYS = BOARD_COLUMNS.map((c) => c.key);
+
+function resolveColumn(id: string, tasks: Task[]): TaskStatus | null {
+  if (COL_KEYS.includes(id)) return id as TaskStatus;
+  return tasks.find((t) => t.id === id)?.status ?? null;
 }
 
-function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
+// Pointer-within first so the column the mouse is INSIDE always wins.
+// Fall back to closestCenter only when pointer isn't inside any droppable
+// (e.g. dragging fast between columns).
+const kanbanCollision: CollisionDetection = (args) => {
+  const inside = pointerWithin(args);
+  if (inside.length > 0) return inside;
+  return closestCenter(args);
+};
+
+// ── Column ────────────────────────────────────────────────────────────────────
+interface ColumnProps {
+  column:        BoardColumn;
+  tasks:         Task[];
+  /** User is hovering here right now AND it's a valid target */
+  isOver:        boolean;
+  /** This column is a valid drop target for the current drag */
+  isValidTarget: boolean;
+  /** This is where the drag originated */
+  isSource:      boolean;
+  onAdd:         () => void;
+}
+
+function KanbanColumn({ column, tasks, isOver, isValidTarget, isSource, onAdd }: ColumnProps) {
   const { setNodeRef } = useDroppable({ id: column.key });
   const s = statusStyles(column.color);
 
@@ -58,15 +79,15 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
     <div className="flex flex-col flex-1 min-w-[200px] h-full min-h-0">
       {/* Header */}
       <div
-        className="rounded-t-xl border border-b-0 px-3 py-2.5 flex items-center justify-between"
+        className={cn(
+          "rounded-t-xl border border-b-0 px-3 py-2.5 flex items-center justify-between transition-opacity duration-200",
+          isSource && "opacity-50"
+        )}
         style={{ ...s.headerBg, borderTop: `2px solid ${column.color}` }}
       >
         <div className="flex items-center gap-2 min-w-0">
           <span className="size-2 rounded-full shrink-0" style={s.dot} />
-          <span
-            className="text-[11px] font-bold uppercase tracking-wider truncate"
-            style={s.text}
-          >
+          <span className="text-[11px] font-bold uppercase tracking-wider truncate" style={s.text}>
             {column.label}
           </span>
           <span
@@ -76,7 +97,6 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
             {tasks.length}
           </span>
         </div>
-
         {column.key === "pending" && (
           <button
             onClick={onAdd}
@@ -95,32 +115,38 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
         className={cn(
           "no-scrollbar flex flex-col gap-2 rounded-b-xl border border-t-0 p-1.5",
           "flex-1 min-h-0 overflow-y-auto overflow-x-hidden",
-          "transition-colors duration-150",
-          isOver && "ring-2 ring-inset"
+          "transition-all duration-200",
+          // Active hover on valid target: strong ring + bright bg
+          isOver        && "ring-2 ring-inset shadow-inner",
+          // Valid target but not hovered: soft pulse ring
+          isValidTarget && !isOver && "ring-1 ring-inset opacity-90",
+          // Source column: dim it
+          isSource      && "opacity-40",
         )}
         style={{
           backgroundColor: isOver
-            ? `${column.color}18`
+            ? `${column.color}22`
+            : isValidTarget
+            ? `${column.color}10`
             : `${column.color}07`,
-          borderColor: `${column.color}33`,
-          ringColor: column.color,
+          borderColor: isOver
+            ? `${column.color}88`
+            : isValidTarget
+            ? `${column.color}55`
+            : `${column.color}33`,
+          ...(isOver        ? { ringColor: column.color } : {}),
+          ...(isValidTarget && !isOver ? { ringColor: `${column.color}66` } : {}),
         }}
       >
-        <SortableContext
-          items={tasks.map((t) => t.id)}
-          strategy={verticalListSortingStrategy}
-        >
-          {/* No framer-motion layout/layoutId on sortable items —
-              those conflict with dnd-kit's CSS transforms and cause jitter.
-              Only use initial/animate/exit for mount/unmount transitions. */}
+        <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           <AnimatePresence initial={false}>
             {tasks.map((task) => (
               <motion.div
                 key={task.id}
-                initial={{ opacity: 0, y: -8, scale: 0.97 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.1 } }}
-                transition={{ type: "spring", stiffness: 420, damping: 32 }}
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.12 } }}
+                transition={{ type: "spring", stiffness: 350, damping: 28 }}
               >
                 <KanbanCard task={task} />
               </motion.div>
@@ -131,15 +157,18 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
         {tasks.length === 0 && (
           <div
             className={cn(
-              "flex flex-1 items-center justify-center rounded-lg border border-dashed p-6",
-              "transition-colors duration-150",
+              "flex flex-1 items-center justify-center rounded-lg border border-dashed p-6 transition-colors duration-200",
               isOver
-                ? "border-primary/40 bg-primary/5"
+                ? "border-current bg-current/5"
+                : isValidTarget
+                ? "border-current/40"
                 : "border-muted-foreground/12"
             )}
+            style={isOver || isValidTarget ? { color: column.color } : {}}
           >
-            <p className="text-[11px] text-muted-foreground/40 text-center whitespace-pre-line">
-              {isOver ? "Drop here" : "No tasks\nclick + to add"}
+            <p className="text-[11px] text-center whitespace-pre-line"
+               style={{ color: isOver ? column.color : isValidTarget ? `${column.color}88` : undefined }}>
+              {isOver ? "Drop here" : isValidTarget ? "Valid target" : "No tasks\nclick + to add"}
             </p>
           </div>
         )}
@@ -148,158 +177,133 @@ function KanbanColumn({ column, tasks, isOver, onAdd }: ColumnProps) {
   );
 }
 
-// ── Board ──────────────────────────────────────────────────────────────────────
-interface Props {
-  tasks: Task[];
-}
-
-export function KanbanBoard({ tasks }: Props) {
+// ── Board ─────────────────────────────────────────────────────────────────────
+export function KanbanBoard({ tasks }: { tasks: Task[] }) {
   const updateTask = useUpdateTask();
   const canApprove = useCanApprove();
 
   const [localTasks,   setLocalTasks]   = useState<Task[]>(tasks);
   const [activeTask,   setActiveTask]   = useState<Task | null>(null);
   const [overColumnId, setOverColumnId] = useState<TaskStatus | null>(null);
-  const [addStatus,    setAddStatus]    = useState<TaskStatus>(BOARD_COLUMNS[0].key);
   const [addOpen,      setAddOpen]      = useState(false);
+  const [addStatus,    setAddStatus]    = useState<TaskStatus>("pending");
 
-  // Sync server state only when not dragging
+  const draggingRef = useRef(false);
+  const serverRef   = useRef(tasks);
+  serverRef.current = tasks;
+
   useEffect(() => {
-    if (!activeTask) setLocalTasks(tasks);
-  }, [tasks, activeTask]);
+    if (!draggingRef.current) setLocalTasks(tasks);
+  }, [tasks]);
 
-  // PointerSensor handles mouse + touch with a single sensor (no double-firing)
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(MouseSensor, { activationConstraint: { distance: 3 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } })
   );
-
-  const validStatuses = BOARD_COLUMNS.map((c) => c.key);
-
-  function resolveColumn(overId: string): TaskStatus | null {
-    if (validStatuses.includes(overId)) return overId;
-    return localTasks.find((t) => t.id === overId)?.status ?? null;
-  }
 
   function onDragStart({ active }: DragStartEvent) {
-    const t = localTasks.find((t) => t.id === active.id);
-    setActiveTask(t ?? null);
-    setOverColumnId(t?.status ?? null);
+    draggingRef.current = true;
+    const task = localTasks.find((t) => t.id === active.id);
+    setActiveTask(task ?? null);
+    setOverColumnId(task?.status ?? null);
   }
 
-  const onDragOver = useCallback(
-    ({ active, over }: DragOverEvent) => {
-      if (!over) { setOverColumnId(null); return; }
+  function onDragOver({ over }: DragOverEvent) {
+    if (!over) { setOverColumnId(null); return; }
+    const col = resolveColumn(String(over.id), localTasks);
+    if (col) setOverColumnId(col);
+  }
 
-      const activeId = String(active.id);
-      const overId   = String(over.id);
-      if (activeId === overId) return;
-
-      const targetColumn = resolveColumn(overId);
-      if (!targetColumn) return;
-
-      const dragged = localTasks.find((t) => t.id === activeId);
-      if (dragged && dragged.status !== targetColumn) {
-        // Block invalid workflow transitions
-        if (!canTransition(dragged.status, targetColumn)) return;
-        // Pending Review locked for non-leaders
-        if (dragged.status === "pending_review" && !canApprove(dragged)) return;
-      }
-
-      setOverColumnId(targetColumn);
-
-      setLocalTasks((prev) => {
-        const activeIdx = prev.findIndex((t) => t.id === activeId);
-        if (activeIdx === -1) return prev;
-
-        const activeItem = prev[activeIdx];
-        const isCrossColumn = activeItem.status !== targetColumn;
-
-        if (isCrossColumn) {
-          const overIdx    = prev.findIndex((t) => t.id === overId);
-          const updated    = prev.map((t) =>
-            t.id === activeId ? { ...t, status: targetColumn } : t
-          );
-          const withoutActive = updated.filter((t) => t.id !== activeId);
-          const insertAt = overIdx === -1 ? withoutActive.length : Math.min(overIdx, withoutActive.length);
-          return [
-            ...withoutActive.slice(0, insertAt),
-            { ...activeItem, status: targetColumn },
-            ...withoutActive.slice(insertAt),
-          ];
-        } else {
-          const overIdx = prev.findIndex((t) => t.id === overId);
-          if (overIdx === -1) return prev;
-          return arrayMove(prev, activeIdx, overIdx);
-        }
-      });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [localTasks]
-  );
-
-  function onDragEnd({ active }: DragEndEvent) {
-    const activeId   = String(active.id);
-    const movedTask  = localTasks.find((t) => t.id === activeId);
-    const original   = tasks.find((t) => t.id === activeId);
-
-    if (movedTask && original && movedTask.status !== original.status) {
-      if (!canTransition(original.status, movedTask.status)) {
-        setLocalTasks(tasks);
-        toast.error("That move isn't allowed by the workflow.");
-      } else {
-        updateTask.mutate({
-          id: activeId,
-          payload: { status: movedTask.status },
-        });
-      }
-    }
-
+  function onDragEnd({ active, over }: DragEndEvent) {
+    draggingRef.current = false;
+    const draggedTask = activeTask;
     setActiveTask(null);
     setOverColumnId(null);
+
+    if (!over || !draggedTask) return;
+
+    const activeId     = String(active.id);
+    const overId       = String(over.id);
+    if (activeId === overId) return;
+
+    const targetStatus = resolveColumn(overId, localTasks);
+    if (!targetStatus) return;
+
+    // Same column — local reorder only
+    if (targetStatus === draggedTask.status) {
+      setLocalTasks((prev) => {
+        const from = prev.findIndex((t) => t.id === activeId);
+        const to   = prev.findIndex((t) => t.id === overId);
+        if (from === -1 || to === -1 || from === to) return prev;
+        return arrayMove(prev, from, to);
+      });
+      return;
+    }
+
+    // Cross-column — validate the 5 allowed transitions
+    if (!canTransition(draggedTask.status, targetStatus)) {
+      toast.error(`Cannot move from ${draggedTask.status.replace(/_/g, " ")} to ${targetStatus.replace(/_/g, " ")}.`);
+      return;
+    }
+
+    if (draggedTask.status === "pending_review" && !canApprove(draggedTask)) {
+      toast.error("Only a team leader can move tasks out of Pending Review.");
+      return;
+    }
+
+    // Optimistic update
+    setLocalTasks((prev) =>
+      prev.map((t) => (t.id === activeId ? { ...t, status: targetStatus } : t))
+    );
+
+    updateTask.mutate(
+      { id: activeId, payload: { status: targetStatus } },
+      {
+        onError: () => {
+          setLocalTasks(serverRef.current);
+          toast.error("Failed to update task.");
+        },
+      }
+    );
   }
 
   function onDragCancel() {
-    setLocalTasks(tasks);
+    draggingRef.current = false;
     setActiveTask(null);
     setOverColumnId(null);
-  }
-
-  const tasksByColumn = (key: string) =>
-    localTasks.filter((t) => t.status === key);
-
-  function openAdd(status: TaskStatus) {
-    setAddStatus(status);
-    setAddOpen(true);
+    setLocalTasks(serverRef.current);
   }
 
   return (
     <>
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={kanbanCollision}
         onDragStart={onDragStart}
         onDragOver={onDragOver}
         onDragEnd={onDragEnd}
         onDragCancel={onDragCancel}
       >
         <div className="no-scrollbar flex h-full min-h-0 gap-3 pt-1 pb-1 select-none overflow-x-auto">
-          {BOARD_COLUMNS.map((col) => (
-            <KanbanColumn
-              key={col.key}
-              column={col}
-              tasks={tasksByColumn(col.key)}
-              isOver={
-                overColumnId === col.key &&
-                activeTask?.status !== col.key
-              }
-              onAdd={() => openAdd(col.key)}
-            />
-          ))}
+          {BOARD_COLUMNS.map((col) => {
+            const isSource      = activeTask?.status === col.key;
+            const isValidTarget = activeTask !== null
+              && !isSource
+              && canTransition(activeTask.status, col.key);
+            const isOver        = overColumnId === col.key && isValidTarget;
+
+            return (
+              <KanbanColumn
+                key={col.key}
+                column={col}
+                tasks={localTasks.filter((t) => t.status === col.key)}
+                isOver={isOver}
+                isValidTarget={isValidTarget}
+                isSource={isSource}
+                onAdd={() => { setAddStatus(col.key); setAddOpen(true); }}
+              />
+            );
+          })}
         </div>
 
         <DragOverlay dropAnimation={dropAnimation}>
@@ -307,11 +311,7 @@ export function KanbanBoard({ tasks }: Props) {
         </DragOverlay>
       </DndContext>
 
-      <AddTaskModal
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
-        defaultStatus={addStatus}
-      />
+      <AddTaskModal open={addOpen} onClose={() => setAddOpen(false)} defaultStatus={addStatus} />
     </>
   );
 }

@@ -95,9 +95,10 @@ export function KanbanCard({ task, overlay = false }: Props) {
           className="size-3.5 shrink-0 text-muted-foreground/20 pointer-events-none"
         />
 
-        {/* Title — click opens detail modal */}
+        {/* Title — click opens detail modal; no stopPropagation so drag still
+            works from this area (DnD activationConstraint.distance handles
+            distinguishing a click from a drag without blocking either). */}
         <button
-          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); setDetailOpen(true); }}
           className="flex-1 min-w-0 text-left"
           title="View task details"
