@@ -3,7 +3,12 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
-from app.services.notification_service import list_notifications, mark_all_read, mark_read
+from app.services.notification_service import (
+    check_due_reminders,
+    list_notifications,
+    mark_all_read,
+    mark_read,
+)
 from app.utils.response import error_response, success_response
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
@@ -16,7 +21,10 @@ async def get_notifications(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    data = await list_notifications(db, str(current_user["_id"]), limit, unread_only)
+    uid = str(current_user["_id"])
+    # Fire any pending due-date reminders before returning the list
+    await check_due_reminders(db, uid)
+    data = await list_notifications(db, uid, limit, unread_only)
     return success_response(data, "Notifications retrieved")
 
 

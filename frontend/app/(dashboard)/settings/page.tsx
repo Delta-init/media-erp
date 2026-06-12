@@ -5,8 +5,12 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
-import { ClipboardList, KeyRound, Loader2, Palette, QrCode, Shield, Sparkles, User } from "lucide-react";
+import { Bell, ClipboardList, Eye, EyeOff, KeyRound, Loader2, Mail, Palette, QrCode, Shield, Sparkles, User } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { useBranding, useUpdateBranding, useResetBranding } from "@/hooks/useWhitelabel";
+import { useEmailSettings, useUpdateEmailSettings, useTestEmail } from "@/hooks/useEmailSettings";
+import { useNotificationPrefs, useUpdateNotificationPrefs } from "@/hooks/useNotificationPrefs";
+import type { User as UserType } from "@/types/user";
 import { useAuthStore } from "@/stores/authStore";
 import { useUpdatePassword, useUpdateProfile, use2faStatus, use2faSetup, use2faEnable, use2faDisable } from "@/hooks/useAuth";
 import { useAuditLogs } from "@/hooks/useAuditLogs";
@@ -34,7 +38,50 @@ const passwordSchema = z
 
 type ProfileForm   = z.infer<typeof profileSchema>;
 type PasswordForm  = z.infer<typeof passwordSchema>;
-type Tab = "profile" | "password" | "plan" | "branding" | "security" | "audit";
+type Tab = "profile" | "password" | "plan" | "branding" | "security" | "audit" | "email" | "notifications";
+
+// ── Notification-prefs helpers ────────────────────────────────────────────────
+type NotifCategory = "employee" | "leader" | "elevated";
+
+interface NotifDef { key: string; label: string; desc: string }
+
+const NOTIF_DEFS: Record<NotifCategory, NotifDef[]> = {
+  employee: [
+    { key: "task_assigned",     label: "Task Assigned",       desc: "When a new task is assigned to you" },
+    { key: "pending_review",    label: "Review Acknowledged", desc: "When your task enters pending review" },
+    { key: "task_approved",     label: "Task Approved",       desc: "When your task is approved by a leader" },
+    { key: "task_reedit",       label: "Sent for Revision",   desc: "When your task is returned for revision" },
+    { key: "due_date_reminder", label: "Due Date Reminder",   desc: "When a task is due the next day" },
+  ],
+  leader: [
+    { key: "team_task_assigned", label: "New Team Task",     desc: "When new work is assigned to your team" },
+    { key: "pending_review",     label: "Pending Review",    desc: "When a team member submits a task for your review" },
+    { key: "task_approved",      label: "Task Approved",     desc: "When a task in your team is approved" },
+    { key: "task_reedit",        label: "Sent for Revision", desc: "When a task is returned to a member for revision" },
+    { key: "task_started",       label: "Task Started",      desc: "When a team member begins working on a task" },
+    { key: "task_break",         label: "Task Paused",       desc: "When a team member takes a break on a task" },
+  ],
+  elevated: [
+    { key: "team_task_assigned", label: "Task Assigned",     desc: "When any task is assigned to a team" },
+    { key: "pending_review",     label: "Pending Review",    desc: "When any task is submitted for review" },
+    { key: "task_approved",      label: "Task Approved",     desc: "When any task is approved" },
+    { key: "task_reedit",        label: "Sent for Revision", desc: "When any task is sent back for revision" },
+  ],
+};
+
+const ROLE_LABEL: Record<NotifCategory, string> = {
+  employee: "Employee",
+  leader:   "Team Leader",
+  elevated: "Admin / Coordinator / Super Admin",
+};
+
+function getNotifCategory(user: UserType | null): NotifCategory {
+  if (!user?.role) return "employee";
+  if (user.role.is_system_role) return "elevated";
+  const n = (user.role.role_name ?? "").toLowerCase();
+  if (n.includes("leader") || n.includes("manager") || n.includes("supervisor")) return "leader";
+  return "employee";
+}
 
 // ── Tab button ────────────────────────────────────────────────────────────────
 function TabButton({
@@ -328,12 +375,10 @@ function BrandingPanel() {
         </div>
 
         <label className="flex items-center gap-3 cursor-pointer">
-          <div
-            className={cn("relative h-5 w-9 rounded-full transition-colors", form.hide_mediaerp_branding ? "bg-primary" : "bg-muted-foreground/30")}
-            onClick={() => setForm((f) => ({ ...f, hide_mediaerp_branding: !f.hide_mediaerp_branding }))}
-          >
-            <div className={cn("absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform", form.hide_mediaerp_branding ? "translate-x-4" : "translate-x-0.5")} />
-          </div>
+          <Switch
+            checked={form.hide_mediaerp_branding}
+            onCheckedChange={(v) => setForm((f) => ({ ...f, hide_mediaerp_branding: v }))}
+          />
           <span className="text-sm">Hide "Powered by mediaERP" in exports</span>
         </label>
 
@@ -541,17 +586,268 @@ function AuditTab() {
   );
 }
 
-const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: "profile",  label: "Profile",  icon: User },
-  { id: "password", label: "Password", icon: KeyRound },
-  { id: "plan",     label: "Plan",     icon: Shield },
-  { id: "branding", label: "Branding", icon: Palette },
-  { id: "security", label: "Security", icon: Shield },
-  { id: "audit",    label: "Audit Logs", icon: ClipboardList },
+// ── Notifications tab — all users ────────────────────────────────────────────
+function NotificationsTab() {
+  const user     = useAuthStore((s) => s.user);
+  const { data, isLoading } = useNotificationPrefs();
+  const update   = useUpdateNotificationPrefs();
+
+  const category = getNotifCategory(user);
+  const defs     = NOTIF_DEFS[category];
+
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [emailTypes,   setEmailTypes]   = useState<Record<string, boolean>>({});
+  const [synced,       setSynced]       = useState(false);
+
+  if (data && !synced) {
+    setEmailEnabled(data.email_enabled ?? false);
+    setEmailTypes(data.email_types ?? {});
+    setSynced(true);
+  }
+
+  function getType(key: string): boolean {
+    return key in emailTypes ? emailTypes[key] : true;
+  }
+  function toggleType(key: string) {
+    setEmailTypes((t) => ({ ...t, [key]: !getType(key) }));
+  }
+  function save() {
+    update.mutate({ email_enabled: emailEnabled, email_types: emailTypes });
+  }
+
+  if (isLoading) return (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="size-5 animate-spin text-muted-foreground" />
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* Master switch */}
+      <div className="rounded-xl border bg-card p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="font-medium text-sm">Email Notifications</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Receive email alerts for important updates. Turn off to stop all notification emails.
+            </p>
+          </div>
+          <Switch checked={emailEnabled} onCheckedChange={setEmailEnabled} />
+        </div>
+      </div>
+
+      {/* Role context badge */}
+      <div className="flex items-center gap-2 px-1">
+        <Bell className="size-3.5 text-muted-foreground" />
+        <p className="text-xs text-muted-foreground">
+          Customised for&nbsp;
+          <span className="font-medium text-foreground">{ROLE_LABEL[category]}</span>
+        </p>
+      </div>
+
+      {/* Per-type toggles */}
+      <div className={cn(
+        "rounded-xl border bg-card p-5 transition-opacity duration-200",
+        !emailEnabled && "opacity-40 pointer-events-none select-none"
+      )}>
+        <div className="mb-4">
+          <p className="font-medium text-sm">Notification Types</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Choose which events trigger an email.
+          </p>
+        </div>
+
+        <div className="space-y-0">
+          {defs.map((def, i) => (
+            <div
+              key={def.key}
+              className={cn(
+                "flex items-center justify-between gap-4 py-3",
+                i < defs.length - 1 && "border-b border-border/60"
+              )}
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">{def.label}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{def.desc}</p>
+              </div>
+              <Switch checked={getType(def.key)} onCheckedChange={() => toggleType(def.key)} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <Button size="sm" onClick={save} disabled={update.isPending}>
+          {update.isPending && <Loader2 className="size-3 mr-1.5 animate-spin" />}
+          Save Preferences
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Email (SMTP) tab — Super Admin only ───────────────────────────────────────
+function EmailTab() {
+  const { data, isLoading } = useEmailSettings();
+  const update    = useUpdateEmailSettings();
+  const testEmail = useTestEmail();
+
+  const [form, setForm] = useState({
+    host: "", port: 587, username: "", password: "",
+    from_email: "", from_name: "mediaERP", use_tls: true,
+  });
+  const [showPw,  setShowPw]  = useState(false);
+  const [testTo,  setTestTo]  = useState("");
+  const [synced,  setSynced]  = useState(false);
+
+  if (data && !synced) {
+    setForm({
+      host:       data.host ?? "",
+      port:       data.port ?? 587,
+      username:   data.username ?? "",
+      password:   data.password ?? "",
+      from_email: data.from_email ?? "",
+      from_name:  data.from_name ?? "mediaERP",
+      use_tls:    data.use_tls ?? true,
+    });
+    setSynced(true);
+  }
+
+  const labelCls = "block text-xs font-medium text-muted-foreground mb-1";
+  const inputCls = "w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary";
+
+  if (isLoading) return (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="size-5 animate-spin text-muted-foreground" />
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* SMTP config card */}
+      <div className="rounded-xl border bg-card p-5 space-y-4">
+        <div>
+          <h3 className="font-medium text-sm">SMTP Configuration</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Configure the outgoing mail server used for all email notifications.
+          </p>
+        </div>
+
+        {data?.configured && (
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
+            <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" />
+            Email is configured and active.
+          </div>
+        )}
+        {!data?.configured && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            No email settings saved yet. Fill in the form and click Save.
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2 sm:col-span-1">
+            <label className={labelCls}>SMTP Host</label>
+            <input className={inputCls} placeholder="smtp.gmail.com" value={form.host}
+              onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))} />
+          </div>
+          <div>
+            <label className={labelCls}>Port</label>
+            <input type="number" className={inputCls} placeholder="587" value={form.port}
+              onChange={(e) => setForm((f) => ({ ...f, port: Number(e.target.value) }))} />
+          </div>
+          <div className="col-span-2 sm:col-span-1">
+            <label className={labelCls}>Username</label>
+            <input className={inputCls} placeholder="you@gmail.com" value={form.username}
+              onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} />
+          </div>
+          <div className="col-span-2 sm:col-span-1">
+            <label className={labelCls}>Password / App Password</label>
+            <div className="relative">
+              <input
+                type={showPw ? "text" : "password"}
+                className={cn(inputCls, "pr-9")}
+                placeholder="••••••••"
+                value={form.password}
+                onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+              />
+              <button type="button"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setShowPw((v) => !v)}>
+                {showPw ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+              </button>
+            </div>
+          </div>
+          <div className="col-span-2 sm:col-span-1">
+            <label className={labelCls}>From Email</label>
+            <input className={inputCls} placeholder="noreply@yourcompany.com" value={form.from_email}
+              onChange={(e) => setForm((f) => ({ ...f, from_email: e.target.value }))} />
+          </div>
+          <div className="col-span-2 sm:col-span-1">
+            <label className={labelCls}>From Name</label>
+            <input className={inputCls} placeholder="mediaERP" value={form.from_name}
+              onChange={(e) => setForm((f) => ({ ...f, from_name: e.target.value }))} />
+          </div>
+        </div>
+
+        <label className="flex items-center gap-3 cursor-pointer select-none">
+          <Switch
+            checked={form.use_tls}
+            onCheckedChange={(v) => setForm((f) => ({ ...f, use_tls: v }))}
+          />
+          <span className="text-sm">Use TLS / STARTTLS</span>
+        </label>
+
+        <Button size="sm" onClick={() => update.mutate(form)} disabled={update.isPending}>
+          {update.isPending && <Loader2 className="size-3 mr-1.5 animate-spin" />}
+          Save Settings
+        </Button>
+      </div>
+
+      {/* Test email card */}
+      <div className="rounded-xl border bg-card p-5 space-y-3">
+        <div>
+          <h3 className="font-medium text-sm">Send Test Email</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Verify your SMTP settings by sending a test message.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="email"
+            className={cn(inputCls, "flex-1")}
+            placeholder="recipient@example.com"
+            value={testTo}
+            onChange={(e) => setTestTo(e.target.value)}
+          />
+          <Button size="sm" variant="outline"
+            onClick={() => testEmail.mutate(testTo || undefined)}
+            disabled={testEmail.isPending}>
+            {testEmail.isPending && <Loader2 className="size-3 mr-1.5 animate-spin" />}
+            Send Test
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const TABS: { id: Tab; label: string; icon: React.ElementType; superAdminOnly?: boolean }[] = [
+  { id: "profile",       label: "Profile",       icon: User },
+  { id: "password",      label: "Password",      icon: KeyRound },
+  { id: "plan",          label: "Plan",          icon: Sparkles },
+  { id: "branding",      label: "Branding",      icon: Palette },
+  { id: "security",      label: "Security",      icon: Shield },
+  { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "audit",         label: "Audit Logs",    icon: ClipboardList },
+  { id: "email",         label: "Email SMTP",    icon: Mail, superAdminOnly: true },
 ];
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>("profile");
+  const user = useAuthStore((s) => s.user);
+  const isSuperAdmin = !!(user?.role?.is_system_role && user?.role?.role_name === "Super Admin");
+  const visibleTabs = TABS.filter((t) => !t.superAdminOnly || isSuperAdmin);
 
   return (
     <div className="space-y-5">
@@ -561,8 +857,8 @@ export default function SettingsPage() {
       />
 
       {/* Tab bar */}
-      <div className="rounded-xl border bg-muted/40 p-1 w-fit flex gap-0.5">
-        {TABS.map((t) => (
+      <div className="rounded-xl border bg-muted/40 p-1 w-fit flex flex-wrap gap-0.5">
+        {visibleTabs.map((t) => (
           <TabButton
             key={t.id}
             active={tab === t.id}
@@ -588,7 +884,9 @@ export default function SettingsPage() {
             {tab === "plan"     && <PlanTab />}
             {tab === "branding" && <BrandingPanel />}
             {tab === "security" && <SecurityTab />}
-            {tab === "audit"    && <AuditTab />}
+            {tab === "audit"         && <AuditTab />}
+            {tab === "notifications" && <NotificationsTab />}
+            {tab === "email"         && <EmailTab />}
           </motion.div>
         </AnimatePresence>
       </div>

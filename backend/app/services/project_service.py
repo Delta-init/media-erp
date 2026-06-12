@@ -14,24 +14,38 @@ VALID_STATUSES = {"pending", "upcoming", "currently_working", "updation_needed"}
 VALID_PRIORITIES = {"low", "medium", "high"}
 
 
+def _dt_to_utc_iso(dt) -> str | None:
+    """Serialize a datetime to an ISO string with explicit UTC offset.
+
+    Motor returns timezone-naive datetime objects that represent UTC.
+    Without the +00:00 suffix, JavaScript parses them as *local* time,
+    causing openIntervalSeconds to be off by the browser's UTC offset.
+    """
+    if dt is None:
+        return None
+    if not hasattr(dt, "isoformat"):
+        return dt  # already a string
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
 def _serialize(doc: dict) -> dict:
     out = {**doc}
     out["id"] = str(doc["_id"])
     del out["_id"]
-    if "created_at" in out and hasattr(out["created_at"], "isoformat"):
-        out["created_at"] = out["created_at"].isoformat()
-    if "updated_at" in out and hasattr(out["updated_at"], "isoformat"):
-        out["updated_at"] = out["updated_at"].isoformat()
+    if "created_at" in out:
+        out["created_at"] = _dt_to_utc_iso(out["created_at"])
+    if "updated_at" in out:
+        out["updated_at"] = _dt_to_utc_iso(out["updated_at"])
     # Serialize nested datetime objects inside timing intervals
     if out.get("timing"):
         timing = out["timing"]
         serialized_intervals = []
         for iv in timing.get("intervals", []):
-            sa = iv.get("started_at")
-            ea = iv.get("ended_at")
             serialized_intervals.append({
-                "started_at": sa.isoformat() if hasattr(sa, "isoformat") else sa,
-                "ended_at": ea.isoformat() if hasattr(ea, "isoformat") else ea,
+                "started_at": _dt_to_utc_iso(iv.get("started_at")),
+                "ended_at":   _dt_to_utc_iso(iv.get("ended_at")),
             })
         out["timing"] = {
             "intervals": serialized_intervals,

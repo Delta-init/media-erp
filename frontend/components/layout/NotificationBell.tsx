@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bell, CheckCheck, RefreshCw, ServerCrash, Wifi } from "lucide-react";
+import {
+  Bell, CheckCheck, RefreshCw, ServerCrash, Wifi,
+  ClipboardList, Play, Coffee, Eye, CheckCircle2,
+  RotateCcw, Users, Clock,
+} from "lucide-react";
 import { fadeVariants, listItemVariants, listVariants } from "@/lib/animations";
 import { useMarkAllRead, useMarkRead, useNotifications } from "@/hooks/useNotifications";
 import type { Notification } from "@/types/notification";
@@ -19,31 +24,66 @@ function timeAgo(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-// ── Notification icon by type ─────────────────────────────────────────────────
-function NotifIcon({ type }: { type: Notification["type"] }) {
-  if (type === "sync_success")
-    return <Wifi className="size-3.5 shrink-0 text-emerald-500" />;
-  if (type === "sync_error")
-    return <ServerCrash className="size-3.5 shrink-0 text-destructive" />;
-  return <Bell className="size-3.5 shrink-0 text-primary" />;
+// ── Icon + colour per notification type ──────────────────────────────────────
+function typeConfig(type: string): { icon: React.ReactNode; bg: string } {
+  switch (type) {
+    case "task_assigned":
+      return { icon: <ClipboardList className="size-3.5 text-blue-500" />,    bg: "bg-blue-100 dark:bg-blue-900/30" };
+    case "task_started":
+      return { icon: <Play className="size-3.5 text-emerald-500" />,          bg: "bg-emerald-100 dark:bg-emerald-900/30" };
+    case "task_break":
+      return { icon: <Coffee className="size-3.5 text-yellow-500" />,         bg: "bg-yellow-100 dark:bg-yellow-900/30" };
+    case "pending_review":
+      return { icon: <Eye className="size-3.5 text-amber-500" />,             bg: "bg-amber-100 dark:bg-amber-900/30" };
+    case "task_approved":
+      return { icon: <CheckCircle2 className="size-3.5 text-emerald-500" />,  bg: "bg-emerald-100 dark:bg-emerald-900/30" };
+    case "task_reedit":
+      return { icon: <RotateCcw className="size-3.5 text-orange-500" />,      bg: "bg-orange-100 dark:bg-orange-900/30" };
+    case "team_task_assigned":
+      return { icon: <Users className="size-3.5 text-purple-500" />,          bg: "bg-purple-100 dark:bg-purple-900/30" };
+    case "due_date_reminder":
+      return { icon: <Clock className="size-3.5 text-red-500" />,             bg: "bg-red-100 dark:bg-red-900/30" };
+    case "sync_success":
+      return { icon: <Wifi className="size-3.5 text-emerald-500" />,          bg: "bg-emerald-100 dark:bg-emerald-900/30" };
+    case "sync_error":
+      return { icon: <ServerCrash className="size-3.5 text-destructive" />,   bg: "bg-red-100 dark:bg-red-900/30" };
+    default:
+      return { icon: <Bell className="size-3.5 text-primary" />,              bg: "bg-muted" };
+  }
 }
 
+// Route to navigate to when a task-related notification is clicked
+const TASK_TYPES = new Set([
+  "task_assigned", "task_started", "task_break", "pending_review",
+  "task_approved", "task_reedit", "team_task_assigned", "due_date_reminder",
+]);
+
 // ── Single notification row ───────────────────────────────────────────────────
-function NotifRow({ item }: { item: Notification }) {
+function NotifRow({ item, onClose }: { item: Notification; onClose: () => void }) {
   const markRead = useMarkRead();
+  const router   = useRouter();
+  const { icon, bg } = typeConfig(item.type);
+
+  function handleClick() {
+    if (!item.read) markRead.mutate(item.id);
+    if (TASK_TYPES.has(item.type)) {
+      router.push("/projects");
+      onClose();
+    }
+  }
 
   return (
     <motion.button
       variants={listItemVariants}
       type="button"
-      onClick={() => { if (!item.read) markRead.mutate(item.id); }}
+      onClick={handleClick}
       className={cn(
         "w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-muted/60 transition-colors",
         !item.read && "bg-primary/5"
       )}
     >
-      <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted">
-        <NotifIcon type={item.type} />
+      <div className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full", bg)}>
+        {icon}
       </div>
       <div className="min-w-0 flex-1">
         <p className={cn("text-xs font-medium truncate", !item.read ? "text-foreground" : "text-muted-foreground")}>
@@ -63,7 +103,7 @@ function NotifRow({ item }: { item: Notification }) {
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const { data, isLoading } = useNotifications(20);
+  const { data, isLoading } = useNotifications(30);
   const markAll = useMarkAllRead();
 
   const unread = data?.unread_count ?? 0;
@@ -72,9 +112,7 @@ export function NotificationBell() {
   // Close on outside click
   useEffect(() => {
     function handle(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
     if (open) document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
@@ -141,7 +179,7 @@ export function NotificationBell() {
             </div>
 
             {/* Body */}
-            <div className="max-h-80 overflow-y-auto">
+            <div className="max-h-[360px] overflow-y-auto">
               {isLoading && (
                 <div className="flex h-24 items-center justify-center">
                   <RefreshCw className="size-4 animate-spin text-muted-foreground" />
@@ -149,7 +187,7 @@ export function NotificationBell() {
               )}
 
               {!isLoading && items.length === 0 && (
-                <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+                <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
                   <Bell className="size-8 text-muted-foreground/30" />
                   <p className="text-xs text-muted-foreground">No notifications yet</p>
                 </div>
@@ -163,7 +201,7 @@ export function NotificationBell() {
                   className="divide-y divide-border"
                 >
                   {items.map((item) => (
-                    <NotifRow key={item.id} item={item} />
+                    <NotifRow key={item.id} item={item} onClose={() => setOpen(false)} />
                   ))}
                 </motion.div>
               )}

@@ -2,48 +2,112 @@
 Async email utility using stdlib smtplib (no extra dependency).
 Runs the blocking SMTP call in a thread-pool executor so it
 doesn't block the FastAPI event loop.
+
+Config priority: MongoDB `email_settings` collection → .env fallback.
+
+Port behaviour
+--------------
+465  → SMTP_SSL  (SSL from the start — no STARTTLS)
+587  → SMTP + STARTTLS  (upgrade mid-session — standard Gmail App Password flow)
+other→ same as 587 when use_tls=True, plain SMTP otherwise
 """
 import asyncio
 import logging
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
+from typing import Optional
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_SMTP_TIMEOUT = 15  # seconds — fail fast instead of hanging forever
+_SMTP_TIMEOUT = 20  # seconds
 
 
-def _send_sync(to: str, subject: str, html_body: str) -> None:
+async def get_smtp_config(db) -> Optional[dict]:
+    """Fetch SMTP config from the `email_settings` collection; None if not configured."""
+    try:
+        doc = await db["email_settings"].find_one({"_id": "smtp"})
+        if doc and doc.get("host") and doc.get("username") and doc.get("password"):
+            return doc
+    except Exception:
+        pass
+    return None
+
+
+def _send_sync(to: str, subject: str, html_body: str, cfg: Optional[dict] = None) -> None:
     """Blocking SMTP send — runs in a thread-pool executor."""
-    if not settings.mail_username or not settings.mail_password or not settings.mail_from:
+    host       = (cfg or {}).get("host")       or settings.mail_server
+    port       = int((cfg or {}).get("port")   or settings.mail_port or 587)
+    username   = (cfg or {}).get("username")   or settings.mail_username
+    password   = (cfg or {}).get("password")   or settings.mail_password
+    from_email = (cfg or {}).get("from_email") or settings.mail_from
+    from_name  = (cfg or {}).get("from_name")  or settings.mail_from_name
+    use_tls    = (cfg or {}).get("use_tls", True) if cfg else True
+
+    if not username or not password or not from_email:
         raise RuntimeError(
-            "Email is not configured. "
-            "Set MAIL_USERNAME, MAIL_PASSWORD and MAIL_FROM in .env"
+            "Email is not configured — set credentials via Super Admin › Settings › Email SMTP"
         )
 
+    domain = from_email.split("@")[1] if "@" in from_email else "mediaerp.com"
+
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = f"{settings.mail_from_name} <{settings.mail_from}>"
-    msg["To"] = to
+    msg["Subject"]    = subject
+    msg["From"]       = f"{from_name} <{from_email}>"
+    msg["To"]         = to
+    msg["Date"]       = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=domain)
     msg.attach(MIMEText(html_body, "html"))
 
-    with smtplib.SMTP(settings.mail_server, settings.mail_port, timeout=_SMTP_TIMEOUT) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(settings.mail_username, settings.mail_password)
-        server.sendmail(settings.mail_from, [to], msg.as_string())
+    ctx = ssl.create_default_context()
+
+    try:
+        if port == 465:
+            # Port 465 — SSL from the start (no STARTTLS)
+            with smtplib.SMTP_SSL(host, port, timeout=_SMTP_TIMEOUT, context=ctx) as server:
+                server.ehlo()
+                server.login(username, password)
+                server.sendmail(from_email, [to], msg.as_string())
+        else:
+            # Port 587 (or other) — plain connect then STARTTLS upgrade
+            with smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT) as server:
+                server.ehlo()
+                if use_tls:
+                    server.starttls(context=ctx)
+                    server.ehlo()
+                server.login(username, password)
+                server.sendmail(from_email, [to], msg.as_string())
+    except smtplib.SMTPAuthenticationError as exc:
+        logger.error("SMTP auth failed for %s: %s", username, exc)
+        # Surface a friendly message for the most common Gmail mistake
+        raise RuntimeError(
+            f"Authentication failed ({exc.smtp_code}). "
+            "For Gmail, you must use a 16-character App Password "
+            "(Google Account › Security › 2-Step Verification › App passwords), "
+            "not your regular Gmail password."
+        ) from exc
+    except Exception as exc:
+        logger.error("SMTP send failed → %s | %s", to, exc, exc_info=True)
+        raise
 
     logger.info("Email sent → %s | Subject: %s", to, subject)
 
 
 async def send_email(to: str, subject: str, html_body: str) -> None:
-    """Non-blocking wrapper: dispatches _send_sync to the default thread executor."""
+    """Non-blocking wrapper using .env SMTP config."""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _send_sync, to, subject, html_body)
+    await loop.run_in_executor(None, _send_sync, to, subject, html_body, None)
+
+
+async def send_email_db(db, to: str, subject: str, html_body: str) -> None:
+    """Like send_email but reads SMTP config from DB first; falls back to .env."""
+    cfg = await get_smtp_config(db)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _send_sync, to, subject, html_body, cfg)
 
 
 async def send_otp_email(to: str, otp: str) -> None:

@@ -23,7 +23,7 @@ async def get_users(
     status: str = Query("", alias="status"),
     role_id: str = Query("", alias="role_id"),
     page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=500),
     db: AsyncIOMotorDatabase = Depends(get_db),
     _: dict = Depends(check_permission("users", "view")),
 ):

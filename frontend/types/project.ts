@@ -43,8 +43,14 @@ export interface Attachment {
   backend: string;
 }
 
+export interface TaskInterval {
+  started_at: string;
+  ended_at: string | null;
+}
+
 export interface TaskTiming {
   total_seconds: number | null;
+  intervals?: TaskInterval[] | null;
   started_at?: string | null;
   approved_at?: string | null;
 }

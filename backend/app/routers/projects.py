@@ -31,6 +31,130 @@ from app.utils.response import error_response, success_response
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
 
+async def _fire_notifications(
+    db,
+    task: dict,
+    event: str,
+    actor_id: str,
+    actor_name: str,
+) -> None:
+    """
+    Create notifications for the right recipients based on a task event.
+
+    Events
+    ------
+    created          → team leaders get team_task_assigned; assigned employee gets task_assigned
+    assigned         → assigned employee gets task_assigned
+    started          → team leaders get task_started
+    break            → team leaders get task_break
+    pending_review   → team leaders + admins/coordinator/super-admin get pending_review
+    approved         → assigned employee + elevated roles get task_approved
+    reedit           → assigned employee + elevated roles get task_reedit
+    """
+    from bson import ObjectId
+    from app.services.notification_service import push_notification
+
+    assigned_to   = task.get("assigned_to") or ""
+    assigned_name = task.get("assigned_to_name") or "Someone"
+    team_id       = task.get("team_id") or ""
+    task_id       = task.get("id") or str(task.get("_id", ""))
+    task_title    = task.get("title") or "Task"
+    reedit_reason = task.get("reedit_reason") or ""
+    meta          = {"task_id": task_id, "task_title": task_title}
+
+    # ── 1. Notify assigned employee ───────────────────────────────────────────
+    if event in ("created", "assigned") and assigned_to and assigned_to != actor_id:
+        await push_notification(
+            db, assigned_to, "task_assigned",
+            "New task assigned to you",
+            f'"{task_title}" has been assigned to you.',
+            meta,
+        )
+
+    elif event == "pending_review" and assigned_to and assigned_to != actor_id:
+        # Leader submitted the task on the employee's behalf — tell them
+        await push_notification(
+            db, assigned_to, "pending_review",
+            "Your task is now in review",
+            f'"{task_title}" has been submitted for review.',
+            meta,
+        )
+
+    elif event == "approved" and assigned_to:
+        await push_notification(
+            db, assigned_to, "task_approved",
+            "Task approved ✓",
+            f'Your task "{task_title}" has been approved!',
+            meta,
+        )
+
+    elif event == "reedit" and assigned_to:
+        suffix = f" Reason: {reedit_reason}" if reedit_reason else ""
+        await push_notification(
+            db, assigned_to, "task_reedit",
+            "Task sent back for revision",
+            f'"{task_title}" needs revision.{suffix}',
+            meta,
+        )
+
+    # ── 2. Notify team leader(s) ──────────────────────────────────────────────
+    leader_ids: list[str] = []
+    if team_id and ObjectId.is_valid(team_id):
+        team_doc = await db["teams"].find_one({"_id": ObjectId(team_id)})
+        if team_doc:
+            leader_ids = [
+                m["user_id"]
+                for m in team_doc.get("members", [])
+                if m.get("role") == "leader" and m["user_id"] != actor_id
+            ]
+
+    leader_notif = {
+        "created":        ("team_task_assigned", "New task in your team",
+                           f'A new task "{task_title}" was added to your team.'),
+        "started":        ("task_started", "Employee started a task",
+                           f'{assigned_name} started working on "{task_title}".'),
+        "break":          ("task_break", "Employee took a break",
+                           f'{assigned_name} paused work on "{task_title}".'),
+        "pending_review": ("pending_review", "Task ready for review",
+                           f'{assigned_name} submitted "{task_title}" for your review.'),
+    }
+    if event in leader_notif:
+        ntype, ntitle, nmsg = leader_notif[event]
+        for lid in leader_ids:
+            await push_notification(db, lid, ntype, ntitle, nmsg, meta)
+
+    # ── 3. Notify elevated roles (Admin, Coordinator, Super Admin) ────────────
+    # "created" — new task in any team (so admins can see it in Assign Work)
+    # "pending_review" / "approved" / "reedit" — workflow oversight
+    if event in ("created", "pending_review", "approved", "reedit"):
+        elevated_roles = await db["roles"].find({
+            "is_system_role": True,
+            "role_name": {"$in": ["Admin", "Coordinator", "Super Admin"]},
+        }).to_list(20)
+        role_id_strs = [str(r["_id"]) for r in elevated_roles]
+        if role_id_strs:
+            elevated_users = await db["users"].find(
+                {"role_id": {"$in": role_id_strs}, "is_active": {"$ne": False}}
+            ).to_list(200)
+
+            elevated_notif = {
+                "created":        ("team_task_assigned", "New task assigned to a team",
+                                   f'A new task "{task_title}" is waiting to be assigned.'),
+                "pending_review": ("pending_review", "Task awaiting review",
+                                   f'{assigned_name} submitted "{task_title}" for review.'),
+                "approved":       ("task_approved", "Task approved",
+                                   f'"{task_title}" was approved by {actor_name}.'),
+                "reedit":         ("task_reedit", "Task sent for revision",
+                                   f'"{task_title}" was sent back for revision by {actor_name}.'),
+            }
+            ntype, ntitle, nmsg = elevated_notif[event]
+            for u in elevated_users:
+                uid = str(u["_id"])
+                if uid in (actor_id, assigned_to) or uid in leader_ids:
+                    continue  # avoid duplicate / self-notify
+                await push_notification(db, uid, ntype, ntitle, nmsg, meta)
+
+
 async def _resolve_visibility(current_user: dict, team_id: str, db: AsyncIOMotorDatabase):
     """
     Return (visibility, uid, leader_team_ids).
@@ -142,6 +266,13 @@ async def add_task(
         data["assigned_to_name"] = current_user.get("name", "")
 
     task = await create_task(db, data)
+
+    await _fire_notifications(
+        db, task, "created",
+        str(current_user["_id"]),
+        current_user.get("name", ""),
+    )
+
     return success_response(data=task, message="Task created", status_code=201)
 
 
@@ -280,6 +411,28 @@ async def edit_task(
     if not task:
         return error_response("Task not found", status_code=404)
 
+    # ── Fire notifications for status transition ───────────────────────────────
+    _notif_event_map = {
+        "started":        "started",
+        "break":          "break",
+        "pending_review": "pending_review",
+        "approved":       "approved",
+        "reedit":         "reedit",
+    }
+    if new_status and new_status != cur_status and new_status in _notif_event_map:
+        await _fire_notifications(
+            db, task, _notif_event_map[new_status],
+            str(current_user["_id"]),
+            current_user.get("name", ""),
+        )
+    # Re-assignment to a different person
+    if "assigned_to" in updates and updates["assigned_to"] != current.get("assigned_to"):
+        await _fire_notifications(
+            db, task, "assigned",
+            str(current_user["_id"]),
+            current_user.get("name", ""),
+        )
+
     # ── Destination routing (only on approve) ─────────────────────────────────
     if new_status == "approved" and destination_team_id:
         from datetime import datetime, timezone as tz
@@ -294,7 +447,7 @@ async def edit_task(
                     former_team_name = former_team_doc.get("name", "")
             except Exception:
                 pass
-        await db["project_tasks"].insert_one({
+        routed_result = await db["project_tasks"].insert_one({
             "title": task["title"],
             "description": task.get("description", ""),
             "priority": task.get("priority", "medium"),
@@ -313,6 +466,15 @@ async def edit_task(
             "former_assigned_to_name": task.get("assigned_to_name", "") or task.get("assigned_to", ""),
             "former_team_name": former_team_name,
         })
+        # Notify the destination team's leaders + elevated roles about the new task
+        from app.services.project_service import _serialize
+        routed_task = await db["project_tasks"].find_one({"_id": routed_result.inserted_id})
+        if routed_task:
+            await _fire_notifications(
+                db, _serialize(routed_task), "created",
+                str(current_user["_id"]),
+                current_user.get("name", ""),
+            )
 
     return success_response(data=task, message="Task updated")
 

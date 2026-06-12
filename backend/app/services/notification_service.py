@@ -5,6 +5,7 @@ Provides helpers used by:
   - sync_service (Celery, synchronous PyMongo)
   - notifications router (FastAPI, async Motor)
 """
+import asyncio
 from datetime import datetime, timezone
 
 from bson import ObjectId
@@ -30,6 +31,118 @@ def create_notification_sync(
 
 
 # ── Async helpers (used by FastAPI router) ────────────────────────────────────
+
+async def push_notification(
+    db,
+    user_id: str,
+    notification_type: str,
+    title: str,
+    message: str,
+    metadata: dict | None = None,
+) -> str | None:
+    """Insert a notification using the async Motor client. Returns inserted id or None."""
+    try:
+        doc = notification_doc(user_id, notification_type, title, message, metadata)
+        result = await db["notifications"].insert_one(doc)
+        # Fire email in background — never blocks the request
+        asyncio.create_task(
+            _send_email_if_opted_in(db, user_id, notification_type, title, message)
+        )
+        return str(result.inserted_id)
+    except Exception:
+        return None
+
+
+async def _send_email_if_opted_in(
+    db, user_id: str, notif_type: str, title: str, message: str
+) -> None:
+    """Send an email notification if SMTP is configured and the user has opted in."""
+    try:
+        from app.utils.email import get_smtp_config, send_email_db
+
+        smtp = await get_smtp_config(db)
+        if not smtp:
+            return  # No SMTP configured yet
+
+        prefs = await db["notification_prefs"].find_one({"user_id": user_id})
+        # Master switch — default OFF (user must opt in)
+        if not (prefs or {}).get("email_enabled", False):
+            return
+        # Per-type switch — default ON when master is on
+        email_types = (prefs or {}).get("email_types", {})
+        if notif_type in email_types and not email_types[notif_type]:
+            return
+
+        user = await db["users"].find_one({"_id": ObjectId(user_id)}, {"email": 1, "name": 1})
+        if not user or not user.get("email"):
+            return
+
+        await send_email_db(db, user["email"], f"mediaERP: {title}", _notif_email_html(title, message))
+    except Exception:
+        pass  # email errors must never surface to the caller
+
+
+def _notif_email_html(title: str, message: str) -> str:
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 0;">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0"
+             style="background:#fff;border-radius:12px;overflow:hidden;
+                    box-shadow:0 2px 8px rgba(0,0,0,.08);">
+        <tr><td style="background:#18181b;padding:28px 36px;">
+          <span style="font-size:20px;font-weight:700;color:#fff;">mediaERP</span>
+        </td></tr>
+        <tr><td style="padding:36px;">
+          <h2 style="margin:0 0 12px;color:#18181b;">{title}</h2>
+          <p style="color:#555;font-size:15px;line-height:1.6;">{message}</p>
+        </td></tr>
+        <tr><td style="background:#f9f9f9;padding:16px 36px;border-top:1px solid #eee;">
+          <p style="margin:0;font-size:12px;color:#aaa;">
+            &copy; 2025 mediaERP &mdash; Carlton Trading Academy
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+
+async def check_due_reminders(db, user_id: str) -> None:
+    """Create due-date reminder notifications for tasks assigned to user_id due tomorrow."""
+    try:
+        from datetime import timedelta
+        now      = datetime.now(timezone.utc)
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        tasks = await db["project_tasks"].find({
+            "assigned_to": user_id,
+            "due_date": tomorrow,
+            "status": {"$nin": ["approved"]},
+        }).to_list(50)
+
+        for task in tasks:
+            task_id = str(task["_id"])
+            # Skip if we already sent a reminder today
+            existing = await db["notifications"].find_one({
+                "user_id": ObjectId(user_id),
+                "type": "due_date_reminder",
+                "metadata.task_id": task_id,
+                "created_at": {"$gte": today_start},
+            })
+            if not existing:
+                await push_notification(
+                    db, user_id, "due_date_reminder",
+                    "Task due tomorrow",
+                    f'"{task.get("title", "Task")}" is due tomorrow. Submit for review!',
+                    {"task_id": task_id, "task_title": task.get("title", "")},
+                )
+    except Exception:
+        pass  # never let reminder check break the main request
+
 
 async def list_notifications(
     db,

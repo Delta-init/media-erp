@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
   useEmailSchedules,
@@ -252,18 +253,10 @@ function ScheduleModal({ onClose, initial }: { onClose: () => void; initial?: Em
 
           {/* Enabled */}
           <label className="flex items-center gap-3 cursor-pointer">
-            <div
-              className={cn(
-                "relative h-5 w-9 rounded-full transition-colors",
-                form.enabled ? "bg-primary" : "bg-muted-foreground/30"
-              )}
-              onClick={() => setForm((f) => ({ ...f, enabled: !f.enabled }))}
-            >
-              <div className={cn(
-                "absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform",
-                form.enabled ? "translate-x-4" : "translate-x-0.5"
-              )} />
-            </div>
+            <Switch
+              checked={form.enabled}
+              onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
+            />
             <span className="text-sm">Schedule enabled</span>
           </label>
 

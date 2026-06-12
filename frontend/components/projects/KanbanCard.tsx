@@ -9,7 +9,7 @@ import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
 import { useCanApprove } from "@/hooks/useCanApprove";
 import type { Task, TaskStatus } from "@/types/project";
 import { BOARD_COLUMNS, PRIORITY_META, allowedColumns } from "@/types/project";
-import { useTaskTimer, formatSeconds } from "@/hooks/useTaskTimer";
+import { useTaskTimer, formatSeconds, formatSecondsHMS } from "@/hooks/useTaskTimer";
 import { TaskDetailModal } from "./TaskDetailModal";
 
 interface Props {
@@ -145,20 +145,26 @@ export function KanbanCard({ task, overlay = false }: Props) {
       {/* ── Row 2: timer · pause count ── */}
       {hasTimer && (
         <div className="flex items-center gap-2.5 pl-5 mt-1.5">
-          <div
-            className={cn(
-              "flex items-center gap-1 text-[11px] font-medium tabular-nums",
-              isRunning    ? "text-blue-500"
-              : isCompleted ? "text-green-600 dark:text-green-400"
-              :               "text-muted-foreground"
-            )}
-          >
-            {isRunning && (
-              <span className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
-            )}
-            <Timer className="size-3" />
-            <span>{formatSeconds(seconds)}</span>
-          </div>
+          {isRunning ? (
+            /* Live HH:MM:SS stopwatch — only on Started cards */
+            <div className="flex items-center gap-1.5">
+              <span className="size-1.5 shrink-0 rounded-full bg-blue-500 animate-pulse" />
+              <span className="text-[12px] font-bold font-mono tabular-nums tracking-wider text-blue-500">
+                {formatSecondsHMS(seconds)}
+              </span>
+            </div>
+          ) : (
+            /* Compact h/m/s display for Break, Approved, etc. — unchanged */
+            <div
+              className={cn(
+                "flex items-center gap-1 text-[11px] font-medium tabular-nums",
+                isCompleted ? "text-green-600 dark:text-green-400" : "text-muted-foreground"
+              )}
+            >
+              <Timer className="size-3" />
+              <span>{formatSeconds(seconds)}</span>
+            </div>
+          )}
 
           {pauseCount > 0 && (
             <div

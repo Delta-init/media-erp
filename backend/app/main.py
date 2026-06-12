@@ -56,6 +56,9 @@ from app.routers import fx as fx_router
 from app.routers import teams as teams_router
 from app.routers import board_statuses as board_statuses_router
 from app.routers import pipelines as pipelines_router
+from app.routers import email_settings as email_settings_router
+from app.routers import notification_prefs as notification_prefs_router
+from app.routers import media_schedule as media_schedule_router
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.utils.response import success_response
 
@@ -79,6 +82,11 @@ async def lifespan(app: FastAPI):
     from app.services.email_report_service import start_email_scheduler
     threading.Thread(target=start_email_scheduler, daemon=True, name="email-scheduler").start()
     logger.info("Email scheduler started")
+
+    # Media schedule activation daemon thread (every 60 s)
+    from app.services.media_schedule_service import start_media_scheduler
+    threading.Thread(target=start_media_scheduler, daemon=True, name="media-scheduler").start()
+    logger.info("Media schedule scheduler started")
     yield
     await close_db()
 
@@ -136,6 +144,9 @@ app.include_router(fx_router.router)
 app.include_router(teams_router.router)
 app.include_router(board_statuses_router.router)
 app.include_router(pipelines_router.router)
+app.include_router(email_settings_router.router)
+app.include_router(notification_prefs_router.router)
+app.include_router(media_schedule_router.router)
 
 # Serve uploaded files at /uploads/<filename>
 # These are publicly reachable via ngrok so Instagram can fetch images.
