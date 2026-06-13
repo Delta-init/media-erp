@@ -530,59 +530,96 @@ export default function MediaSchedulePage() {
 
   // ── Role-based access
   const { user } = useAuthStore();
-  const roleName  = user?.role?.role_name?.toLowerCase() ?? "";
-  const canViewAll = ["super admin", "admin", "coordinator"].some((r) =>
-    roleName.includes(r)
-  );
+  const roleName   = user?.role?.role_name ?? "";
+  const canViewAll = ["Super Admin", "Admin", "Coordinator"].includes(roleName);
 
-  // ── Filters
+  // ── Filters (teams loaded before role-detection so we can fall back to my_role)
   const [filterTeam,     setFilterTeam]     = useState("");
   const [filterMember,   setFilterMember]   = useState("");
   const [filterDateType, setFilterDateType] = useState<"both" | "start" | "due">("both");
   const { data: teams = [] } = useTeams();
-  // Load ALL users — backend max is 500 (raised from 100); no status filter
+  // Load ALL users (backend cap raised to 500)
   const { data: usersData } = useUsersList({ limit: 500, page: 1 });
   const allUsersFromDb = usersData?.users ?? [];
 
-  // When a team is selected, restrict to that team's member IDs only
-  const selectedTeamObj  = teams.find((t) => t.id === filterTeam);
-  const teamMemberIds    = useMemo(
-    () => new Set((selectedTeamObj as any)?.members?.map((m: any) => m.user_id) ?? []),
+  // Teams visible in the Team dropdown:
+  //   Admin/Coordinator → all teams
+  //   Team Leader       → only teams where my_role === "leader"
+  //   Employee          → (filter hidden)
+  const visibleTeams = useMemo(() => {
+    if (canViewAll) return teams;
+    return teams.filter((t) => (t as any).my_role === "leader");
+  }, [teams, canViewAll]);
+
+  // Detect leadership from teams data (fallback for users whose role_name may be null)
+  const isLeader   = !canViewAll && (roleName === "Team Leader" || visibleTeams.length > 0);
+  const isEmployee = !canViewAll && !isLeader;
+
+  // When a team is selected, restrict user dropdown to that team's member IDs
+  const selectedTeamObj = teams.find((t) => t.id === filterTeam);
+  const teamMemberIds   = useMemo(
+    () => new Set<string>((selectedTeamObj as any)?.members?.map((m: any) => m.user_id) ?? []),
     [selectedTeamObj]
   );
 
-  // Users shown in the dropdown: all DB users (sorted), filtered to team members when a team is active
+  // For leaders: extract members directly from teams data (no /users permission needed)
+  const leaderTeamMembers = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Array<{ id: string; name: string; designation: string }> = [];
+    const teamsToScan = filterTeam
+      ? visibleTeams.filter((t) => t.id === filterTeam)
+      : visibleTeams;
+    for (const t of teamsToScan) {
+      for (const m of (t as any).members ?? []) {
+        if (m.user_id && !seen.has(m.user_id)) {
+          seen.add(m.user_id);
+          result.push({ id: m.user_id, name: m.name ?? "", designation: m.designation ?? "" });
+        }
+      }
+    }
+    return result.sort((a, b) => a.name.localeCompare(b.name));
+  }, [visibleTeams, filterTeam]);
+
+  // Users in the member dropdown
+  // Admins use the full DB users list; leaders use team member data (no /users permission needed)
   const visibleUsers = useMemo(() => {
-    const base = allUsersFromDb
-      .filter((u) => !filterTeam || teamMemberIds.has(u.id))
-      .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-    return base;
-  }, [allUsersFromDb, filterTeam, teamMemberIds]);
+    if (canViewAll) {
+      let base = allUsersFromDb;
+      if (filterTeam) base = base.filter((u) => teamMemberIds.has(u.id));
+      return base.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+    }
+    return leaderTeamMembers;
+  }, [canViewAll, allUsersFromDb, filterTeam, teamMemberIds, leaderTeamMembers]);
+
+  // "__me__" in the user filter means "show my own assigned tasks"
+  const resolvedAssignedTo = filterMember === "__me__" ? (user?.id ?? "") : filterMember;
 
   // ── Data
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const from_date   = `${year}-${pad2(month + 1)}-01`;
   const to_date     = `${year}-${pad2(month + 1)}-${pad2(daysInMonth)}`;
 
-  // Non-admins can only see their own tasks
-  const effectiveAssignedTo = canViewAll
-    ? (filterMember || undefined)
-    : (user?.id || undefined);
+  // Build query params — backend enforces the real access control,
+  // frontend just passes what the user selected (or nothing for employees).
+  const queryParams = useMemo(() => {
+    if (isEmployee) {
+      return { from_date, to_date };
+    }
+    const p: Record<string, string | undefined> = { from_date, to_date };
+    if (filterTeam)          p.team_id     = filterTeam;
+    if (resolvedAssignedTo)  p.assigned_to = resolvedAssignedTo;
+    return p;
+  }, [isEmployee, filterTeam, resolvedAssignedTo, from_date, to_date]);
 
-  const { data: tasks = [], isLoading } = useMediaTasks({
-    team_id:     canViewAll ? (filterTeam || undefined) : undefined,
-    assigned_to: effectiveAssignedTo,
-    from_date,
-    to_date,
-  });
+  const { data: tasks = [], isLoading } = useMediaTasks(queryParams);
 
-  // Project tasks for the same month — shows their due dates on the calendar
+  // Project tasks for the same month — due dates shown as amber badges
   const { data: projectTasks = [] } = useTasks({
     date_filter: "custom",
     date_from:   from_date,
     date_to:     to_date,
-    ...(filterTeam   && canViewAll ? { team_id:   filterTeam }   : {}),
-    ...(effectiveAssignedTo        ? { member_id: effectiveAssignedTo } : {}),
+    ...(filterTeam   ? { team_id:   filterTeam }   : {}),
+    ...(filterMember ? { member_id: filterMember } : {}),
   });
 
   // ── Calendar cells
@@ -710,8 +747,8 @@ export default function MediaSchedulePage() {
           ))}
         </div>
 
-        {/* Team + User filters — admins/coordinators only */}
-        {canViewAll && (
+        {/* Team + User filters — hidden for employees (backend auto-restricts them) */}
+        {!isEmployee && (
           <>
             <select
               className={selectCls}
@@ -721,8 +758,8 @@ export default function MediaSchedulePage() {
                 setFilterMember("");
               }}
             >
-              <option value="">All Teams</option>
-              {teams.map((t) => (
+              <option value="">{isLeader ? "My Teams" : "All Teams"}</option>
+              {visibleTeams.map((t) => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
@@ -732,7 +769,10 @@ export default function MediaSchedulePage() {
               value={filterMember}
               onChange={(e) => setFilterMember(e.target.value)}
             >
-              <option value="">All Users</option>
+              <option value="">All Members</option>
+              {isLeader && (
+                <option value="__me__">⭐ My Tasks</option>
+              )}
               {visibleUsers.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}{u.designation ? ` — ${u.designation}` : ""}
@@ -740,6 +780,13 @@ export default function MediaSchedulePage() {
               ))}
             </select>
           </>
+        )}
+
+        {/* Employee badge */}
+        {isEmployee && (
+          <span className="text-xs text-muted-foreground bg-muted px-2.5 py-1 rounded-lg border">
+            Showing your tasks only
+          </span>
         )}
       </div>
 

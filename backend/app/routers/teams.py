@@ -152,22 +152,43 @@ async def list_my_teams(
     else:
         query = {"members.user_id": uid}
     docs = await db["teams"].find(query).sort("created_at", -1).to_list(500)
+
+    # Batch-enrich all member user_ids in one DB round-trip
+    all_member_ids = {m["user_id"] for d in docs for m in d.get("members", [])}
+    user_docs = await db["users"].find(
+        {"_id": {"$in": [ObjectId(mid) for mid in all_member_ids if ObjectId.is_valid(mid)]}},
+        {"name": 1, "email": 1, "designation": 1, "avatar": 1},
+    ).to_list(1000) if all_member_ids else []
+    user_map = {str(u["_id"]): u for u in user_docs}
+
     teams = []
     for d in docs:
         t = _serialize_team(d)
-        t["member_count"] = len(d.get("members", []))
+        raw_members = d.get("members", [])
+        t["member_count"] = len(raw_members)
+        # Attach name/email/designation to every member entry
+        t["members"] = [
+            {
+                **m,
+                "name":        user_map.get(m["user_id"], {}).get("name", ""),
+                "email":       user_map.get(m["user_id"], {}).get("email", ""),
+                "designation": user_map.get(m["user_id"], {}).get("designation", ""),
+                "avatar":      user_map.get(m["user_id"], {}).get("avatar", ""),
+            }
+            for m in raw_members
+        ]
         tid = str(d["_id"])
         t["task_count"] = await db["project_tasks"].count_documents({"team_id": tid})
         t["done_count"] = await db["project_tasks"].count_documents(
             {"team_id": tid, "status": "currently_working"}
         )
         # Caller's role in this team
-        for m in d.get("members", []):
+        for m in raw_members:
             if m["user_id"] == uid:
                 t["my_role"] = m["role"]
                 break
         else:
-            # Global admins (Super Admin / Admin / Coordinator) get "admin" on every team.
+            # Global admins get "admin" on every team.
             # Team Leaders can see all teams but are only members of their own —
             # leave my_role unset so the frontend can filter to membership only.
             if _can_manage_any_team(current_user):

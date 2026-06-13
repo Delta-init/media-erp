@@ -172,3 +172,51 @@
     display: none;
   }
 }
+
+/* ── Auth grid background animations ─────────────────────────────────────── */
+@keyframes floatUp {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-30px); }
+}
+@keyframes floatDown {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(30px); }
+}
+@keyframes cardShimmer {
+  0%, 100% { opacity: 0.44; }
+  50%       { opacity: 0.74; }
+}
+.grid-card {
+  animation: cardShimmer 9s ease-in-out infinite;
+}
+
+/* Slow X-axis drift — grid oscillates left/right independently of Y float */
+@keyframes driftX {
+  0%   { transform: translateX(18px); }
+  50%  { transform: translateX(-18px); }
+  100% { transform: translateX(18px); }
+}
+
+/* Skeleton sweep: diagonal highlight slides L→R, then pauses before repeating */
+@keyframes skeletonSweep {
+  0%        { transform: translateX(-180%) skewX(-14deg); opacity: 1; }
+  38%       { transform: translateX(280%)  skewX(-14deg); opacity: 1; }
+  38.1%, 100% { transform: translateX(-180%) skewX(-14deg); opacity: 0; }
+}
+.skeleton-sweep {
+  position: absolute;
+  top: 0;
+  width: 55%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.075) 40%,
+    rgba(255, 255, 255, 0.11) 50%,
+    rgba(255, 255, 255, 0.075) 60%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 10;
+  animation: skeletonSweep 6s ease-in-out infinite;
+}

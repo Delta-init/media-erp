@@ -1,10 +1,16 @@
 """
 Media Schedule — CRUD endpoints for media team task scheduling.
+
+Access levels (same model as projects):
+  Super Admin / Admin / Coordinator → full access
+  Team Leader                       → tasks in teams they lead
+  Employee / other                  → own tasks only
 """
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from bson import ObjectId
+from bson.errors import InvalidId
 from fastapi import APIRouter, Depends
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
@@ -14,6 +20,8 @@ from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
 
 router = APIRouter(prefix="/api/v1/media-schedule", tags=["media-schedule"])
+
+ELEVATED_ROLES = {"Super Admin", "Admin", "Coordinator"}
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
@@ -53,6 +61,45 @@ def _serialize(doc: dict) -> dict:
         if field in out and hasattr(out[field], "isoformat"):
             out[field] = out[field].isoformat()
     return out
+
+
+async def _resolve_visibility(current_user: dict, team_id: Optional[str], db):
+    """
+    Returns (visibility, uid, leader_team_ids).
+
+    visibility:
+      "all"          — Super Admin / Admin / Coordinator
+      "team"         — Team Leader scoped to one specific team they lead
+      "leader_teams" — Team Leader, all their led teams (no specific team_id)
+      "own"          — Employee / other, only their own assigned tasks
+    """
+    uid = str(current_user["_id"])
+    role_doc = current_user.get("_role") or {}
+    role_name = role_doc.get("role_name", "")
+
+    if role_name in ELEVATED_ROLES:
+        return "all", uid, None
+
+    if role_name == "Team Leader":
+        if team_id:
+            try:
+                team = await db["teams"].find_one({"_id": ObjectId(team_id)})
+            except (InvalidId, Exception):
+                team = None
+            if team:
+                for m in team.get("members", []):
+                    if m.get("user_id") == uid and m.get("role") == "leader":
+                        return "team", uid, None
+            return "own", uid, None
+        else:
+            led = await db["teams"].find(
+                {"members": {"$elemMatch": {"user_id": uid, "role": "leader"}}}
+            ).to_list(500)
+            if led:
+                return "leader_teams", uid, [str(t["_id"]) for t in led]
+            return "own", uid, None
+
+    return "own", uid, None
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -101,14 +148,31 @@ async def list_tasks(
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
+    visibility, uid, leader_team_ids = await _resolve_visibility(current_user, team_id, db)
+
     filt: dict = {}
-    if team_id:
+
+    # ── Access-control filter (overrides any caller-supplied filters for lower roles) ──
+    if visibility == "own":
+        filt["assigned_to"] = uid
+    elif visibility == "team":
         filt["team_id"] = team_id
-    if assigned_to:
-        filt["assigned_to"] = assigned_to
+    elif visibility == "leader_teams":
+        filt["team_id"] = {"$in": leader_team_ids}
+        if assigned_to:
+            filt["assigned_to"] = assigned_to  # e.g. "My Tasks" = leader's own uid
+    else:
+        # "all" — apply optional caller-supplied filters
+        if team_id:
+            filt["team_id"] = team_id
+        if assigned_to:
+            filt["assigned_to"] = assigned_to
+
+    # Status filter (all roles)
     if status:
         filt["status"] = status
 
+    # Date range — tasks whose start_date OR due_date falls in the window
     if from_date or to_date:
         try:
             range_filt: dict = {}
