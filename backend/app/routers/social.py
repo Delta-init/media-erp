@@ -606,6 +606,45 @@ async def get_instagram_login_posts(
     return success_response(posts, "Posts retrieved")
 
 
+@router.post("/instagram_login/comments/{comment_id}/reply", status_code=201)
+async def reply_to_instagram_login_comment(
+    comment_id: str,
+    connector_id: str,
+    message: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Reply to an Instagram comment.
+    Uses instagram_business_manage_comments scope.
+    """
+    user_id = str(current_user["_id"])
+    connector = await get_connector(connector_id, user_id, db)
+    if not connector:
+        return error_response("Connector not found", status_code=404)
+    if connector["platform"] != "instagram_login":
+        return error_response("Not an instagram_login connector", status_code=400)
+    if connector.get("status") != "connected":
+        return error_response("Connector is not connected", status_code=400)
+
+    tokens = get_decrypted_tokens(connector)
+
+    # Demo token — return synthetic reply
+    if tokens.get("access_token") == "demo_token_placeholder":
+        import time
+        return success_response(
+            {"id": f"demo_reply_{int(time.time())}"},
+            "Reply posted (demo)",
+        )
+
+    from app.platforms.instagram_login import reply_to_comment
+    try:
+        result = await reply_to_comment(comment_id, message, tokens["access_token"])
+    except Exception as exc:
+        return error_response(f"Failed to post reply: {_safe_exc(exc)}", status_code=502)
+    return success_response(result, "Reply posted")
+
+
 @router.get("/instagram_login/posts/{post_id}/comments")
 async def get_instagram_login_post_comments(
     post_id: str,

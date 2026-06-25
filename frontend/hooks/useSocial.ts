@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import api from "@/lib/axios";
 
@@ -344,6 +344,27 @@ export function useInstagramLoginPostComments(connectorId: string, postId: strin
       return data.data;
     },
     enabled: !!connectorId && !!postId,
+  });
+}
+
+export function useReplyToInstagramComment(connectorId: string, postId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ commentId, message }: { commentId: string; message: string }) => {
+      const params = new URLSearchParams({ connector_id: connectorId, message });
+      const { data } = await api.post<{ success: boolean; data: { id: string } }>(
+        `/social/instagram_login/comments/${commentId}/reply?${params.toString()}`
+      );
+      return data.data;
+    },
+    onSuccess() {
+      toast.success("Reply posted!");
+      qc.invalidateQueries({ queryKey: ["instagram-login-post-comments", connectorId, postId] });
+    },
+    onError(err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? "Failed to post reply");
+    },
   });
 }
 

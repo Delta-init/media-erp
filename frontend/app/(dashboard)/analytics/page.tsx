@@ -1,17 +1,19 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Eye,
   Users,
   Activity,
   Camera,
+  ChevronDown,
   ImageIcon,
   Heart,
   MessageCircle,
   ExternalLink,
   RefreshCw,
+  Send,
   TrendingUp,
   TrendingDown,
   Minus,
@@ -34,7 +36,10 @@ import {
   useInstagramLoginAccount,
   useInstagramLoginPosts,
   useInstagramLoginInsights,
+  useInstagramLoginPostComments,
+  useReplyToInstagramComment,
   type IGInsightDay,
+  type IGComment,
 } from "@/hooks/useSocial";
 import { kpiContainerVariants, kpiCardVariants } from "@/lib/animations";
 
@@ -133,11 +138,138 @@ function ChartTooltip({
   );
 }
 
+// ── Comments panel for a single post ─────────────────────────────────────────
+function CommentsPanel({ connectorId, postId }: { connectorId: string; postId: string }) {
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyText,  setReplyText ] = useState("");
+
+  const { data: comments, isLoading } = useInstagramLoginPostComments(connectorId, postId);
+  const reply = useReplyToInstagramComment(connectorId, postId);
+
+  function submitReply(commentId: string) {
+    if (!replyText.trim()) return;
+    reply.mutate(
+      { commentId, message: replyText.trim() },
+      { onSuccess: () => { setReplyingTo(null); setReplyText(""); } },
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="px-5 py-4 space-y-2">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="flex gap-3">
+            <div className="size-7 rounded-full animate-pulse bg-muted shrink-0" />
+            <div className="flex-1 space-y-1.5">
+              <div className="h-3 w-24 animate-pulse rounded bg-muted" />
+              <div className="h-3 w-3/4 animate-pulse rounded bg-muted" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (!comments?.length) {
+    return (
+      <div className="px-5 py-4 text-xs text-muted-foreground">
+        No comments on this post yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="divide-y border-t bg-muted/30">
+      {comments.map((c: IGComment) => (
+        <div key={c.id} className="px-5 py-3 space-y-1.5">
+          {/* Comment row */}
+          <div className="flex items-start gap-2.5">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-pink-500 text-[10px] font-bold text-white">
+              {(c.username ?? "?")[0].toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold leading-tight">@{c.username ?? "unknown"}</p>
+              <p className="text-sm leading-snug mt-0.5">{c.text}</p>
+              {c.timestamp && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {new Date(c.timestamp).toLocaleString(undefined, {
+                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                  })}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                setReplyingTo(replyingTo === c.id ? null : c.id);
+                setReplyText("");
+              }}
+              className="shrink-0 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <MessageCircle className="size-3" />
+              Reply
+            </button>
+          </div>
+
+          {/* Existing replies */}
+          {c.replies?.data?.length ? (
+            <div className="ml-9 space-y-1.5 border-l-2 border-muted pl-3">
+              {c.replies.data.map((r) => (
+                <div key={r.id} className="flex items-start gap-2">
+                  <div className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[9px] font-bold text-primary">
+                    {(r.username ?? "?")[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold">@{r.username ?? "you"}</p>
+                    <p className="text-xs">{r.text}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {/* Reply input */}
+          <AnimatePresence>
+            {replyingTo === c.id && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.18 }}
+                className="ml-9 overflow-hidden"
+              >
+                <div className="flex gap-2 pt-1">
+                  <input
+                    autoFocus
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(c.id); }}}
+                    placeholder={`Reply to @${c.username ?? "user"}…`}
+                    className="flex-1 rounded-lg border bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <button
+                    onClick={() => submitReply(c.id)}
+                    disabled={!replyText.trim() || reply.isPending}
+                    className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  >
+                    <Send className="size-3" />
+                    {reply.isPending ? "Sending…" : "Send"}
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function AnalyticsPage() {
   const [dateFrom, setDateFrom] = useState(daysAgo(30));
   const [dateTo,   setDateTo  ] = useState(today());
   const [connectorId, setConnectorId] = useState("");
+  const [expandedPost, setExpandedPost] = useState<string | null>(null);
 
   // All connectors → filter to instagram_login
   const { data: connectors, isLoading: loadingConnectors } = useConnectors();
@@ -223,7 +355,7 @@ export default function AnalyticsPage() {
           </div>
           <p className="font-medium">No Camera account connected</p>
           <p className="text-sm text-muted-foreground max-w-xs">
-            Connect an Camera Business account via the Connectors page to view analytics.
+            Connect an Instagram Business account via the Connectors page to view analytics.
           </p>
           <a
             href="/connectors"
@@ -418,77 +550,103 @@ export default function AnalyticsPage() {
                   const dateStr = post.timestamp
                     ? new Date(post.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" })
                     : "—";
+                  const isExpanded = expandedPost === post.id;
 
                   return (
-                    <motion.div
-                      key={post.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="grid grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_auto_auto_auto_auto] gap-4 items-center px-5 py-3 hover:bg-muted/40 transition-colors group"
-                    >
-                      {/* Thumbnail */}
-                      <div className="size-12 rounded-lg overflow-hidden bg-muted shrink-0">
-                        {post.media_url || post.thumbnail_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={post.thumbnail_url ?? post.media_url ?? ""}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center">
-                            <ImageIcon className="size-5 text-muted-foreground/40" />
-                          </div>
-                        )}
-                      </div>
+                    <div key={post.id}>
+                      {/* Post row */}
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        onClick={() => setExpandedPost(isExpanded ? null : post.id)}
+                        className="grid grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_auto_auto_auto_auto_auto] gap-4 items-center px-5 py-3 hover:bg-muted/40 transition-colors group cursor-pointer"
+                      >
+                        {/* Thumbnail */}
+                        <div className="size-12 rounded-lg overflow-hidden bg-muted shrink-0">
+                          {post.media_url || post.thumbnail_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={post.thumbnail_url ?? post.media_url ?? ""}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center">
+                              <ImageIcon className="size-5 text-muted-foreground/40" />
+                            </div>
+                          )}
+                        </div>
 
-                      {/* Caption + link */}
-                      <div className="min-w-0">
-                        <p className="text-sm truncate leading-tight">
-                          {post.caption ?? <span className="text-muted-foreground italic">No caption</span>}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-0.5 md:hidden">{dateStr}</p>
-                        {post.permalink && (
-                          <a
-                            href={post.permalink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="mt-0.5 inline-flex items-center gap-0.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:text-foreground"
+                        {/* Caption + link */}
+                        <div className="min-w-0">
+                          <p className="text-sm truncate leading-tight">
+                            {post.caption ?? <span className="text-muted-foreground italic">No caption</span>}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5 md:hidden">{dateStr}</p>
+                          {post.permalink && (
+                            <a
+                              href={post.permalink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="mt-0.5 inline-flex items-center gap-0.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:text-foreground"
+                            >
+                              View on Instagram <ExternalLink className="size-3" />
+                            </a>
+                          )}
+                        </div>
+
+                        {/* Date */}
+                        <span className="hidden md:block text-xs text-muted-foreground text-right w-20">{dateStr}</span>
+
+                        {/* Likes */}
+                        <div className="hidden md:flex items-center gap-1 justify-end w-16">
+                          <Heart className="size-3 text-rose-400" />
+                          <span className="text-sm font-medium">{fmt(likes)}</span>
+                        </div>
+
+                        {/* Comments — clickable hint */}
+                        <div className="hidden md:flex items-center gap-1 justify-end w-20">
+                          <MessageCircle className="size-3 text-blue-400" />
+                          <span className="text-sm font-medium">{fmt(comments)}</span>
+                        </div>
+
+                        {/* Engagement rate */}
+                        <div className="hidden md:block w-24 text-right">
+                          <span className={cn(
+                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                            parseFloat(eng) >= 3
+                              ? "bg-emerald-500/10 text-emerald-600"
+                              : parseFloat(eng) >= 1
+                              ? "bg-amber-500/10 text-amber-600"
+                              : "bg-muted text-muted-foreground",
+                          )}>
+                            {eng}
+                          </span>
+                        </div>
+
+                        {/* Expand chevron */}
+                        <ChevronDown className={cn(
+                          "hidden md:block size-4 text-muted-foreground transition-transform duration-200",
+                          isExpanded && "rotate-180",
+                        )} />
+                      </motion.div>
+
+                      {/* Comments panel */}
+                      <AnimatePresence>
+                        {isExpanded && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.22, ease: "easeOut" }}
+                            className="overflow-hidden"
                           >
-                            View on Camera <ExternalLink className="size-3" />
-                          </a>
+                            <CommentsPanel connectorId={activeId} postId={post.id} />
+                          </motion.div>
                         )}
-                      </div>
-
-                      {/* Date */}
-                      <span className="hidden md:block text-xs text-muted-foreground text-right w-20">{dateStr}</span>
-
-                      {/* Likes */}
-                      <div className="hidden md:flex items-center gap-1 justify-end w-16">
-                        <Heart className="size-3 text-rose-400" />
-                        <span className="text-sm font-medium">{fmt(likes)}</span>
-                      </div>
-
-                      {/* Comments */}
-                      <div className="hidden md:flex items-center gap-1 justify-end w-20">
-                        <MessageCircle className="size-3 text-blue-400" />
-                        <span className="text-sm font-medium">{fmt(comments)}</span>
-                      </div>
-
-                      {/* Engagement rate */}
-                      <div className="hidden md:block w-24 text-right">
-                        <span className={cn(
-                          "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                          parseFloat(eng) >= 3
-                            ? "bg-emerald-500/10 text-emerald-600"
-                            : parseFloat(eng) >= 1
-                            ? "bg-amber-500/10 text-amber-600"
-                            : "bg-muted text-muted-foreground",
-                        )}>
-                          {eng}
-                        </span>
-                      </div>
-                    </motion.div>
+                      </AnimatePresence>
+                    </div>
                   );
                 })}
               </div>

@@ -419,6 +419,30 @@ async def get_conversation_messages(conversation_id: str, access_token: str) -> 
         return list(reversed(resp.json().get("data", [])))
 
 
+async def reply_to_comment(
+    comment_id: str,
+    message: str,
+    access_token: str,
+) -> dict:
+    """
+    Reply to an Instagram comment.
+    Uses instagram_business_manage_comments scope.
+    POST /{comment-id}/replies?message=...
+    Returns { id: reply_id }.
+    """
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.post(
+            f"{_API_BASE}/{comment_id}/replies",
+            params={
+                "access_token": access_token,
+                "message": message,
+            },
+        )
+        if not resp.is_success:
+            _raise_meta_error(resp)
+        return resp.json()
+
+
 async def send_dm(
     ig_user_id: str,
     access_token: str,
