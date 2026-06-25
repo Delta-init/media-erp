@@ -465,3 +465,39 @@ export interface FBComment {
   created_time: string;
   like_count?: number;
 }
+
+// ── Instagram Login: Account-level Insights ───────────────────────────────────
+
+export interface IGInsightDay {
+  date: string;
+  impressions: number;
+  reach: number;
+  profile_views: number;
+}
+
+export interface IGInsightsData {
+  daily: IGInsightDay[];
+  totals: { impressions: number; reach: number; profile_views: number };
+}
+
+export function useInstagramLoginInsights(
+  connectorId: string,
+  dateFrom?: string,
+  dateTo?: string,
+) {
+  return useQuery({
+    queryKey: ["instagram-login-insights", connectorId, dateFrom, dateTo],
+    queryFn: async () => {
+      const params: Record<string, string> = { connector_id: connectorId };
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo)   params.date_to   = dateTo;
+      const { data } = await api.get<{ success: boolean; data: IGInsightsData }>(
+        "/social/instagram_login/insights",
+        { params },
+      );
+      return data.data;
+    },
+    enabled: !!connectorId,
+    staleTime: 60_000,
+  });
+}

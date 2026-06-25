@@ -3,8 +3,9 @@
   "configurations": [
     {
       "name": "frontend",
-      "runtimeExecutable": "start-preview.bat",
-      "runtimeArgs": [],
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder}/frontend",
       "port": 3000,
       "autoPort": true
     },

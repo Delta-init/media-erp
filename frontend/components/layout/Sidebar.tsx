@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Activity,
   BarChart2,
   Building2,
   Cable,
@@ -47,6 +48,7 @@ const NAV_ITEMS = [
   { label: "Overview",   href: "/dashboard",  icon: LayoutDashboard, module: "dashboard" },
   { label: "Connectors", href: "/connectors", icon: Cable,           module: "connectors" },
   { label: "Reports",    href: "/reports",    icon: TrendingUp,      module: "reports" },
+  { label: "Analytics",  href: "/analytics",  icon: Activity },
   { label: "Campaigns",  href: "/campaigns",  icon: Target,          module: "campaigns" },
   { label: "Schedule",      href: "/schedule",      icon: CalendarDays },
   { label: "Rules",         href: "/rules",         icon: Zap },

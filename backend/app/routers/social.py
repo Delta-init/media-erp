@@ -1,6 +1,7 @@
 import re
+from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 
@@ -719,3 +720,121 @@ async def get_facebook_post_comments(
     except Exception as exc:
         return error_response(f"Failed to fetch comments: {_safe_exc(exc)}", status_code=502)
     return success_response(comments, "Comments retrieved")
+
+
+# ── Instagram Login: Account-level Insights ───────────────────────────────────
+
+@router.get("/instagram_login/insights")
+async def get_instagram_login_insights(
+    connector_id: str,
+    date_from: Optional[str] = Query(default=None),
+    date_to:   Optional[str] = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Return daily account-level insights (impressions, reach, profile_views)
+    for an instagram_login connector.  Uses instagram_business_manage_insights.
+
+    Falls back to demo data when the connector holds a demo token.
+    """
+    from datetime import date, datetime, timedelta
+
+    user_id = str(current_user["_id"])
+    connector = await get_connector(connector_id, user_id, db)
+    if not connector:
+        return error_response("Connector not found", status_code=404)
+    if connector["platform"] != "instagram_login":
+        return error_response("Not an instagram_login connector", status_code=400)
+    if connector.get("status") != "connected":
+        return error_response("Connector is not connected", status_code=400)
+
+    ig_user_id = connector.get("platform_account_id")
+    if not ig_user_id:
+        return error_response("Instagram user ID not found", status_code=400)
+
+    tokens = get_decrypted_tokens(connector)
+
+    # ── Date range ────────────────────────────────────────────────────────────
+    today = date.today()
+    dt_from = (
+        datetime.strptime(date_from, "%Y-%m-%d").date()
+        if date_from else today - timedelta(days=29)
+    )
+    dt_to = (
+        datetime.strptime(date_to, "%Y-%m-%d").date()
+        if date_to else today
+    )
+    since_ts = int(datetime.combine(dt_from, datetime.min.time()).timestamp())
+    until_ts = int(datetime.combine(dt_to + timedelta(days=1), datetime.min.time()).timestamp())
+
+    # ── Demo token → synthetic data ───────────────────────────────────────────
+    if tokens.get("access_token") == "demo_token_placeholder":
+        import math, random
+        days = (dt_to - dt_from).days + 1
+        daily = []
+        base_imp, base_reach, base_pv = 3200, 2100, 480
+        for i in range(days):
+            d = dt_from + timedelta(days=i)
+            factor = 1 + 0.25 * math.sin(i * 0.4) + 0.1 * math.sin(i * 1.1)
+            daily.append({
+                "date": d.isoformat(),
+                "impressions":   int(base_imp  * factor),
+                "reach":         int(base_reach * factor * 0.85),
+                "profile_views": int(base_pv   * factor * 0.6),
+            })
+        total_imp   = sum(d["impressions"]   for d in daily)
+        total_reach = sum(d["reach"]         for d in daily)
+        total_pv    = sum(d["profile_views"] for d in daily)
+        return success_response({
+            "daily": daily,
+            "totals": {"impressions": total_imp, "reach": total_reach, "profile_views": total_pv},
+        }, "Insights retrieved")
+
+    # ── Real API call ─────────────────────────────────────────────────────────
+    import httpx
+    _API = "https://graph.instagram.com/v21.0"
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{_API}/{ig_user_id}/insights",
+                params={
+                    "metric": "impressions,reach,profile_views",
+                    "period": "day",
+                    "since": since_ts,
+                    "until": until_ts,
+                    "access_token": tokens["access_token"],
+                },
+            )
+        if not resp.is_success:
+            return error_response(
+                f"Instagram API error {resp.status_code}: {resp.text[:200]}",
+                status_code=502,
+            )
+        api_data = resp.json().get("data", [])
+        # Build date→metrics map
+        date_map: dict[str, dict] = {}
+        for metric_obj in api_data:
+            name = metric_obj.get("name")
+            for val_entry in metric_obj.get("values", []):
+                d = val_entry.get("end_time", "")[:10]
+                if d not in date_map:
+                    date_map[d] = {"impressions": 0, "reach": 0, "profile_views": 0}
+                try:
+                    date_map[d][name] = int(val_entry.get("value", 0))
+                except (TypeError, ValueError):
+                    pass
+
+        daily = [
+            {"date": d, **metrics}
+            for d, metrics in sorted(date_map.items())
+            if d
+        ]
+        totals = {
+            "impressions":   sum(r["impressions"]   for r in daily),
+            "reach":         sum(r["reach"]         for r in daily),
+            "profile_views": sum(r["profile_views"] for r in daily),
+        }
+        return success_response({"daily": daily, "totals": totals}, "Insights retrieved")
+    except Exception as exc:
+        return error_response(f"Failed to fetch insights: {_safe_exc(exc)}", status_code=502)

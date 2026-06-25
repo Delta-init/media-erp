@@ -1,0 +1,186 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design tokens ─────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    --background:             214 37% 97%;
+    --foreground:             222 47% 11%;
+    --card:                   0 0% 100%;
+    --card-foreground:        222 47% 11%;
+    --popover:                0 0% 100%;
+    --popover-foreground:     222 47% 11%;
+    --primary:                213 100% 36%;
+    --primary-foreground:     0 0% 100%;
+    --secondary:              213 55% 95%;
+    --secondary-foreground:   213 100% 36%;
+    --muted:                  213 35% 93%;
+    --muted-foreground:       215 16% 47%;
+    --accent:                 213 55% 92%;
+    --accent-foreground:      213 100% 36%;
+    --destructive:            0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border:                 210 32% 88%;
+    --input:                  0 0% 100%;
+    --ring:                   213 100% 36%;
+    --radius:                 12px;
+    --form-button:            213 100% 36%;
+    --form-button-hover:      213 100% 28%;
+  }
+
+  * { @apply border-border box-border; }
+
+  html, body, #root {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Prevent iOS/Android auto-zoom on input focus (requires font-size ≥ 16px) ── */
+  input, textarea, select {
+    font-size: 16px !important;
+    touch-action: manipulation;
+  }
+
+  /* Prevent double-tap zoom on all interactive elements */
+  button, a, [role="button"] {
+    touch-action: manipulation;
+  }
+
+  h1, h2, h3 { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; font-weight: 800; }
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────────── */
+@keyframes slideInUp  { from { opacity:0; transform:translateY(22px); } to { opacity:1; transform:none; } }
+@keyframes fadeIn     { from { opacity:0; } to { opacity:1; } }
+@keyframes floatY     { 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-9px); } }
+@keyframes pulseDot   {
+  0%   { box-shadow: 0 0 0 0   hsl(213 100% 36% / 0.45); }
+  70%  { box-shadow: 0 0 0 7px hsl(213 100% 36% / 0); }
+  100% { box-shadow: 0 0 0 0   hsl(213 100% 36% / 0); }
+}
+
+/* ── Grid move (infinite scroll to the right) ──────────────────────── */
+@keyframes gridScroll {
+  from { background-position: 0 0; }
+  to   { background-position: 40px 0; }
+}
+
+/* ── Blue grid background ──────────────────────────────────────────── */
+.form-grid-bg {
+  position: relative;
+  background: linear-gradient(135deg, #0057b8 0%, #003d80 100%);
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* animated grid lines — moves right infinitely */
+.form-grid-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.07) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: gridScroll 6s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* top-right glow */
+.form-grid-bg::after {
+  content: '';
+  position: absolute;
+  top: -100px; right: -100px;
+  width: 420px; height: 420px;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 65%);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Welcome page scrolls freely */
+.form-grid-bg--scroll {
+  height: auto !important;
+  min-height: 100dvh !important;
+  overflow: visible !important;
+}
+
+/* ── Question card ─────────────────────────────────────────────────── */
+.question-card {
+  background: rgba(255,255,255,0.98);
+  border: 1.5px solid rgba(255,255,255,0.7);
+  border-radius: 20px;
+  box-shadow: 0 16px 56px rgba(0,45,110,0.22), 0 2px 8px rgba(0,0,0,0.06);
+}
+
+/* ── Primary button ────────────────────────────────────────────────── */
+.form-button {
+  background: hsl(var(--form-button)) !important;
+  color: #fff !important;
+  border-radius: 50px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.4px !important;
+  transition: all 0.25s cubic-bezier(0.4,0,0.2,1) !important;
+  border: none !important;
+}
+.form-button:hover:not(:disabled) {
+  background: hsl(var(--form-button-hover)) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(0,87,184,0.35) !important;
+}
+.form-button:disabled { opacity: 0.4 !important; cursor: not-allowed !important; }
+
+/* ── Input ─────────────────────────────────────────────────────────── */
+.form-input-base {
+  width: 100%;
+  padding: 0 1rem;
+  height: 48px;
+  border-radius: 14px;
+  border: 2px solid hsl(var(--border));
+  background: #fff;
+  font-size: 1rem;        /* ≥16px prevents iOS auto-zoom on focus */
+  font-weight: 500;
+  color: hsl(var(--foreground));
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+.form-input-base:focus {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 3px rgba(0,87,184,0.12);
+}
+.form-input-base.error {
+  border-color: #f87171;
+  box-shadow: 0 0 0 3px rgba(248,113,113,0.12);
+}
+
+/* ── Helpers ───────────────────────────────────────────────────────── */
+.form-welcome { animation: slideInUp 0.65s ease; }
+.form-logo    { animation: floatY 4s ease-in-out infinite; }
+.form-fade-in { animation: fadeIn 0.9s ease; }
+.step-dot-current { animation: pulseDot 1.8s ease-in-out infinite; }
+
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+.scrollbar-thin::-webkit-scrollbar       { width: 4px; }
+.scrollbar-thin::-webkit-scrollbar-track  { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb  { background: #cbd5e1; border-radius: 4px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.scrollbar-hide { scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* Terms & Conditions scroll box — always scrollable on all devices */
+.terms-scroll-box {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
