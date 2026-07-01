@@ -57,8 +57,8 @@ function StatCard({
 }) {
   const inner = (
     <div className={cn(
-      "flex flex-col gap-3 rounded-xl border bg-card p-5 shadow-sm transition-shadow",
-      href && "hover:shadow-md cursor-pointer"
+      "flex flex-col gap-3 rounded-xl border bg-card p-5 delta-shadow",
+      href && "cursor-pointer"
     )}>
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>

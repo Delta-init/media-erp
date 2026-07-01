@@ -17,7 +17,7 @@ export default function PageHeader({ title, subtitle, action }: PageHeaderProps)
       className="flex items-start justify-between gap-4"
     >
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>
         {subtitle && (
           <motion.p
             initial={{ opacity: 0 }}
