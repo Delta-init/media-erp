@@ -23,7 +23,7 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "pending":        {"started"},
+    "pending":        {"started", "reedit"},   # leader can return a routed task to reedit
     "started":        {"break", "pending_review"},
     "break":          {"started"},
     "reedit":         {"started"},
@@ -53,8 +53,8 @@ def transition_error(current: str, target: str) -> str:
                 f"a leader rejecting a review sends it to Reedit instead.")
     if target == "approved" and current != "pending_review":
         return "Tasks can only be Approved from Pending Review (a leader approves them)."
-    if target == "reedit" and current != "pending_review":
-        return "A task only goes to Reedit when a team leader sends it back from Pending Review."
+    if target == "reedit" and current not in ("pending_review", "pending"):
+        return "A task only goes to Reedit from Pending Review or when a leader returns a routed task."
     return f"Invalid move: {c} -> {t}."
 
 

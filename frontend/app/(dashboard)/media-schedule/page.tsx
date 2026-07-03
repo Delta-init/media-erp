@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronLeft,
@@ -12,6 +12,8 @@ import {
   Users,
   Flag,
   CheckCircle2,
+  Check,
+  ChevronDown,
 } from "lucide-react";
 import {
   useMediaTasks,
@@ -69,6 +71,124 @@ const INPUT_CLS =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30";
 const LABEL_CLS = "block text-xs font-medium text-muted-foreground mb-1";
 
+// ─── Multi-select employee picker ─────────────────────────────────────────────
+
+interface Member { user_id: string; name: string; designation?: string }
+
+function MemberPicker({
+  members,
+  selected,
+  onChange,
+  disabled,
+}: {
+  members: Member[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function toggle(id: string) {
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  }
+
+  function selectAll() { onChange(members.map((m) => m.user_id)); }
+  function clearAll()  { onChange([]); }
+
+  const label =
+    selected.length === 0 ? "Select employees…"
+    : selected.length === 1
+      ? members.find((m) => m.user_id === selected[0])?.name ?? "1 selected"
+    : `${selected.length} employees selected`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          INPUT_CLS,
+          "flex items-center justify-between gap-2 cursor-pointer",
+          disabled && "opacity-50 cursor-not-allowed",
+          selected.length > 0 && "border-primary/60"
+        )}
+      >
+        <span className={cn("truncate", selected.length === 0 && "text-muted-foreground")}>
+          {label}
+        </span>
+        <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute z-50 mt-1 w-full rounded-lg border bg-card shadow-lg overflow-hidden"
+          >
+            {/* Select all / clear */}
+            <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/30">
+              <span className="text-[11px] font-medium text-muted-foreground">
+                {selected.length}/{members.length} selected
+              </span>
+              <div className="flex gap-2">
+                <button type="button" onClick={selectAll}
+                  className="text-[11px] text-primary hover:underline font-medium">All</button>
+                <button type="button" onClick={clearAll}
+                  className="text-[11px] text-muted-foreground hover:underline">Clear</button>
+              </div>
+            </div>
+
+            {/* Member list */}
+            <div className="max-h-44 overflow-y-auto py-1">
+              {members.length === 0 && (
+                <p className="px-3 py-2 text-xs text-muted-foreground italic">No members in this team</p>
+              )}
+              {members.map((m) => {
+                const checked = selected.includes(m.user_id);
+                return (
+                  <button
+                    key={m.user_id}
+                    type="button"
+                    onClick={() => toggle(m.user_id)}
+                    className={cn(
+                      "w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors",
+                      checked ? "bg-primary/8 text-foreground" : "hover:bg-muted/60"
+                    )}
+                  >
+                    <span className={cn(
+                      "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
+                      checked ? "bg-primary border-primary text-primary-foreground" : "border-border"
+                    )}>
+                      {checked && <Check className="size-3" />}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block truncate font-medium">{m.name}</span>
+                      {m.designation && (
+                        <span className="text-[10px] text-muted-foreground truncate">{m.designation}</span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ─── TaskModal ─────────────────────────────────────────────────────────────────
 
 interface TaskModalProps {
@@ -83,26 +203,58 @@ function TaskModal({ onClose, teams = [], initial }: TaskModalProps) {
   const loading = create.isPending || update.isPending;
 
   const [form, setForm] = useState({
-    title:       initial?.title       ?? "",
-    description: initial?.description ?? "",
-    team_id:     initial?.team_id     ?? "",
-    assigned_to: initial?.assigned_to ?? "",
-    start_date:  initial ? parseDate(initial.start_date) : "",
-    due_date:    initial ? parseDate(initial.due_date)   : "",
-    priority:    initial?.priority    ?? "medium",
+    title:        initial?.title        ?? "",
+    description:  initial?.description  ?? "",
+    team_id:      initial?.team_id      ?? "",
+    // multi-select: when editing an existing task pre-fill the one assignee
+    assigned_ids: initial?.assigned_to  ? [initial.assigned_to] : [] as string[],
+    start_date:   initial ? parseDate(initial.start_date) : "",
+    due_date:     initial ? parseDate(initial.due_date)   : "",
+    priority:     initial?.priority     ?? "medium" as "low" | "medium" | "high",
   });
 
-  const teamObj  = teams.find((t) => t.id === form.team_id);
-  const members  = (teamObj as any)?.members ?? [];
+  const teamObj = teams.find((t) => t.id === form.team_id);
+  const members: Member[] = ((teamObj as any)?.members ?? []).map((m: any) => ({
+    user_id:     m.user_id,
+    name:        m.name ?? "",
+    designation: m.designation ?? "",
+  }));
+
+  const canSubmit =
+    !!form.title.trim() && !!form.team_id &&
+    form.assigned_ids.length > 0 && !!form.start_date && !!form.due_date;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.title.trim() || !form.team_id || !form.assigned_to ||
-        !form.start_date    || !form.due_date) return;
+    if (!canSubmit) return;
+
     if (initial) {
-      await update.mutateAsync({ id: initial.id, ...form });
+      // Edit: update with first selected employee (single-assignee edit)
+      await update.mutateAsync({
+        id: initial.id,
+        title:       form.title,
+        description: form.description,
+        team_id:     form.team_id,
+        assigned_to: form.assigned_ids[0],
+        start_date:  form.start_date,
+        due_date:    form.due_date,
+        priority:    form.priority,
+      });
     } else {
-      await create.mutateAsync(form);
+      // Create: fan out — one task per selected employee
+      await Promise.all(
+        form.assigned_ids.map((uid) =>
+          create.mutateAsync({
+            title:       form.title,
+            description: form.description || undefined,
+            team_id:     form.team_id,
+            assigned_to: uid,
+            start_date:  form.start_date,
+            due_date:    form.due_date,
+            priority:    form.priority,
+          })
+        )
+      );
     }
     onClose();
   }
@@ -121,10 +273,7 @@ function TaskModal({ onClose, teams = [], initial }: TaskModalProps) {
           <h2 className="font-semibold text-sm">
             {initial ? "Edit Task" : "Schedule New Task"}
           </h2>
-          <button
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors"
-          >
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X className="size-4" />
           </button>
         </div>
@@ -153,39 +302,43 @@ function TaskModal({ onClose, teams = [], initial }: TaskModalProps) {
             />
           </div>
 
-          {/* Team + Assigned To */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={LABEL_CLS}>Team *</label>
-              <select
-                className={INPUT_CLS}
-                value={form.team_id}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, team_id: e.target.value, assigned_to: "" }))
-                }
-                required
-              >
-                <option value="">Select team</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className={LABEL_CLS}>Assign To *</label>
-              <select
-                className={INPUT_CLS}
-                value={form.assigned_to}
-                onChange={(e) => setForm((f) => ({ ...f, assigned_to: e.target.value }))}
-                required
-                disabled={!form.team_id}
-              >
-                <option value="">Select member</option>
-                {members.map((m: any) => (
-                  <option key={m.user_id} value={m.user_id}>{m.name}</option>
-                ))}
-              </select>
-            </div>
+          {/* Team */}
+          <div>
+            <label className={LABEL_CLS}>Team *</label>
+            <select
+              className={INPUT_CLS}
+              value={form.team_id}
+              onChange={(e) => setForm((f) => ({ ...f, team_id: e.target.value, assigned_ids: [] }))}
+              required
+            >
+              <option value="">Select team</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Assign To — multi-select */}
+          <div>
+            <label className={LABEL_CLS}>
+              Assign To *
+              {form.assigned_ids.length > 1 && (
+                <span className="ml-2 text-primary font-semibold">
+                  → {form.assigned_ids.length} tasks will be created
+                </span>
+              )}
+            </label>
+            <MemberPicker
+              members={members}
+              selected={form.assigned_ids}
+              onChange={(ids) => setForm((f) => ({ ...f, assigned_ids: ids }))}
+              disabled={!form.team_id}
+            />
+            {form.assigned_ids.length > 1 && (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                A separate task will be created for each selected employee, all starting on the same date.
+              </p>
+            )}
           </div>
 
           {/* Dates */}
@@ -240,9 +393,13 @@ function TaskModal({ onClose, teams = [], initial }: TaskModalProps) {
             <Button type="button" variant="outline" size="sm" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={loading}>
+            <Button type="submit" size="sm" disabled={loading || !canSubmit}>
               {loading && <Loader2 className="size-3 mr-1.5 animate-spin" />}
-              {initial ? "Save Changes" : "Schedule Task"}
+              {initial
+                ? "Save Changes"
+                : form.assigned_ids.length > 1
+                  ? `Schedule ${form.assigned_ids.length} Tasks`
+                  : "Schedule Task"}
             </Button>
           </div>
         </form>

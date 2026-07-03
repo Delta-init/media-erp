@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ClipboardCheck, CheckCircle2, RotateCcw, Inbox, UserPlus,
   Loader2, X, Calendar, Crown, ChevronDown, Paperclip,
-  MessageSquare, Eye,
+  MessageSquare, Eye, AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLeaderQueue, useUpdateTask, type LeaderTeam } from "@/hooks/useProjects";
@@ -16,7 +16,7 @@ import { PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-type Tab = "review" | "assign";
+type Tab = "review" | "assign" | "reedit";
 
 // ── Reedit reason modal ───────────────────────────────────────────────────────
 
@@ -28,6 +28,7 @@ function ReeditModal({ task, onClose }: { task: Task; onClose: () => void }) {
     e.preventDefault();
     if (!reason.trim()) return;
     await update.mutateAsync({ id: task.id, payload: { status: "reedit", reedit_reason: reason.trim() } });
+    toast.success("Task sent to reedit");
     onClose();
   }
 
@@ -54,14 +55,15 @@ function ReeditModal({ task, onClose }: { task: Task; onClose: () => void }) {
             <label className="text-sm font-medium">Reason for reedit *</label>
             <textarea
               autoFocus value={reason} onChange={(e) => setReason(e.target.value)} rows={4}
-              placeholder="Explain what needs to change so the assignee knows how to fix it…"
+              placeholder="Explain what needs to change so the original team knows how to fix it…"
               className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
               required
             />
           </div>
           <div className="flex justify-end gap-3 pt-1">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={!reason.trim() || update.isPending}>
+            <Button type="submit" disabled={!reason.trim() || update.isPending}
+              className="bg-rose-600 hover:bg-rose-700 text-white">
               {update.isPending ? <Loader2 className="size-4 animate-spin mr-1.5" /> : <RotateCcw className="size-4 mr-1.5" />}
               Send to Reedit
             </Button>
@@ -163,7 +165,6 @@ function ReviewCard({
   return (
     <>
       <div className="rounded-xl border bg-card shadow-sm overflow-hidden flex flex-col">
-        {/* Clickable body */}
         <button
           type="button"
           onClick={() => setDetailOpen(true)}
@@ -215,15 +216,13 @@ function ReviewCard({
           </div>
         </button>
 
-        {/* Action bar */}
         <div className="border-t px-4 py-3 flex gap-2">
           <Button
-            size="sm"
-            variant="outline"
+            size="sm" variant="outline"
             onClick={() => setDetailOpen(true)}
             className="gap-1.5 text-muted-foreground hover:text-foreground"
           >
-            <Eye className="size-3.5" /> View Task
+            <Eye className="size-3.5" /> View
           </Button>
           <Button
             size="sm"
@@ -256,7 +255,13 @@ function ReviewCard({
 
 // ── Assign card ───────────────────────────────────────────────────────────────
 
-function AssignCard({ task, team }: { task: Task; team?: LeaderTeam }) {
+function AssignCard({
+  task, team, onReedit,
+}: {
+  task: Task;
+  team?: LeaderTeam;
+  onReedit: (t: Task) => void;
+}) {
   const update = useUpdateTask();
   const [memberId, setMemberId] = useState("");
   const [detailOpen, setDetailOpen] = useState(false);
@@ -271,7 +276,6 @@ function AssignCard({ task, team }: { task: Task; team?: LeaderTeam }) {
   return (
     <>
       <div className="rounded-xl border bg-card shadow-sm overflow-hidden flex flex-col">
-        {/* Clickable body */}
         <button
           type="button"
           onClick={() => setDetailOpen(true)}
@@ -288,7 +292,6 @@ function AssignCard({ task, team }: { task: Task; team?: LeaderTeam }) {
           {task.description && (
             <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{task.description}</p>
           )}
-          {/* Former team provenance */}
           {task.former_team_name && (
             <div className="mb-2 rounded-md border border-amber-400/30 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
               Routed from <span className="font-semibold">{task.former_team_name}</span>
@@ -306,15 +309,120 @@ function AssignCard({ task, team }: { task: Task; team?: LeaderTeam }) {
           </div>
         </button>
 
-        {/* Action bar */}
-        <div className="border-t px-4 py-3 flex gap-2">
+        <div className="border-t px-4 py-3 flex gap-2 flex-wrap">
           <Button
-            size="sm"
-            variant="outline"
+            size="sm" variant="outline"
             onClick={() => setDetailOpen(true)}
             className="gap-1.5 text-muted-foreground hover:text-foreground"
           >
-            <Eye className="size-3.5" /> View Task
+            <Eye className="size-3.5" /> View
+          </Button>
+          <Button
+            size="sm" variant="outline"
+            className="border-rose-400/40 text-rose-600 hover:bg-rose-500/10"
+            onClick={() => onReedit(task)}
+          >
+            <RotateCcw className="size-3.5 mr-1" /> Reedit
+          </Button>
+          <div className="flex flex-1 gap-2 min-w-0">
+            <select
+              value={memberId}
+              onChange={(e) => setMemberId(e.target.value)}
+              className="flex-1 min-w-0 rounded-lg border bg-background px-3 py-1.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+            >
+              <option value="">Assign to…</option>
+              {team?.members.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}{m.role === "leader" ? " (leader)" : ""}</option>
+              ))}
+            </select>
+            <Button size="sm" onClick={assign} disabled={!memberId || update.isPending}>
+              {update.isPending ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {detailOpen && (
+        <TaskDetailModal
+          task={task}
+          teamName={team?.name}
+          readOnly
+          onClose={() => setDetailOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// ── Reedit card ───────────────────────────────────────────────────────────────
+
+function ReeditCard({ task, team }: { task: Task; team?: LeaderTeam }) {
+  const update = useUpdateTask();
+  const [memberId, setMemberId] = useState(task.assigned_to || "");
+  const [detailOpen, setDetailOpen] = useState(false);
+  const pri = PRIORITY_META[task.priority];
+
+  function assign() {
+    if (!memberId) return;
+    const m = team?.members.find((x) => x.id === memberId);
+    update.mutate({
+      id: task.id,
+      payload: { assigned_to: memberId, assigned_to_name: m?.name ?? "", status: "started" },
+    });
+    toast.success("Task assigned and started");
+  }
+
+  return (
+    <>
+      <div className="rounded-xl border border-rose-200 dark:border-rose-900/40 bg-card shadow-sm overflow-hidden flex flex-col">
+        {/* Red top stripe */}
+        <div className="h-1 bg-gradient-to-r from-rose-500 to-orange-400" />
+
+        <button
+          type="button"
+          onClick={() => setDetailOpen(true)}
+          className="flex-1 text-left px-4 pt-3 pb-3 hover:bg-muted/20 transition-colors group/card"
+        >
+          <div className="flex items-start justify-between gap-3 mb-1.5">
+            <p className="text-sm font-semibold leading-snug flex-1 group-hover/card:text-primary transition-colors">
+              {task.title}
+            </p>
+            <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0", pri.color)}>
+              {pri.label}
+            </span>
+          </div>
+
+          {/* Reedit reason — most prominent element */}
+          {task.reedit_reason && (
+            <div className="mb-2 rounded-md border border-rose-400/30 bg-rose-500/5 px-2.5 py-2">
+              <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1 mb-1">
+                <AlertTriangle className="size-3" /> Reedit Reason
+              </p>
+              <p className="text-xs text-foreground/80 leading-relaxed">{task.reedit_reason}</p>
+            </div>
+          )}
+
+          {task.former_team_name && (
+            <div className="mb-2 rounded-md border border-amber-400/30 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+              Returned by <span className="font-semibold">{task.former_team_name}</span>
+              {task.former_assigned_to_name && (
+                <> · originally worked by <span className="font-semibold">{task.former_assigned_to_name}</span></>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            {team?.name && <span className="rounded-full bg-muted px-2 py-0.5">{team.name}</span>}
+          </div>
+        </button>
+
+        <div className="border-t px-4 py-3 flex gap-2">
+          <Button
+            size="sm" variant="outline"
+            onClick={() => setDetailOpen(true)}
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
+          >
+            <Eye className="size-3.5" /> View
           </Button>
           <select
             value={memberId}
@@ -323,10 +431,17 @@ function AssignCard({ task, team }: { task: Task; team?: LeaderTeam }) {
           >
             <option value="">Assign to…</option>
             {team?.members.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}{m.role === "leader" ? " (leader)" : ""}</option>
+              <option key={m.id} value={m.id}>
+                {m.name}{m.role === "leader" ? " (leader)" : ""}
+              </option>
             ))}
           </select>
-          <Button size="sm" onClick={assign} disabled={!memberId || update.isPending}>
+          <Button
+            size="sm"
+            onClick={assign}
+            disabled={!memberId || update.isPending}
+            className="bg-primary hover:bg-primary/90 text-primary-foreground"
+          >
             {update.isPending ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
           </Button>
         </div>
@@ -368,6 +483,7 @@ export default function LeaderPage() {
   }, [data, selectedTeamId]);
 
   const incoming = data?.incoming ?? [];
+  const reeditList = data?.reedit ?? [];
 
   if (isLoading) {
     return (
@@ -389,6 +505,12 @@ export default function LeaderPage() {
     );
   }
 
+  const tabs: { id: Tab; icon: React.ReactNode; label: string; count: number; danger?: boolean }[] = [
+    { id: "review", icon: <ClipboardCheck className="size-4" />, label: "Pending Reviews", count: review.length },
+    { id: "assign", icon: <Inbox className="size-4" />, label: "Assign Work",     count: incoming.length },
+    { id: "reedit", icon: <RotateCcw className="size-4" />, label: "Reedit",       count: reeditList.length, danger: true },
+  ];
+
   return (
     <div className="flex flex-col gap-5 pb-6">
       <div>
@@ -402,10 +524,7 @@ export default function LeaderPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-xl bg-muted/50 p-1 border w-fit">
-        {([
-          { id: "review" as Tab, icon: <ClipboardCheck className="size-4" />, label: "Pending Reviews", count: review.length },
-          { id: "assign" as Tab, icon: <Inbox className="size-4" />, label: "Assign Work", count: incoming.length },
-        ]).map(({ id, icon, label, count }) => (
+        {tabs.map(({ id, icon, label, count, danger }) => (
           <button
             key={id} onClick={() => setTab(id)}
             className={cn(
@@ -414,12 +533,16 @@ export default function LeaderPage() {
             )}
           >
             {icon} {label}
-            <span className={cn(
-              "flex h-5 min-w-5 px-1 items-center justify-center rounded-full text-[10px] font-bold",
-              tab === id ? "bg-primary/15 text-primary" : "bg-muted-foreground/15"
-            )}>
-              {count}
-            </span>
+            {count > 0 && (
+              <span className={cn(
+                "flex h-5 min-w-5 px-1 items-center justify-center rounded-full text-[10px] font-bold",
+                danger && count > 0
+                  ? tab === id ? "bg-rose-500/20 text-rose-600" : "bg-rose-500/15 text-rose-500"
+                  : tab === id ? "bg-primary/15 text-primary" : "bg-muted-foreground/15"
+              )}>
+                {count}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -486,9 +609,32 @@ export default function LeaderPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {incoming.map((t) => (
-              <AssignCard key={t.id} task={t} team={teamsById.get(t.team_id || "")} />
+              <AssignCard key={t.id} task={t} team={teamsById.get(t.team_id || "")} onReedit={setReeditTask} />
             ))}
           </div>
+        )
+      )}
+
+      {/* Reedit tab */}
+      {tab === "reedit" && (
+        reeditList.length === 0 ? (
+          <Empty
+            icon={<RotateCcw className="size-10" />}
+            title="No reedit tasks"
+            sub="Tasks returned for revision will appear here with the reedit reason."
+          />
+        ) : (
+          <>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-500/5 border border-rose-400/20 text-xs text-rose-600 dark:text-rose-400">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              These tasks were returned for revision. Read the reason, then assign to an employee to fix.
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {reeditList.map((t) => (
+                <ReeditCard key={t.id} task={t} team={teamsById.get(t.team_id || "")} />
+              ))}
+            </div>
+          </>
         )
       )}
 

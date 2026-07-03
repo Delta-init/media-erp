@@ -25,10 +25,11 @@ export interface LeaderQueue {
   is_leader: boolean;
   review: Task[];
   incoming: Task[];
+  reedit: Task[];
   teams: LeaderTeam[];
 }
 
-export function useLeaderQueue() {
+export function useLeaderQueue(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["projects", "leader-queue"],
     queryFn: async () => {
@@ -38,6 +39,7 @@ export function useLeaderQueue() {
       return data.data;
     },
     refetchInterval: 15_000,
+    enabled: opts?.enabled ?? true,
   });
 }
 

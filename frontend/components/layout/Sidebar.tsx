@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity,
   BarChart2,
   Building2,
   Cable,
@@ -36,6 +35,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useLogout } from "@/hooks/useAuth";
 import { useUnreadCounts } from "@/hooks/useChat";
 import { useTeams } from "@/hooks/useTeams";
+import { useLeaderQueue } from "@/hooks/useProjects";
 import ThemeToggle from "@/components/shared/ThemeToggle";
 import {
   backdropVariants,
@@ -48,7 +48,6 @@ const NAV_ITEMS = [
   { label: "Overview",   href: "/dashboard",  icon: LayoutDashboard, module: "dashboard" },
   { label: "Connectors", href: "/connectors", icon: Cable,           module: "connectors" },
   { label: "Reports",    href: "/reports",    icon: TrendingUp,      module: "reports" },
-  { label: "Analytics",  href: "/analytics",  icon: Activity },
   { label: "Campaigns",  href: "/campaigns",  icon: Target,          module: "campaigns" },
   { label: "Schedule",      href: "/schedule",      icon: CalendarDays },
   { label: "Rules",         href: "/rules",         icon: Zap },
@@ -171,6 +170,12 @@ function SidebarContent({
   const isSuperAdmin = !!(user?.role?.is_system_role && user?.role?.role_name === "Super Admin");
   const showLeaderDesk = isSuperAdmin || teams.some((t) => t.my_role === "leader");
 
+  // Badge: pending reviews + unassigned incoming + reedit tasks (only fetched when user can see Leader Desk)
+  const { data: leaderData } = useLeaderQueue({ enabled: showLeaderDesk });
+  const leaderBadge = showLeaderDesk
+    ? (leaderData?.review?.length ?? 0) + (leaderData?.incoming?.length ?? 0) + (leaderData?.reedit?.length ?? 0)
+    : 0;
+
   // Filter nav items the user can see
   const visibleNav = NAV_ITEMS.filter((item) =>
     (!item.module || hasPermission(item.module, "view")) &&
@@ -229,7 +234,11 @@ function SidebarContent({
             {...item}
             collapsed={collapsed}
             onClick={onNavClick}
-            badge={item.href === "/chat" ? totalUnread : undefined}
+            badge={
+              item.href === "/chat" ? totalUnread :
+              item.href === "/leader" ? (leaderBadge || undefined) :
+              undefined
+            }
           />
         ))}
 

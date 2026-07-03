@@ -338,11 +338,17 @@ async def leader_queue(
         "$or": [{"assigned_to": {"$in": ["", None]}}, {"assigned_to": uid}],
     }).sort("created_at", -1).to_list(500)
 
+    # Reedit tasks: returned by another leader (or sent back from pending_review)
+    reedit_tasks = await db["project_tasks"].find(
+        {"status": "reedit", "team_id": {"$in": team_ids}}
+    ).sort("updated_at", -1).to_list(500)
+
     return success_response(
         data={
             "is_leader": True,
             "review":   [_serialize(t) for t in review],
             "incoming": [_serialize(t) for t in incoming],
+            "reedit":   [_serialize(t) for t in reedit_tasks],
             "teams":    teams_out,
         },
         message="Leader queue",
@@ -385,6 +391,17 @@ async def edit_task(
                     "Only a team leader can approve a task or send it to reedit.",
                     status_code=403,
                 )
+        # Leader returning a routed pending task to reedit — also leader-only
+        if cur_status == "pending" and new_status == "reedit":
+            if not await workflow.can_approve(current_user, current, db):
+                return error_response(
+                    "Only a team leader can return a task to reedit.",
+                    status_code=403,
+                )
+            # Route the task back to its originating team so Leader1 sees it
+            former_team_id = current.get("former_team_id")
+            if former_team_id:
+                updates["team_id"] = former_team_id
         # Sending to reedit requires a reason
         if new_status == "reedit":
             if not (updates.get("reedit_reason") or "").strip():
@@ -465,6 +482,7 @@ async def edit_task(
             # Provenance: who worked on this in the originating team
             "former_assigned_to_name": task.get("assigned_to_name", "") or task.get("assigned_to", ""),
             "former_team_name": former_team_name,
+            "former_team_id": task.get("team_id", ""),
         })
         # Notify the destination team's leaders + elevated roles about the new task
         from app.services.project_service import _serialize
