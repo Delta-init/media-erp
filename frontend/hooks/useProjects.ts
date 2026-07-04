@@ -29,6 +29,20 @@ export interface LeaderQueue {
   teams: LeaderTeam[];
 }
 
+export function useTaskDetail(id: string | null) {
+  return useQuery({
+    queryKey: ["projects", "task", id],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: Task }>(
+        `/projects/${id}`
+      );
+      return data.data;
+    },
+    enabled: !!id,
+    staleTime: 0,
+  });
+}
+
 export function useLeaderQueue(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ["projects", "leader-queue"],

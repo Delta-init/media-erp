@@ -55,6 +55,16 @@ export interface TaskTiming {
   approved_at?: string | null;
 }
 
+export interface TaskHistoryEntry {
+  action: string;
+  actor_id: string;
+  actor_name: string;
+  timestamp: string;
+  from_status?: string | null;
+  to_status?: string | null;
+  note?: string | null;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -74,6 +84,7 @@ export interface Task {
   created_at: string;
   updated_at: string;
   timing?: TaskTiming | null;
+  history?: TaskHistoryEntry[];
 }
 
 export interface CreateTaskPayload {

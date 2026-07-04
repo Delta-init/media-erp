@@ -51,6 +51,12 @@ def _serialize(doc: dict) -> dict:
             "intervals": serialized_intervals,
             "total_seconds": timing.get("total_seconds"),
         }
+    # Serialize history entries
+    if out.get("history"):
+        out["history"] = [
+            {**e, "timestamp": _dt_to_utc_iso(e.get("timestamp"))}
+            for e in out["history"]
+        ]
     return out
 
 
@@ -128,6 +134,20 @@ async def list_tasks(
 
 async def create_task(db: AsyncIOMotorDatabase, data: dict) -> dict:
     now = datetime.now(timezone.utc)
+    actor_id   = data.get("created_by", "")
+    actor_name = data.get("actor_name", "")
+    assigned_to_name = data.get("assigned_to_name", "")
+    initial_history = [
+        {
+            "action":      "created",
+            "actor_id":    actor_id,
+            "actor_name":  actor_name,
+            "timestamp":   now,
+            "from_status": None,
+            "to_status":   data.get("status", "pending"),
+            "note":        f"Assigned to {assigned_to_name}" if assigned_to_name else None,
+        }
+    ]
     doc = {
         "title": data["title"],
         "description": data.get("description", ""),
@@ -138,10 +158,11 @@ async def create_task(db: AsyncIOMotorDatabase, data: dict) -> dict:
         "due_date": data.get("due_date"),
         "team_id": data.get("team_id") or None,
         "attachments": data.get("attachments") or [],
-        "created_by": data.get("created_by", ""),
+        "created_by": actor_id,
         "created_at": now,
         "updated_at": now,
         "timing": {"intervals": [], "total_seconds": None},
+        "history": initial_history,
         # Pipeline tracing (optional)
         "pipeline_id": data.get("pipeline_id") or None,
         "pipeline_node_id": data.get("pipeline_node_id") or None,

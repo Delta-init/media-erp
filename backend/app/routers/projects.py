@@ -257,6 +257,7 @@ async def add_task(
 
     data = body.model_dump()
     data["created_by"] = str(current_user["_id"])
+    data["actor_name"] = current_user.get("name", "")
     data["status"] = "pending"  # new work always enters the workflow at Pending
 
     # Members can only create tasks for themselves; only admins / team leaders
@@ -428,6 +429,51 @@ async def edit_task(
     if not task:
         return error_response("Task not found", status_code=404)
 
+    # ── Append audit history entry ────────────────────────────────────────────
+    from datetime import datetime, timezone as tz
+    actor_id   = str(current_user["_id"])
+    actor_name = current_user.get("name", "")
+    history_entries = []
+
+    if new_status and new_status != cur_status:
+        _action_labels = {
+            "started":        "started",
+            "break":          "break",
+            "pending_review": "pending_review",
+            "approved":       "approved",
+            "reedit":         "reedit",
+        }
+        action = _action_labels.get(new_status, new_status)
+        note   = updates.get("reedit_reason") or None
+        history_entries.append({
+            "action":      action,
+            "actor_id":    actor_id,
+            "actor_name":  actor_name,
+            "timestamp":   datetime.now(tz.utc),
+            "from_status": cur_status,
+            "to_status":   new_status,
+            "note":        note,
+        })
+
+    # Assignment change (separate from status)
+    if "assigned_to" in updates and updates["assigned_to"] != current.get("assigned_to"):
+        new_assignee_name = updates.get("assigned_to_name") or updates["assigned_to"]
+        history_entries.append({
+            "action":      "assigned",
+            "actor_id":    actor_id,
+            "actor_name":  actor_name,
+            "timestamp":   datetime.now(tz.utc),
+            "from_status": None,
+            "to_status":   None,
+            "note":        f"Assigned to {new_assignee_name}",
+        })
+
+    if history_entries:
+        await db["project_tasks"].update_one(
+            {"_id": oid},
+            {"$push": {"history": {"$each": history_entries}}},
+        )
+
     # ── Fire notifications for status transition ───────────────────────────────
     _notif_event_map = {
         "started":        "started",
@@ -483,6 +529,15 @@ async def edit_task(
             "former_assigned_to_name": task.get("assigned_to_name", "") or task.get("assigned_to", ""),
             "former_team_name": former_team_name,
             "former_team_id": task.get("team_id", ""),
+            "history": [{
+                "action":      "routed",
+                "actor_id":    str(current_user["_id"]),
+                "actor_name":  current_user.get("name", ""),
+                "timestamp":   now,
+                "from_status": None,
+                "to_status":   "pending",
+                "note":        f"Routed from {former_team_name} (approved by {current_user.get('name', '')})",
+            }],
         })
         # Notify the destination team's leaders + elevated roles about the new task
         from app.services.project_service import _serialize
@@ -495,6 +550,25 @@ async def edit_task(
             )
 
     return success_response(data=task, message="Task updated")
+
+
+@router.get("/{task_id}")
+async def get_task(
+    task_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    from app.services.project_service import _serialize
+    try:
+        oid = ObjectId(task_id)
+    except (InvalidId, Exception):
+        return error_response("Invalid task ID", status_code=422)
+    doc = await db["project_tasks"].find_one({"_id": oid})
+    if not doc:
+        return error_response("Task not found", status_code=404)
+    return success_response(data=_serialize(doc), message="Task retrieved")
 
 
 @router.delete("/{task_id}", status_code=204)

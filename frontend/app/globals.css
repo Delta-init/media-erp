@@ -54,7 +54,7 @@
   --card-foreground: oklch(0.16 0.04 257);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.16 0.04 257);
-  --primary: oklch(0.44 0.19 254);              /* #0057b8 royal blue */
+  --primary: oklch(0.44 0.19 254);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.955 0.030 253);
   --secondary-foreground: oklch(0.44 0.19 254);
@@ -74,14 +74,14 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.16 0.04 257);
-  --sidebar-primary: oklch(0.44 0.19 254);      /* royal blue */
+  --sidebar-primary: oklch(0.44 0.19 254);
   --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.955 0.030 253);
   --sidebar-accent-foreground: oklch(0.16 0.04 257);
   --sidebar-border: oklch(0.888 0.020 253);
   --sidebar-ring: oklch(0.44 0.19 254);
-  --background: oklch(0.975 0.010 253);         /* light blue-gray */
-  --foreground: oklch(0.16 0.04 257);           /* dark navy */
+  --background: oklch(0.975 0.010 253);
+  --foreground: oklch(0.16 0.04 257);
 }
 
 .dark {
@@ -91,7 +91,7 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.21 0.006 285.885);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.62 0.19 254);              /* lighter blue for dark mode */
+  --primary: oklch(0.62 0.19 254);
   --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.22 0.04 254);
   --secondary-foreground: oklch(0.985 0 0);
@@ -110,7 +110,7 @@
   --chart-5: oklch(0.67 0.18 240);
   --sidebar: oklch(0.21 0.006 285.885);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.62 0.19 254);      /* lighter blue */
+  --sidebar-primary: oklch(0.62 0.19 254);
   --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.22 0.04 254);
   --sidebar-accent-foreground: oklch(0.985 0 0);
@@ -175,32 +175,24 @@
 
 /* ── Delta Design System — inherited from delta-enrolment-form ───────────── */
 
-/* Scrolling white grid (enrollment form hero background pattern) */
 @keyframes gridScroll {
   from { background-position: 0 0; }
   to   { background-position: 40px 0; }
 }
-
-/* Slide up entrance */
 @keyframes slideInUp {
   from { opacity: 0; transform: translateY(22px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-
-/* Vertical float (logo hover) */
 @keyframes floatY {
   0%, 100% { transform: translateY(0); }
   50%       { transform: translateY(-9px); }
 }
-
-/* Pulse ring (step indicator / live dot) */
 @keyframes pulseDot {
   0%   { box-shadow: 0 0 0 0   rgba(0, 87, 184, 0.45); }
   70%  { box-shadow: 0 0 0 7px rgba(0, 87, 184, 0); }
   100% { box-shadow: 0 0 0 0   rgba(0, 87, 184, 0); }
 }
 
-/* Delta white-grid overlay — apply to any div over a blue background */
 .delta-grid-bg {
   background-image:
     linear-gradient(rgba(255,255,255,0.07) 1px, transparent 1px),
@@ -209,7 +201,6 @@
   animation: gridScroll 6s linear infinite;
 }
 
-/* Delta card — white card with deep blue shadow (enrollment form question-card) */
 .delta-card {
   background: rgba(255, 255, 255, 0.98);
   border: 1.5px solid rgba(255, 255, 255, 0.7);
@@ -219,7 +210,6 @@
     0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
-/* Delta glass — frosted glass panel */
 .delta-glass {
   background: rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(10px);
@@ -227,24 +217,17 @@
   border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
-/* Delta pill button */
 .delta-btn {
   border-radius: 50px;
   font-weight: 800;
   letter-spacing: 0.4px;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.delta-btn:hover {
+.delta-btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(0, 87, 184, 0.35);
 }
 
-/* Animation utilities */
-.delta-slide-up  { animation: slideInUp 0.65s ease; }
-.delta-float     { animation: floatY 4s ease-in-out infinite; }
-.delta-pulse-dot { animation: pulseDot 1.8s ease-in-out infinite; }
-
-/* Delta shadow only — preserves bg color, for dashboard cards */
 .delta-shadow {
   box-shadow:
     0 8px 32px rgba(0, 45, 110, 0.10),
@@ -257,7 +240,6 @@
     0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-/* Delta auth input — white input with blue focus (enrollment form style) */
 .delta-input {
   display: block;
   width: 100%;
@@ -284,6 +266,10 @@
 }
 .delta-input-icon { padding-left: 42px; }
 
+.delta-slide-up  { animation: slideInUp 0.65s ease; }
+.delta-float     { animation: floatY 4s ease-in-out infinite; }
+.delta-pulse-dot { animation: pulseDot 1.8s ease-in-out infinite; }
+
 /* ── Auth grid background animations ─────────────────────────────────────── */
 @keyframes floatUp {
   0%, 100% { transform: translateY(0px); }
@@ -299,6 +285,37 @@
 }
 .grid-card {
   animation: cardShimmer 9s ease-in-out infinite;
+}
+
+/* ── Task History Report — print / PDF export ─────────────────────────────── */
+@media print {
+  /* When printing the report, hide everything on the page … */
+  body.printing-report > * {
+    display: none !important;
+  }
+  /* … except the report portal itself */
+  body.printing-report > [data-report-portal] {
+    display: flex !important;
+    position: fixed;
+    inset: 0;
+    background: white !important;
+    z-index: 9999;
+  }
+  /* Hide the backdrop overlay, buttons, and close controls */
+  body.printing-report [data-report-portal] > div {
+    background: transparent !important;
+    backdrop-filter: none !important;
+  }
+  .report-print-hide {
+    display: none !important;
+  }
+  /* Let the modal expand to full page */
+  body.printing-report .max-h-\[92vh\] {
+    max-height: none !important;
+    overflow: visible !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
 }
 
 /* Slow X-axis drift — grid oscillates left/right independently of Y float */
