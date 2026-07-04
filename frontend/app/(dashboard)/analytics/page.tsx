@@ -1,43 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Camera, Heart, MessageCircle, Users, TrendingUp,
-  ExternalLink, X, Send, ChevronRight, BarChart3,
-  ImageIcon, Video, Grid3x3, RefreshCw, Loader2,
+  Camera, Heart, MessageCircle, Users, Eye,
+  Activity, ExternalLink, X, Send, RefreshCw,
+  Loader2, ImageIcon, Video, Grid3x3, ChevronRight,
 } from "lucide-react";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
 import { useConnectors } from "@/hooks/useConnectors";
 import {
   useInstagramLoginAccount,
   useInstagramLoginPosts,
+  useInstagramLoginInsights,
   useInstagramLoginPostComments,
   useReplyToInstagramComment,
   type IGPost,
-  type IGComment,
 } from "@/hooks/useSocial";
 import type { Connector } from "@/types/connector";
-import PageHeader from "@/components/shared/PageHeader";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-const igGradient = "linear-gradient(135deg, #E1306C, #833AB4, #405DE6)";
-
+function today() { return new Date().toISOString().slice(0, 10); }
+function daysAgo(n: number) {
+  const d = new Date(); d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
 }
-
+function fmtShort(iso: string) {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+}
 function formatCount(n: number | undefined) {
   if (n == null) return "—";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
-
-function engagement(post: IGPost, followers: number | undefined) {
+function engagementRate(post: IGPost, followers?: number) {
   if (!followers || followers === 0) return null;
-  const rate = ((post.like_count ?? 0) + (post.comments_count ?? 0)) / followers * 100;
-  return rate.toFixed(2) + "%";
+  return (((post.like_count ?? 0) + (post.comments_count ?? 0)) / followers * 100).toFixed(2) + "%";
 }
 
 function MediaIcon({ type }: { type: IGPost["media_type"] }) {
@@ -46,16 +52,39 @@ function MediaIcon({ type }: { type: IGPost["media_type"] }) {
   return <ImageIcon className="size-3 text-white" />;
 }
 
+const igGradient = "linear-gradient(135deg, #E1306C, #833AB4, #405DE6)";
+
+// ── KPI Card ──────────────────────────────────────────────────────────────────
+
+function KpiCard({
+  label, value, icon, iconBg, loading, period,
+}: {
+  label: string; value: number | undefined; icon: React.ReactNode;
+  iconBg: string; loading: boolean; period: string;
+}) {
+  return (
+    <div className="rounded-2xl border bg-card p-5 flex flex-col gap-3 shadow-sm">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+        <div className={`size-9 rounded-xl flex items-center justify-center ${iconBg}`}>
+          {icon}
+        </div>
+      </div>
+      {loading
+        ? <div className="h-8 w-20 rounded-lg bg-muted animate-pulse" />
+        : <p className="text-3xl font-bold leading-none">{value != null ? formatCount(value) : "—"}</p>
+      }
+      <p className="text-xs text-muted-foreground">{period}</p>
+    </div>
+  );
+}
+
 // ── Comment panel ─────────────────────────────────────────────────────────────
 
 function CommentPanel({
-  connectorId,
-  post,
-  onClose,
+  connectorId, post, onClose,
 }: {
-  connectorId: string;
-  post: IGPost;
-  onClose: () => void;
+  connectorId: string; post: IGPost; onClose: () => void;
 }) {
   const { data: comments = [], isLoading } = useInstagramLoginPostComments(connectorId, post.id);
   const reply = useReplyToInstagramComment();
@@ -71,17 +100,12 @@ function CommentPanel({
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: 40 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 40 }}
-      className="flex flex-col h-full"
-    >
-      {/* Header */}
-      <div className="flex items-center gap-3 border-b px-4 py-3 shrink-0">
+    <div className="flex flex-col h-full">
+      {/* Post mini-header */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0">
         <div className="size-10 rounded-lg overflow-hidden bg-muted shrink-0">
-          {post.media_url
-            ? <img src={post.media_url} alt="" className="size-full object-cover" />
+          {(post.thumbnail_url ?? post.media_url)
+            ? <img src={post.thumbnail_url ?? post.media_url} alt="" className="size-full object-cover" />
             : <div className="size-full flex items-center justify-center"><Camera className="size-4 text-muted-foreground" /></div>
           }
         </div>
@@ -89,21 +113,12 @@ function CommentPanel({
           <p className="text-sm font-medium truncate">{post.caption || "No caption"}</p>
           <p className="text-xs text-muted-foreground">{fmtDate(post.timestamp)}</p>
         </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-          <span className="flex items-center gap-1"><Heart className="size-3 text-rose-400" />{formatCount(post.like_count)}</span>
-          <span className="flex items-center gap-1"><MessageCircle className="size-3 text-blue-400" />{formatCount(post.comments_count)}</span>
-          {post.permalink && (
-            <a href={post.permalink} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
-              <ExternalLink className="size-3.5" />
-            </a>
-          )}
-        </div>
-        <button onClick={onClose} className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+        <button onClick={onClose} className="rounded-lg p-1 text-muted-foreground hover:bg-muted transition-colors">
           <X className="size-4" />
         </button>
       </div>
 
-      {/* Comments */}
+      {/* Comments list */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {isLoading && (
           <div className="flex items-center justify-center py-10 gap-2 text-sm text-muted-foreground">
@@ -111,30 +126,24 @@ function CommentPanel({
           </div>
         )}
         {!isLoading && comments.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
+          <div className="flex flex-col items-center justify-center py-12 gap-2 text-center">
             <MessageCircle className="size-8 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">No comments yet</p>
           </div>
         )}
         {comments.map((c) => (
           <div key={c.id} className="space-y-2">
-            {/* Comment */}
             <div className="flex gap-2.5">
               <div className="size-7 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-bold uppercase text-muted-foreground">
-                {(c.username ?? "?").slice(0, 1)}
+                {(c.username ?? "?")[0]}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="rounded-xl rounded-tl-sm bg-muted/50 px-3 py-2">
-                  <p className="text-xs font-semibold text-foreground">@{c.username ?? "user"}</p>
+                  <p className="text-xs font-semibold">@{c.username ?? "user"}</p>
                   <p className="text-sm mt-0.5">{c.text}</p>
                 </div>
                 <div className="flex items-center gap-3 mt-1 px-1">
                   <span className="text-[10px] text-muted-foreground">{fmtDate(c.timestamp)}</span>
-                  {c.like_count != null && c.like_count > 0 && (
-                    <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
-                      <Heart className="size-2.5" /> {c.like_count}
-                    </span>
-                  )}
                   <button
                     onClick={() => setReplyingTo(replyingTo === c.id ? null : c.id)}
                     className="text-[10px] font-medium text-primary hover:underline"
@@ -142,24 +151,17 @@ function CommentPanel({
                     Reply
                   </button>
                 </div>
-
-                {/* Replies */}
                 {c.replies?.data?.map((r) => (
                   <div key={r.id} className="flex gap-2 mt-2 ml-4">
                     <div className="size-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-[9px] font-bold uppercase text-primary">
-                      {(r.username ?? "?").slice(0, 1)}
+                      {(r.username ?? "?")[0]}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="rounded-xl rounded-tl-sm bg-primary/5 px-2.5 py-1.5">
-                        <p className="text-[10px] font-semibold text-primary">@{r.username ?? "you"}</p>
-                        <p className="text-xs mt-0.5">{r.text}</p>
-                      </div>
-                      <span className="text-[9px] text-muted-foreground px-1">{fmtDate(r.timestamp)}</span>
+                    <div className="rounded-xl rounded-tl-sm bg-primary/5 px-2.5 py-1.5 flex-1">
+                      <p className="text-[10px] font-semibold text-primary">@{r.username ?? "you"}</p>
+                      <p className="text-xs mt-0.5">{r.text}</p>
                     </div>
                   </div>
                 ))}
-
-                {/* Reply input */}
                 {replyingTo === c.id && (
                   <div className="flex items-center gap-2 mt-2 ml-4">
                     <input
@@ -184,24 +186,18 @@ function CommentPanel({
           </div>
         ))}
       </div>
-    </motion.div>
+    </div>
   );
 }
 
 // ── Post row ──────────────────────────────────────────────────────────────────
 
 function PostRow({
-  post,
-  followers,
-  isSelected,
-  onSelect,
+  post, followers, isSelected, onSelect,
 }: {
-  post: IGPost;
-  followers: number | undefined;
-  isSelected: boolean;
-  onSelect: () => void;
+  post: IGPost; followers?: number; isSelected: boolean; onSelect: () => void;
 }) {
-  const eng = engagement(post, followers);
+  const eng = engagementRate(post, followers);
   const thumb = post.thumbnail_url ?? post.media_url;
 
   return (
@@ -213,45 +209,43 @@ function PostRow({
         <div className="relative size-10 rounded-lg overflow-hidden bg-muted shrink-0">
           {thumb
             ? <img src={thumb} alt="" className="size-full object-cover" />
-            : <div className="size-full flex items-center justify-center bg-gradient-to-br from-pink-500/20 to-purple-500/20"><Camera className="size-4 text-muted-foreground" /></div>
+            : <div className="size-full flex items-center justify-center bg-gradient-to-br from-pink-500/20 to-purple-500/20">
+                <Camera className="size-4 text-muted-foreground" />
+              </div>
           }
           <div className="absolute bottom-0.5 right-0.5 rounded-sm p-0.5" style={{ background: igGradient }}>
             <MediaIcon type={post.media_type} />
           </div>
         </div>
       </td>
-      <td className="py-3 px-2 max-w-[220px]">
+      <td className="py-3 px-2 max-w-[200px]">
         {post.caption
           ? <p className="text-sm truncate">{post.caption}</p>
-          : <p className="text-sm text-muted-foreground italic">No caption</p>
+          : <p className="text-sm italic text-muted-foreground">No caption</p>
         }
         {post.permalink && (
           <a
-            href={post.permalink}
-            target="_blank"
-            rel="noopener noreferrer"
+            href={post.permalink} target="_blank" rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
             className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-primary mt-0.5"
           >
-            <ExternalLink className="size-2.5" /> View on Instagram
+            <ExternalLink className="size-2.5" /> View on Camera
           </a>
         )}
       </td>
       <td className="py-3 px-2 text-sm text-muted-foreground whitespace-nowrap">{fmtDate(post.timestamp)}</td>
       <td className="py-3 px-2">
         <span className="flex items-center gap-1 text-sm">
-          <Heart className="size-3.5 text-rose-400" />
-          {formatCount(post.like_count)}
+          <Heart className="size-3.5 text-rose-400" />{formatCount(post.like_count)}
         </span>
       </td>
       <td className="py-3 px-2">
         <span className="flex items-center gap-1 text-sm">
-          <MessageCircle className="size-3.5 text-blue-400" />
-          {formatCount(post.comments_count)}
+          <MessageCircle className="size-3.5 text-blue-400" />{formatCount(post.comments_count)}
         </span>
       </td>
-      <td className="py-3 pl-2 pr-4">
-        {eng != null
+      <td className="py-3 pl-2 pr-3">
+        {eng
           ? <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{eng}</span>
           : <span className="text-xs text-muted-foreground">—</span>
         }
@@ -263,140 +257,165 @@ function PostRow({
   );
 }
 
-// ── Account header card ───────────────────────────────────────────────────────
-
-function AccountHeader({ connectorId }: { connectorId: string }) {
-  const { data: account, isLoading } = useInstagramLoginAccount(connectorId);
-
-  if (isLoading) {
-    return (
-      <div className="rounded-2xl border bg-card p-5 animate-pulse">
-        <div className="flex items-center gap-4">
-          <div className="size-16 rounded-2xl bg-muted" />
-          <div className="space-y-2">
-            <div className="h-4 w-32 rounded bg-muted" />
-            <div className="h-3 w-20 rounded bg-muted" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-  if (!account) return null;
-
-  return (
-    <div className="rounded-2xl border bg-card overflow-hidden shadow-sm">
-      <div className="h-16 relative" style={{ background: igGradient }} />
-      <div className="px-5 pb-5">
-        <div className="flex items-end gap-4 -mt-8 mb-4">
-          <div className="size-16 rounded-2xl border-4 border-card overflow-hidden bg-muted shadow-md shrink-0">
-            {account.profile_picture_url
-              ? <img src={account.profile_picture_url} alt="" className="size-full object-cover" />
-              : <div className="size-full flex items-center justify-center" style={{ background: igGradient }}>
-                  <Camera className="size-7 text-white" />
-                </div>
-            }
-          </div>
-          <div className="pb-1">
-            <p className="font-bold text-base leading-tight">{account.name ?? account.username}</p>
-            {account.username && <p className="text-sm text-muted-foreground">@{account.username}</p>}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-xl border bg-muted/30 p-3 text-center">
-            <Users className="size-4 text-muted-foreground mx-auto mb-1" />
-            <p className="text-xl font-bold leading-none">{formatCount(account.followers_count)}</p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Followers</p>
-          </div>
-          <div className="rounded-xl border bg-muted/30 p-3 text-center">
-            <ImageIcon className="size-4 text-muted-foreground mx-auto mb-1" />
-            <p className="text-xl font-bold leading-none">{formatCount(account.media_count)}</p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Posts</p>
-          </div>
-          <div className="rounded-xl border bg-muted/30 p-3 text-center">
-            <TrendingUp className="size-4 text-muted-foreground mx-auto mb-1" />
-            <p className="text-xl font-bold leading-none">
-              {account.followers_count && account.media_count
-                ? (account.followers_count / Math.max(account.media_count, 1)).toFixed(0)
-                : "—"}
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Followers/Post</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
   const { data: allConnectors = [] } = useConnectors();
   const igConnectors = allConnectors.filter((c: Connector) => c.platform === "instagram_login");
 
-  const [connectorId, setConnectorId] = useState<string>("");
-  const activeConnectorId = connectorId || igConnectors[0]?.id || "";
+  const [connectorId, setConnectorId] = useState("");
+  const activeId = connectorId || igConnectors[0]?.id || "";
+  const activeConnector = igConnectors.find((c: Connector) => c.id === activeId);
+  const isConnected = activeConnector?.status === "connected";
 
-  const { data: posts = [], isLoading: postsLoading } = useInstagramLoginPosts(activeConnectorId);
-  const { data: account } = useInstagramLoginAccount(activeConnectorId);
+  // Date range
+  const [dateFrom, setDateFrom] = useState(daysAgo(30));
+  const [dateTo, setDateTo]   = useState(today());
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  function setPreset(n: number) {
+    setDateFrom(daysAgo(n));
+    setDateTo(today());
+    setRefreshKey((k) => k + 1);
+  }
+
+  // Data
+  const { data: account, isLoading: accLoading } = useInstagramLoginAccount(activeId);
+  const { data: posts = [], isLoading: postsLoading, refetch: refetchPosts } = useInstagramLoginPosts(activeId);
+  const { data: insights, isLoading: insightsLoading, refetch: refetchInsights } = useInstagramLoginInsights(activeId, dateFrom, dateTo);
+
   const [selectedPost, setSelectedPost] = useState<IGPost | null>(null);
 
-  const noConnectors = igConnectors.length === 0;
-  const activeConnector = igConnectors.find((c: Connector) => c.id === activeConnectorId);
-  const isDisconnected = activeConnector && activeConnector.status !== "connected";
+  const handleRefresh = useCallback(() => {
+    refetchPosts();
+    refetchInsights();
+    setRefreshKey((k) => k + 1);
+  }, [refetchPosts, refetchInsights]);
 
-  return (
-    <div className="space-y-5 h-full">
-      <PageHeader
-        title="Analytics"
-        subtitle="Instagram account performance and post engagement"
-      />
+  // Build chart data by merging insight series on end_time
+  const chartData = (() => {
+    if (!insights) return [];
+    const imp = insights.impressions ?? [];
+    const rch = insights.reach ?? [];
+    const pv  = insights.profile_views ?? [];
+    const map: Record<string, { date: string; Impressions?: number; Reach?: number; "Profile Views"?: number }> = {};
+    for (const p of imp) {
+      const d = fmtShort(p.end_time);
+      map[d] = { ...(map[d] ?? { date: d }), Impressions: p.value };
+    }
+    for (const p of rch) {
+      const d = fmtShort(p.end_time);
+      map[d] = { ...(map[d] ?? { date: d }), Reach: p.value };
+    }
+    for (const p of pv) {
+      const d = fmtShort(p.end_time);
+      map[d] = { ...(map[d] ?? { date: d }), "Profile Views": p.value };
+    }
+    return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
+  })();
 
-      {/* Connector selector */}
-      {igConnectors.length > 1 && (
-        <div className="flex items-center gap-2">
-          <Camera className="size-4 text-muted-foreground shrink-0" />
-          <select
-            value={activeConnectorId}
-            onChange={(e) => { setConnectorId(e.target.value); setSelectedPost(null); }}
-            className="rounded-xl border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
-          >
-            {igConnectors.map((c: Connector) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+  const totalImpressions  = insights?.impressions?.reduce((s, p) => s + p.value, 0);
+  const totalReach        = insights?.reach?.reduce((s, p) => s + p.value, 0);
+  const totalProfileViews = insights?.profile_views?.reduce((s, p) => s + p.value, 0);
+
+  const dayCount = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000) || 30;
+
+  // No connectors
+  if (igConnectors.length === 0) {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">Camera Analytics</h1>
+            <p className="text-sm text-muted-foreground">Account insights powered by instagram_business_manage_insights</p>
+          </div>
         </div>
-      )}
-
-      {/* No connector state */}
-      {noConnectors && (
         <div className="flex flex-col items-center justify-center py-24 gap-5 rounded-2xl border bg-card">
-          <div className="size-20 rounded-2xl flex items-center justify-center shadow-md" style={{ background: igGradient }}>
+          <div className="size-20 rounded-2xl flex items-center justify-center shadow-lg" style={{ background: igGradient }}>
             <Camera className="size-10 text-white" />
           </div>
           <div className="text-center">
             <p className="font-semibold text-lg">No Instagram account connected</p>
             <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-              Connect your Instagram account in Connectors to see analytics, posts, and engagement data.
+              Connect your Instagram Business account in Connectors to see analytics.
             </p>
           </div>
-          <a
-            href="/connectors"
-            className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
-          >
+          <a href="/connectors" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors">
             Go to Connectors
           </a>
         </div>
-      )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* ── Header ── */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Camera Analytics</h1>
+          <p className="text-sm text-muted-foreground">Account insights powered by instagram_business_manage_insights</p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Connector selector */}
+          {igConnectors.length > 1 && (
+            <select
+              value={activeId}
+              onChange={(e) => { setConnectorId(e.target.value); setSelectedPost(null); }}
+              className="rounded-xl border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary"
+            >
+              {igConnectors.map((c: Connector) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Preset buttons */}
+          {["7", "30", "90"].map((n) => (
+            <button
+              key={n}
+              onClick={() => setPreset(+n)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium border transition-colors ${
+                dayCount === +n ? "bg-foreground text-background border-foreground" : "bg-background hover:bg-muted"
+              }`}
+            >
+              {n}d
+            </button>
+          ))}
+
+          {/* Date inputs */}
+          <input
+            type="date" value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="rounded-xl border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary"
+          />
+          <span className="text-muted-foreground">→</span>
+          <input
+            type="date" value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="rounded-xl border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary"
+          />
+
+          {/* Refresh */}
+          <button
+            onClick={handleRefresh}
+            className="flex items-center gap-1.5 rounded-xl border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted transition-colors"
+          >
+            <RefreshCw className={`size-3.5 ${insightsLoading || postsLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
+      </div>
 
       {/* Disconnected state */}
-      {!noConnectors && isDisconnected && (
+      {!isConnected && activeConnector && (
         <div className="flex flex-col items-center justify-center py-16 gap-4 rounded-2xl border border-dashed bg-card">
           <div className="size-14 rounded-2xl flex items-center justify-center opacity-60" style={{ background: igGradient }}>
             <Camera className="size-7 text-white" />
           </div>
           <div className="text-center">
-            <p className="font-medium">{activeConnector?.name} is disconnected</p>
+            <p className="font-medium">{activeConnector.name} is disconnected</p>
             <p className="text-sm text-muted-foreground mt-1">Reconnect this account in Connectors to view analytics.</p>
           </div>
           <a href="/connectors" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors">
@@ -405,26 +424,112 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      {/* Main content — connected */}
-      {!noConnectors && !isDisconnected && (
-        <div className={`grid gap-5 transition-all ${selectedPost ? "lg:grid-cols-[1fr_420px]" : "grid-cols-1"}`}>
-          {/* Left: account + table */}
+      {/* ── Connected content ── */}
+      {isConnected && (
+        <div className={`grid gap-5 ${selectedPost ? "lg:grid-cols-[1fr_400px]" : "grid-cols-1"}`}>
           <div className="space-y-5 min-w-0">
-            {/* Account header */}
-            <AccountHeader connectorId={activeConnectorId} />
+
+            {/* Account card */}
+            <div className="rounded-2xl border bg-card px-5 py-4 flex items-center gap-4 shadow-sm">
+              <div className="size-11 rounded-full overflow-hidden shrink-0 shadow" style={{ background: igGradient }}>
+                {account?.profile_picture_url
+                  ? <img src={account.profile_picture_url} alt="" className="size-full object-cover" />
+                  : <div className="size-full flex items-center justify-center">
+                      <Camera className="size-5 text-white" />
+                    </div>
+                }
+              </div>
+              <div className="flex-1 min-w-0">
+                {accLoading
+                  ? <div className="space-y-1.5"><div className="h-4 w-28 rounded bg-muted animate-pulse" /><div className="h-3 w-16 rounded bg-muted animate-pulse" /></div>
+                  : <>
+                      <p className="font-bold text-sm leading-tight">@{account?.username ?? activeConnector?.name}</p>
+                      <p className="text-xs text-muted-foreground">{account?.name ?? ""}</p>
+                    </>
+                }
+              </div>
+              <div className="flex items-center gap-6 shrink-0 text-right">
+                <div>
+                  <p className="text-xl font-bold leading-none">{formatCount(account?.followers_count)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Followers</p>
+                </div>
+                <div>
+                  <p className="text-xl font-bold leading-none">{formatCount(account?.media_count)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Posts</p>
+                </div>
+              </div>
+            </div>
+
+            {/* KPI cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <KpiCard
+                label="Impressions"
+                value={totalImpressions}
+                icon={<Eye className="size-4 text-blue-500" />}
+                iconBg="bg-blue-500/10"
+                loading={insightsLoading}
+                period={`Last ${dayCount} days`}
+              />
+              <KpiCard
+                label="Reach"
+                value={totalReach}
+                icon={<Activity className="size-4 text-purple-500" />}
+                iconBg="bg-purple-500/10"
+                loading={insightsLoading}
+                period={`Last ${dayCount} days`}
+              />
+              <KpiCard
+                label="Profile Views"
+                value={totalProfileViews}
+                icon={<Users className="size-4 text-rose-500" />}
+                iconBg="bg-rose-500/10"
+                loading={insightsLoading}
+                period={`Last ${dayCount} days`}
+              />
+            </div>
+
+            {/* Chart */}
+            <div className="rounded-2xl border bg-card p-5 shadow-sm">
+              <p className="text-sm font-semibold">Impressions &amp; Reach Over Time</p>
+              <p className="text-xs text-muted-foreground mb-4">Daily account-level metrics</p>
+              {insightsLoading ? (
+                <div className="flex items-center justify-center h-48 gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" /> Loading…
+                </div>
+              ) : chartData.length === 0 || chartData.every(d => !d.Impressions && !d.Reach && !d["Profile Views"]) ? (
+                <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
+                  No data for this period
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.08} />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={36} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 12, fontSize: 12, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}
+                      labelStyle={{ fontWeight: 600 }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />
+                    <Line type="monotone" dataKey="Impressions"   stroke="#3b82f6" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="Reach"         stroke="#a855f7" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="Profile Views" stroke="#f43f5e" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
 
             {/* Post engagement table */}
             <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-3 border-b">
-                <BarChart3 className="size-4 text-muted-foreground" />
+              <div className="flex items-center justify-between px-5 py-4 border-b">
                 <div>
                   <p className="text-sm font-semibold">Post-level Engagement</p>
                   <p className="text-xs text-muted-foreground">Individual post performance</p>
                 </div>
-                {postsLoading && <RefreshCw className="size-3.5 animate-spin text-muted-foreground ml-auto" />}
-                {!postsLoading && (
-                  <span className="ml-auto text-xs text-muted-foreground">{posts.length} posts</span>
-                )}
+                {postsLoading
+                  ? <RefreshCw className="size-3.5 animate-spin text-muted-foreground" />
+                  : <span className="text-xs text-muted-foreground">{posts.length} posts</span>
+                }
               </div>
 
               {postsLoading ? (
@@ -441,13 +546,13 @@ export default function AnalyticsPage() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b bg-muted/20">
-                        <th className="py-2.5 pl-4 pr-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Thumb</th>
-                        <th className="py-2.5 px-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Caption</th>
-                        <th className="py-2.5 px-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
-                        <th className="py-2.5 px-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Likes</th>
-                        <th className="py-2.5 px-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Comments</th>
-                        <th className="py-2.5 pl-2 pr-4 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Engagement</th>
-                        <th className="py-2.5 pr-4" />
+                        <th className="py-2.5 pl-4 pr-2 w-14" />
+                        <th className="py-2.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Caption</th>
+                        <th className="py-2.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
+                        <th className="py-2.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Likes</th>
+                        <th className="py-2.5 px-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Comments</th>
+                        <th className="py-2.5 pl-2 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Engagement</th>
+                        <th className="py-2.5 pr-4 w-8" />
                       </tr>
                     </thead>
                     <tbody>
@@ -472,17 +577,17 @@ export default function AnalyticsPage() {
             {selectedPost && (
               <motion.div
                 key={selectedPost.id}
-                initial={{ opacity: 0, x: 40 }}
+                initial={{ opacity: 0, x: 30 }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 40 }}
+                exit={{ opacity: 0, x: 30 }}
                 className="rounded-2xl border bg-card shadow-sm overflow-hidden flex flex-col"
                 style={{ maxHeight: "80vh", position: "sticky", top: "1rem" }}
               >
                 <div className="px-4 py-3 border-b shrink-0" style={{ background: igGradient }}>
-                  <p className="text-xs font-semibold text-white/90 uppercase tracking-wider">Comments</p>
+                  <p className="text-xs font-semibold text-white/90 uppercase tracking-wider">Comments &amp; Replies</p>
                 </div>
                 <CommentPanel
-                  connectorId={activeConnectorId}
+                  connectorId={activeId}
                   post={selectedPost}
                   onClose={() => setSelectedPost(null)}
                 />

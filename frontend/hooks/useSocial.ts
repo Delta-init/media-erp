@@ -347,6 +347,22 @@ export function useInstagramLoginPostComments(connectorId: string, postId: strin
   });
 }
 
+export interface InsightPoint { end_time: string; value: number }
+export type InsightsData = Record<string, InsightPoint[]>
+
+export function useInstagramLoginInsights(connectorId: string, since: string, until: string) {
+  return useQuery({
+    queryKey: ["instagram-login-insights", connectorId, since, until],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: InsightsData }>(
+        `/social/instagram_login/insights?connector_id=${connectorId}&since=${since}&until=${until}`
+      );
+      return data.data;
+    },
+    enabled: !!connectorId,
+  });
+}
+
 export function useReplyToInstagramComment() {
   return useMutation({
     mutationFn: async ({

@@ -630,6 +630,38 @@ async def get_instagram_login_post_comments(
     return success_response(comments, "Comments retrieved")
 
 
+@router.get("/instagram_login/insights")
+async def get_instagram_login_insights(
+    connector_id: str,
+    since: str = None,
+    until: str = None,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Return daily account-level insights: impressions, reach, profile_views."""
+    from datetime import datetime, timezone, timedelta
+    user_id = str(current_user["_id"])
+    connector = await get_connector(connector_id, user_id, db)
+    if not connector:
+        return error_response("Connector not found", status_code=404)
+    if connector["platform"] != "instagram_login":
+        return error_response("Not an instagram_login connector", status_code=400)
+    if connector.get("status") != "connected":
+        return error_response("Connector is not connected", status_code=400)
+    since = since or (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%d")
+    until = until or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    ig_user_id = connector.get("platform_account_id")
+    if not ig_user_id:
+        return error_response("Instagram account ID missing — please reconnect", status_code=400)
+    tokens = get_decrypted_tokens(connector)
+    from app.platforms.instagram_login import get_account_insights
+    try:
+        data = await get_account_insights(ig_user_id, tokens["access_token"], since, until)
+    except Exception as exc:
+        return error_response(f"Failed to fetch insights: {_safe_exc(exc)}", status_code=502)
+    return success_response(data, "Insights retrieved")
+
+
 @router.post("/instagram_login/posts/{post_id}/comments/{comment_id}/reply")
 async def reply_to_instagram_login_comment(
     post_id: str,
