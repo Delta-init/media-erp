@@ -1,658 +1,495 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Eye,
-  Users,
-  Activity,
-  Camera,
-  ChevronDown,
-  ImageIcon,
-  Heart,
-  MessageCircle,
-  ExternalLink,
-  RefreshCw,
-  Send,
-  TrendingUp,
-  TrendingDown,
-  Minus,
+  Camera, Heart, MessageCircle, Users, TrendingUp,
+  ExternalLink, X, Send, ChevronRight, BarChart3,
+  ImageIcon, Video, Grid3x3, RefreshCw, Loader2,
 } from "lucide-react";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-} from "recharts";
-import type { LucideIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
-import PageHeader from "@/components/shared/PageHeader";
-import { DateRangePicker } from "@/components/shared/DateRangePicker";
 import { useConnectors } from "@/hooks/useConnectors";
 import {
   useInstagramLoginAccount,
   useInstagramLoginPosts,
-  useInstagramLoginInsights,
   useInstagramLoginPostComments,
   useReplyToInstagramComment,
-  type IGInsightDay,
+  type IGPost,
   type IGComment,
 } from "@/hooks/useSocial";
-import { kpiContainerVariants, kpiCardVariants } from "@/lib/animations";
+import type { Connector } from "@/types/connector";
+import PageHeader from "@/components/shared/PageHeader";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function today() { return new Date().toISOString().slice(0, 10); }
-function daysAgo(n: number) {
-  const d = new Date(); d.setDate(d.getDate() - n + 1);
-  return d.toISOString().slice(0, 10);
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+const igGradient = "linear-gradient(135deg, #E1306C, #833AB4, #405DE6)";
+
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
 }
-function fmt(n: number): string {
+
+function formatCount(n: number | undefined) {
+  if (n == null) return "—";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
-function fmtDate(iso: string) {
-  return new Date(iso + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+function engagement(post: IGPost, followers: number | undefined) {
+  if (!followers || followers === 0) return null;
+  const rate = ((post.like_count ?? 0) + (post.comments_count ?? 0)) / followers * 100;
+  return rate.toFixed(2) + "%";
 }
 
-// ── KPI Card ──────────────────────────────────────────────────────────────────
-interface KpiCardProps {
-  label: string;
-  value: number | null;
-  delta?: number | null;
-  icon: LucideIcon;
-  color: string;
-  bg: string;
-  loading?: boolean;
-  formatter?: (v: number) => string;
+function MediaIcon({ type }: { type: IGPost["media_type"] }) {
+  if (type === "VIDEO") return <Video className="size-3 text-white" />;
+  if (type === "CAROUSEL_ALBUM") return <Grid3x3 className="size-3 text-white" />;
+  return <ImageIcon className="size-3 text-white" />;
 }
 
-function KpiCard({ label, value, delta, icon: Icon, color, bg, loading, formatter = fmt }: KpiCardProps) {
-  const isUp   = delta != null && delta > 0;
-  const isDown = delta != null && delta < 0;
+// ── Comment panel ─────────────────────────────────────────────────────────────
 
-  return (
-    <motion.div
-      variants={kpiCardVariants}
-      whileHover={{ y: -3, boxShadow: "0 12px 32px -8px rgb(0 0 0 / 0.14)" }}
-      transition={{ duration: 0.18, ease: "easeOut" }}
-      className="flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-sm"
-    >
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        <div className={cn("flex size-8 items-center justify-center rounded-lg", bg)}>
-          <Icon className={cn("size-4", color)} />
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="space-y-2">
-          <div className="h-7 w-28 animate-pulse rounded-md bg-muted" />
-          <div className="h-4 w-20 animate-pulse rounded-md bg-muted" />
-        </div>
-      ) : (
-        <div>
-          <p className="text-2xl font-bold tracking-tight">
-            {value !== null && value !== undefined ? formatter(value) : "—"}
-          </p>
-          {delta !== null && delta !== undefined ? (
-            <p className={cn(
-              "mt-1 flex items-center gap-1 text-xs font-medium",
-              isUp ? "text-emerald-500" : isDown ? "text-destructive" : "text-muted-foreground",
-            )}>
-              {isUp   && <TrendingUp   className="size-3" />}
-              {isDown && <TrendingDown className="size-3" />}
-              {!isUp && !isDown && <Minus className="size-3" />}
-              {`${isUp ? "+" : ""}${delta.toFixed(1)}% vs prev period`}
-            </p>
-          ) : (
-            <p className="mt-1 text-xs text-muted-foreground">Last 30 days</p>
-          )}
-        </div>
-      )}
-    </motion.div>
-  );
-}
-
-// ── Trend chart tooltip ────────────────────────────────────────────────────────
-function ChartTooltip({
-  active, payload, label,
+function CommentPanel({
+  connectorId,
+  post,
+  onClose,
 }: {
-  active?: boolean;
-  payload?: { name: string; value: number; color: string }[];
-  label?: string;
+  connectorId: string;
+  post: IGPost;
+  onClose: () => void;
 }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="rounded-lg border bg-card px-3 py-2 shadow-lg text-xs space-y-1">
-      <p className="font-medium">{label}</p>
-      {payload.map((p) => (
-        <p key={p.name} style={{ color: p.color }}>
-          {p.name}: <span className="font-semibold">{fmt(p.value)}</span>
-        </p>
-      ))}
-    </div>
-  );
-}
-
-// ── Comments panel for a single post ─────────────────────────────────────────
-function CommentsPanel({ connectorId, postId }: { connectorId: string; postId: string }) {
+  const { data: comments = [], isLoading } = useInstagramLoginPostComments(connectorId, post.id);
+  const reply = useReplyToInstagramComment();
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [replyText,  setReplyText ] = useState("");
+  const [replyText, setReplyText] = useState("");
 
-  const { data: comments, isLoading } = useInstagramLoginPostComments(connectorId, postId);
-  const reply = useReplyToInstagramComment(connectorId, postId);
-
-  function submitReply(commentId: string) {
+  function handleReply(commentId: string) {
     if (!replyText.trim()) return;
     reply.mutate(
-      { commentId, message: replyText.trim() },
-      { onSuccess: () => { setReplyingTo(null); setReplyText(""); } },
+      { connectorId, postId: post.id, commentId, message: replyText.trim() },
+      { onSuccess: () => { setReplyText(""); setReplyingTo(null); } }
     );
   }
 
-  if (isLoading) {
-    return (
-      <div className="px-5 py-4 space-y-2">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="flex gap-3">
-            <div className="size-7 rounded-full animate-pulse bg-muted shrink-0" />
-            <div className="flex-1 space-y-1.5">
-              <div className="h-3 w-24 animate-pulse rounded bg-muted" />
-              <div className="h-3 w-3/4 animate-pulse rounded bg-muted" />
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 40 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 40 }}
+      className="flex flex-col h-full"
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 border-b px-4 py-3 shrink-0">
+        <div className="size-10 rounded-lg overflow-hidden bg-muted shrink-0">
+          {post.media_url
+            ? <img src={post.media_url} alt="" className="size-full object-cover" />
+            : <div className="size-full flex items-center justify-center"><Camera className="size-4 text-muted-foreground" /></div>
+          }
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium truncate">{post.caption || "No caption"}</p>
+          <p className="text-xs text-muted-foreground">{fmtDate(post.timestamp)}</p>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
+          <span className="flex items-center gap-1"><Heart className="size-3 text-rose-400" />{formatCount(post.like_count)}</span>
+          <span className="flex items-center gap-1"><MessageCircle className="size-3 text-blue-400" />{formatCount(post.comments_count)}</span>
+          {post.permalink && (
+            <a href={post.permalink} target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
+              <ExternalLink className="size-3.5" />
+            </a>
+          )}
+        </div>
+        <button onClick={onClose} className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors">
+          <X className="size-4" />
+        </button>
+      </div>
+
+      {/* Comments */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+        {isLoading && (
+          <div className="flex items-center justify-center py-10 gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" /> Loading comments…
+          </div>
+        )}
+        {!isLoading && comments.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
+            <MessageCircle className="size-8 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">No comments yet</p>
+          </div>
+        )}
+        {comments.map((c) => (
+          <div key={c.id} className="space-y-2">
+            {/* Comment */}
+            <div className="flex gap-2.5">
+              <div className="size-7 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-bold uppercase text-muted-foreground">
+                {(c.username ?? "?").slice(0, 1)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="rounded-xl rounded-tl-sm bg-muted/50 px-3 py-2">
+                  <p className="text-xs font-semibold text-foreground">@{c.username ?? "user"}</p>
+                  <p className="text-sm mt-0.5">{c.text}</p>
+                </div>
+                <div className="flex items-center gap-3 mt-1 px-1">
+                  <span className="text-[10px] text-muted-foreground">{fmtDate(c.timestamp)}</span>
+                  {c.like_count != null && c.like_count > 0 && (
+                    <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                      <Heart className="size-2.5" /> {c.like_count}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setReplyingTo(replyingTo === c.id ? null : c.id)}
+                    className="text-[10px] font-medium text-primary hover:underline"
+                  >
+                    Reply
+                  </button>
+                </div>
+
+                {/* Replies */}
+                {c.replies?.data?.map((r) => (
+                  <div key={r.id} className="flex gap-2 mt-2 ml-4">
+                    <div className="size-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-[9px] font-bold uppercase text-primary">
+                      {(r.username ?? "?").slice(0, 1)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="rounded-xl rounded-tl-sm bg-primary/5 px-2.5 py-1.5">
+                        <p className="text-[10px] font-semibold text-primary">@{r.username ?? "you"}</p>
+                        <p className="text-xs mt-0.5">{r.text}</p>
+                      </div>
+                      <span className="text-[9px] text-muted-foreground px-1">{fmtDate(r.timestamp)}</span>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Reply input */}
+                {replyingTo === c.id && (
+                  <div className="flex items-center gap-2 mt-2 ml-4">
+                    <input
+                      autoFocus
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleReply(c.id)}
+                      placeholder="Write a reply…"
+                      className="flex-1 rounded-xl border bg-background px-3 py-1.5 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
+                    />
+                    <button
+                      onClick={() => handleReply(c.id)}
+                      disabled={!replyText.trim() || reply.isPending}
+                      className="rounded-xl bg-primary p-1.5 text-primary-foreground disabled:opacity-50 hover:bg-primary/90 transition-colors"
+                    >
+                      {reply.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ))}
       </div>
-    );
-  }
+    </motion.div>
+  );
+}
 
-  if (!comments?.length) {
+// ── Post row ──────────────────────────────────────────────────────────────────
+
+function PostRow({
+  post,
+  followers,
+  isSelected,
+  onSelect,
+}: {
+  post: IGPost;
+  followers: number | undefined;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const eng = engagement(post, followers);
+  const thumb = post.thumbnail_url ?? post.media_url;
+
+  return (
+    <tr
+      onClick={onSelect}
+      className={`cursor-pointer border-b transition-colors hover:bg-muted/30 ${isSelected ? "bg-primary/5" : ""}`}
+    >
+      <td className="py-3 pl-4 pr-2">
+        <div className="relative size-10 rounded-lg overflow-hidden bg-muted shrink-0">
+          {thumb
+            ? <img src={thumb} alt="" className="size-full object-cover" />
+            : <div className="size-full flex items-center justify-center bg-gradient-to-br from-pink-500/20 to-purple-500/20"><Camera className="size-4 text-muted-foreground" /></div>
+          }
+          <div className="absolute bottom-0.5 right-0.5 rounded-sm p-0.5" style={{ background: igGradient }}>
+            <MediaIcon type={post.media_type} />
+          </div>
+        </div>
+      </td>
+      <td className="py-3 px-2 max-w-[220px]">
+        {post.caption
+          ? <p className="text-sm truncate">{post.caption}</p>
+          : <p className="text-sm text-muted-foreground italic">No caption</p>
+        }
+        {post.permalink && (
+          <a
+            href={post.permalink}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-primary mt-0.5"
+          >
+            <ExternalLink className="size-2.5" /> View on Instagram
+          </a>
+        )}
+      </td>
+      <td className="py-3 px-2 text-sm text-muted-foreground whitespace-nowrap">{fmtDate(post.timestamp)}</td>
+      <td className="py-3 px-2">
+        <span className="flex items-center gap-1 text-sm">
+          <Heart className="size-3.5 text-rose-400" />
+          {formatCount(post.like_count)}
+        </span>
+      </td>
+      <td className="py-3 px-2">
+        <span className="flex items-center gap-1 text-sm">
+          <MessageCircle className="size-3.5 text-blue-400" />
+          {formatCount(post.comments_count)}
+        </span>
+      </td>
+      <td className="py-3 pl-2 pr-4">
+        {eng != null
+          ? <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">{eng}</span>
+          : <span className="text-xs text-muted-foreground">—</span>
+        }
+      </td>
+      <td className="py-3 pr-4">
+        <ChevronRight className={`size-4 text-muted-foreground transition-transform ${isSelected ? "rotate-90 text-primary" : ""}`} />
+      </td>
+    </tr>
+  );
+}
+
+// ── Account header card ───────────────────────────────────────────────────────
+
+function AccountHeader({ connectorId }: { connectorId: string }) {
+  const { data: account, isLoading } = useInstagramLoginAccount(connectorId);
+
+  if (isLoading) {
     return (
-      <div className="px-5 py-4 text-xs text-muted-foreground">
-        No comments on this post yet.
+      <div className="rounded-2xl border bg-card p-5 animate-pulse">
+        <div className="flex items-center gap-4">
+          <div className="size-16 rounded-2xl bg-muted" />
+          <div className="space-y-2">
+            <div className="h-4 w-32 rounded bg-muted" />
+            <div className="h-3 w-20 rounded bg-muted" />
+          </div>
+        </div>
       </div>
     );
   }
+  if (!account) return null;
 
   return (
-    <div className="divide-y border-t bg-muted/30">
-      {comments.map((c: IGComment) => (
-        <div key={c.id} className="px-5 py-3 space-y-1.5">
-          {/* Comment row */}
-          <div className="flex items-start gap-2.5">
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-pink-500 text-[10px] font-bold text-white">
-              {(c.username ?? "?")[0].toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold leading-tight">@{c.username ?? "unknown"}</p>
-              <p className="text-sm leading-snug mt-0.5">{c.text}</p>
-              {c.timestamp && (
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {new Date(c.timestamp).toLocaleString(undefined, {
-                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-                  })}
-                </p>
-              )}
-            </div>
-            <button
-              onClick={() => {
-                setReplyingTo(replyingTo === c.id ? null : c.id);
-                setReplyText("");
-              }}
-              className="shrink-0 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <MessageCircle className="size-3" />
-              Reply
-            </button>
+    <div className="rounded-2xl border bg-card overflow-hidden shadow-sm">
+      <div className="h-16 relative" style={{ background: igGradient }} />
+      <div className="px-5 pb-5">
+        <div className="flex items-end gap-4 -mt-8 mb-4">
+          <div className="size-16 rounded-2xl border-4 border-card overflow-hidden bg-muted shadow-md shrink-0">
+            {account.profile_picture_url
+              ? <img src={account.profile_picture_url} alt="" className="size-full object-cover" />
+              : <div className="size-full flex items-center justify-center" style={{ background: igGradient }}>
+                  <Camera className="size-7 text-white" />
+                </div>
+            }
           </div>
-
-          {/* Existing replies */}
-          {c.replies?.data?.length ? (
-            <div className="ml-9 space-y-1.5 border-l-2 border-muted pl-3">
-              {c.replies.data.map((r) => (
-                <div key={r.id} className="flex items-start gap-2">
-                  <div className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[9px] font-bold text-primary">
-                    {(r.username ?? "?")[0].toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-semibold">@{r.username ?? "you"}</p>
-                    <p className="text-xs">{r.text}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {/* Reply input */}
-          <AnimatePresence>
-            {replyingTo === c.id && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.18 }}
-                className="ml-9 overflow-hidden"
-              >
-                <div className="flex gap-2 pt-1">
-                  <input
-                    autoFocus
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitReply(c.id); }}}
-                    placeholder={`Reply to @${c.username ?? "user"}…`}
-                    className="flex-1 rounded-lg border bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                  <button
-                    onClick={() => submitReply(c.id)}
-                    disabled={!replyText.trim() || reply.isPending}
-                    className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
-                  >
-                    <Send className="size-3" />
-                    {reply.isPending ? "Sending…" : "Send"}
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <div className="pb-1">
+            <p className="font-bold text-base leading-tight">{account.name ?? account.username}</p>
+            {account.username && <p className="text-sm text-muted-foreground">@{account.username}</p>}
+          </div>
         </div>
-      ))}
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl border bg-muted/30 p-3 text-center">
+            <Users className="size-4 text-muted-foreground mx-auto mb-1" />
+            <p className="text-xl font-bold leading-none">{formatCount(account.followers_count)}</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Followers</p>
+          </div>
+          <div className="rounded-xl border bg-muted/30 p-3 text-center">
+            <ImageIcon className="size-4 text-muted-foreground mx-auto mb-1" />
+            <p className="text-xl font-bold leading-none">{formatCount(account.media_count)}</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Posts</p>
+          </div>
+          <div className="rounded-xl border bg-muted/30 p-3 text-center">
+            <TrendingUp className="size-4 text-muted-foreground mx-auto mb-1" />
+            <p className="text-xl font-bold leading-none">
+              {account.followers_count && account.media_count
+                ? (account.followers_count / Math.max(account.media_count, 1)).toFixed(0)
+                : "—"}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Followers/Post</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function AnalyticsPage() {
-  const [dateFrom, setDateFrom] = useState(daysAgo(30));
-  const [dateTo,   setDateTo  ] = useState(today());
-  const [connectorId, setConnectorId] = useState("");
-  const [expandedPost, setExpandedPost] = useState<string | null>(null);
+  const { data: allConnectors = [] } = useConnectors();
+  const igConnectors = allConnectors.filter((c: Connector) => c.platform === "instagram_login");
 
-  // All connectors → filter to instagram_login
-  const { data: connectors, isLoading: loadingConnectors } = useConnectors();
-  const igConnectors = useMemo(
-    () => (connectors ?? []).filter((c) => c.platform === "instagram_login" && c.status === "connected"),
-    [connectors],
-  );
+  const [connectorId, setConnectorId] = useState<string>("");
+  const activeConnectorId = connectorId || igConnectors[0]?.id || "";
 
-  // Auto-select first connector
-  const activeId = connectorId || igConnectors[0]?.id || "";
+  const { data: posts = [], isLoading: postsLoading } = useInstagramLoginPosts(activeConnectorId);
+  const { data: account } = useInstagramLoginAccount(activeConnectorId);
+  const [selectedPost, setSelectedPost] = useState<IGPost | null>(null);
 
-  const { data: account,  isLoading: loadingAccount  } = useInstagramLoginAccount(activeId);
-  const { data: posts,    isLoading: loadingPosts     } = useInstagramLoginPosts(activeId);
-  const { data: insights, isLoading: loadingInsights,
-          refetch: refetchInsights, isFetching } = useInstagramLoginInsights(activeId, dateFrom, dateTo);
-
-  // Build chart data
-  const chartData = useMemo(() => {
-    if (!insights?.daily) return [];
-    return insights.daily.map((d: IGInsightDay) => ({
-      date:          fmtDate(d.date),
-      Impressions:   d.impressions,
-      Reach:         d.reach,
-      "Profile Views": d.profile_views,
-    }));
-  }, [insights]);
-
-  // Post engagement helper
-  function engagementRate(likes: number, comments: number, followers: number) {
-    if (!followers) return "—";
-    return `${(((likes + comments) / followers) * 100).toFixed(2)}%`;
-  }
-
-  const noConnector = !loadingConnectors && igConnectors.length === 0;
+  const noConnectors = igConnectors.length === 0;
+  const activeConnector = igConnectors.find((c: Connector) => c.id === activeConnectorId);
+  const isDisconnected = activeConnector && activeConnector.status !== "connected";
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header */}
+    <div className="space-y-5 h-full">
       <PageHeader
-        title="Camera Analytics"
-        subtitle="Account insights powered by instagram_business_manage_insights"
-        action={
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Account selector */}
-            {igConnectors.length > 1 && (
-              <select
-                value={activeId}
-                onChange={(e) => setConnectorId(e.target.value)}
-                className="h-9 rounded-lg border bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-              >
-                {igConnectors.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            )}
-            <DateRangePicker
-              dateFrom={dateFrom}
-              dateTo={dateTo}
-              onFromChange={setDateFrom}
-              onToChange={setDateTo}
-            />
-            <button
-              onClick={() => refetchInsights()}
-              disabled={isFetching}
-              className="flex items-center gap-1.5 h-9 px-3 rounded-lg border bg-card text-sm hover:bg-muted transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className={cn("size-3.5", isFetching && "animate-spin")} />
-              Refresh
-            </button>
-          </div>
-        }
+        title="Analytics"
+        subtitle="Instagram account performance and post engagement"
       />
 
+      {/* Connector selector */}
+      {igConnectors.length > 1 && (
+        <div className="flex items-center gap-2">
+          <Camera className="size-4 text-muted-foreground shrink-0" />
+          <select
+            value={activeConnectorId}
+            onChange={(e) => { setConnectorId(e.target.value); setSelectedPost(null); }}
+            className="rounded-xl border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+          >
+            {igConnectors.map((c: Connector) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* No connector state */}
-      {noConnector && (
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col items-center gap-3 rounded-xl border border-dashed bg-card p-12 text-center"
-        >
-          <div className="flex size-12 items-center justify-center rounded-full bg-pink-500/10">
-            <Camera className="size-6 text-pink-500" />
+      {noConnectors && (
+        <div className="flex flex-col items-center justify-center py-24 gap-5 rounded-2xl border bg-card">
+          <div className="size-20 rounded-2xl flex items-center justify-center shadow-md" style={{ background: igGradient }}>
+            <Camera className="size-10 text-white" />
           </div>
-          <p className="font-medium">No Camera account connected</p>
-          <p className="text-sm text-muted-foreground max-w-xs">
-            Connect an Instagram Business account via the Connectors page to view analytics.
-          </p>
+          <div className="text-center">
+            <p className="font-semibold text-lg">No Instagram account connected</p>
+            <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+              Connect your Instagram account in Connectors to see analytics, posts, and engagement data.
+            </p>
+          </div>
           <a
             href="/connectors"
-            className="mt-1 inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+            className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
           >
             Go to Connectors
           </a>
-        </motion.div>
+        </div>
       )}
 
-      {!noConnector && (
-        <>
-          {/* Account banner */}
-          {(account || loadingAccount) && (
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-3 rounded-xl border bg-card px-5 py-3"
-            >
-              <div className="flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-pink-500">
-                <Camera className="size-4 text-white" />
-              </div>
-              {loadingAccount ? (
-                <div className="h-4 w-40 animate-pulse rounded bg-muted" />
-              ) : (
+      {/* Disconnected state */}
+      {!noConnectors && isDisconnected && (
+        <div className="flex flex-col items-center justify-center py-16 gap-4 rounded-2xl border border-dashed bg-card">
+          <div className="size-14 rounded-2xl flex items-center justify-center opacity-60" style={{ background: igGradient }}>
+            <Camera className="size-7 text-white" />
+          </div>
+          <div className="text-center">
+            <p className="font-medium">{activeConnector?.name} is disconnected</p>
+            <p className="text-sm text-muted-foreground mt-1">Reconnect this account in Connectors to view analytics.</p>
+          </div>
+          <a href="/connectors" className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors">
+            Reconnect
+          </a>
+        </div>
+      )}
+
+      {/* Main content — connected */}
+      {!noConnectors && !isDisconnected && (
+        <div className={`grid gap-5 transition-all ${selectedPost ? "lg:grid-cols-[1fr_420px]" : "grid-cols-1"}`}>
+          {/* Left: account + table */}
+          <div className="space-y-5 min-w-0">
+            {/* Account header */}
+            <AccountHeader connectorId={activeConnectorId} />
+
+            {/* Post engagement table */}
+            <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 border-b">
+                <BarChart3 className="size-4 text-muted-foreground" />
                 <div>
-                  <p className="text-sm font-semibold">@{account?.username ?? "—"}</p>
-                  <p className="text-xs text-muted-foreground">{account?.name}</p>
+                  <p className="text-sm font-semibold">Post-level Engagement</p>
+                  <p className="text-xs text-muted-foreground">Individual post performance</p>
+                </div>
+                {postsLoading && <RefreshCw className="size-3.5 animate-spin text-muted-foreground ml-auto" />}
+                {!postsLoading && (
+                  <span className="ml-auto text-xs text-muted-foreground">{posts.length} posts</span>
+                )}
+              </div>
+
+              {postsLoading ? (
+                <div className="flex items-center justify-center py-16 gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" /> Loading posts…
+                </div>
+              ) : posts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3">
+                  <ImageIcon className="size-8 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">No posts found</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b bg-muted/20">
+                        <th className="py-2.5 pl-4 pr-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Thumb</th>
+                        <th className="py-2.5 px-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Caption</th>
+                        <th className="py-2.5 px-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
+                        <th className="py-2.5 px-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Likes</th>
+                        <th className="py-2.5 px-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Comments</th>
+                        <th className="py-2.5 pl-2 pr-4 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Engagement</th>
+                        <th className="py-2.5 pr-4" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {posts.map((post) => (
+                        <PostRow
+                          key={post.id}
+                          post={post}
+                          followers={account?.followers_count}
+                          isSelected={selectedPost?.id === post.id}
+                          onSelect={() => setSelectedPost(selectedPost?.id === post.id ? null : post)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-              {!loadingAccount && account && (
-                <div className="ml-auto flex gap-6 text-sm">
-                  <div className="text-center">
-                    <p className="font-bold">{fmt(account.followers_count ?? 0)}</p>
-                    <p className="text-xs text-muted-foreground">Followers</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="font-bold">{account.media_count ?? "—"}</p>
-                    <p className="text-xs text-muted-foreground">Posts</p>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {/* KPI Cards */}
-          <motion.div
-            variants={kpiContainerVariants}
-            initial="initial"
-            animate="animate"
-            className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3"
-          >
-            <KpiCard
-              label="Impressions"
-              value={insights?.totals?.impressions ?? null}
-              icon={Eye}
-              color="text-blue-500"
-              bg="bg-blue-500/10"
-              loading={loadingInsights}
-            />
-            <KpiCard
-              label="Reach"
-              value={insights?.totals?.reach ?? null}
-              icon={Activity}
-              color="text-violet-500"
-              bg="bg-violet-500/10"
-              loading={loadingInsights}
-            />
-            <KpiCard
-              label="Profile Views"
-              value={insights?.totals?.profile_views ?? null}
-              icon={Users}
-              color="text-pink-500"
-              bg="bg-pink-500/10"
-              loading={loadingInsights}
-            />
-          </motion.div>
-
-          {/* Trend Chart */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.1 }}
-            className="rounded-xl border bg-card p-5 shadow-sm"
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold">Impressions &amp; Reach Over Time</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Daily account-level metrics</p>
-              </div>
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-3 rounded-sm bg-blue-500" />
-                  Impressions
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-3 rounded-sm bg-violet-500" />
-                  Reach
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-3 rounded-sm bg-pink-500" />
-                  Profile Views
-                </span>
-              </div>
             </div>
+          </div>
 
-            {loadingInsights ? (
-              <div className="h-52 animate-pulse rounded-lg bg-muted" />
-            ) : chartData.length === 0 ? (
-              <div className="flex h-52 items-center justify-center text-sm text-muted-foreground">
-                No data for this period
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="gradImp"  x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.18} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}    />
-                    </linearGradient>
-                    <linearGradient id="gradReach" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#8b5cf6" stopOpacity={0.18} />
-                      <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}    />
-                    </linearGradient>
-                    <linearGradient id="gradPV"   x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#ec4899" stopOpacity={0.18} />
-                      <stop offset="95%" stopColor="#ec4899" stopOpacity={0}    />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} className="text-muted-foreground" interval="preserveStartEnd" />
-                  <YAxis tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={48} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Area type="monotone" dataKey="Impressions"   stroke="#3b82f6" strokeWidth={2} fill="url(#gradImp)"   dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-                  <Area type="monotone" dataKey="Reach"         stroke="#8b5cf6" strokeWidth={2} fill="url(#gradReach)" dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-                  <Area type="monotone" dataKey="Profile Views" stroke="#ec4899" strokeWidth={2} fill="url(#gradPV)"    dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </motion.div>
-
-          {/* Post-level Breakdown */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.18 }}
-            className="rounded-xl border bg-card shadow-sm overflow-hidden"
-          >
-            <div className="flex items-center justify-between px-5 py-4 border-b">
-              <div>
-                <h2 className="text-sm font-semibold">Post-level Engagement</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Individual post performance</p>
-              </div>
-              <TrendingUp className="size-4 text-muted-foreground" />
-            </div>
-
-            {loadingPosts ? (
-              <div className="divide-y">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-4 px-5 py-4">
-                    <div className="size-12 rounded-lg animate-pulse bg-muted shrink-0" />
-                    <div className="flex-1 space-y-2">
-                      <div className="h-3 w-3/4 animate-pulse rounded bg-muted" />
-                      <div className="h-3 w-1/4 animate-pulse rounded bg-muted" />
-                    </div>
-                    <div className="h-4 w-16 animate-pulse rounded bg-muted" />
-                    <div className="h-4 w-12 animate-pulse rounded bg-muted" />
-                  </div>
-                ))}
-              </div>
-            ) : !posts?.length ? (
-              <div className="flex flex-col items-center gap-2 py-12 text-center">
-                <ImageIcon className="size-8 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">No posts found</p>
-              </div>
-            ) : (
-              <div className="divide-y">
-                {/* Table header */}
-                <div className="hidden md:grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-4 items-center px-5 py-2 text-xs font-medium text-muted-foreground">
-                  <span className="w-12" />
-                  <span>Caption</span>
-                  <span className="w-20 text-right">Date</span>
-                  <span className="w-16 text-right">Likes</span>
-                  <span className="w-20 text-right">Comments</span>
-                  <span className="w-24 text-right">Engagement</span>
+          {/* Right: comment panel */}
+          <AnimatePresence>
+            {selectedPost && (
+              <motion.div
+                key={selectedPost.id}
+                initial={{ opacity: 0, x: 40 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 40 }}
+                className="rounded-2xl border bg-card shadow-sm overflow-hidden flex flex-col"
+                style={{ maxHeight: "80vh", position: "sticky", top: "1rem" }}
+              >
+                <div className="px-4 py-3 border-b shrink-0" style={{ background: igGradient }}>
+                  <p className="text-xs font-semibold text-white/90 uppercase tracking-wider">Comments</p>
                 </div>
-                {posts.map((post) => {
-                  const likes    = post.like_count    ?? 0;
-                  const comments = post.comments_count ?? 0;
-                  const followers = account?.followers_count ?? 0;
-                  const eng = engagementRate(likes, comments, followers);
-                  const dateStr = post.timestamp
-                    ? new Date(post.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" })
-                    : "—";
-                  const isExpanded = expandedPost === post.id;
-
-                  return (
-                    <div key={post.id}>
-                      {/* Post row */}
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        onClick={() => setExpandedPost(isExpanded ? null : post.id)}
-                        className="grid grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_auto_auto_auto_auto_auto] gap-4 items-center px-5 py-3 hover:bg-muted/40 transition-colors group cursor-pointer"
-                      >
-                        {/* Thumbnail */}
-                        <div className="size-12 rounded-lg overflow-hidden bg-muted shrink-0">
-                          {post.media_url || post.thumbnail_url ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={post.thumbnail_url ?? post.media_url ?? ""}
-                              alt=""
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center">
-                              <ImageIcon className="size-5 text-muted-foreground/40" />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Caption + link */}
-                        <div className="min-w-0">
-                          <p className="text-sm truncate leading-tight">
-                            {post.caption ?? <span className="text-muted-foreground italic">No caption</span>}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-0.5 md:hidden">{dateStr}</p>
-                          {post.permalink && (
-                            <a
-                              href={post.permalink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="mt-0.5 inline-flex items-center gap-0.5 text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity hover:text-foreground"
-                            >
-                              View on Instagram <ExternalLink className="size-3" />
-                            </a>
-                          )}
-                        </div>
-
-                        {/* Date */}
-                        <span className="hidden md:block text-xs text-muted-foreground text-right w-20">{dateStr}</span>
-
-                        {/* Likes */}
-                        <div className="hidden md:flex items-center gap-1 justify-end w-16">
-                          <Heart className="size-3 text-rose-400" />
-                          <span className="text-sm font-medium">{fmt(likes)}</span>
-                        </div>
-
-                        {/* Comments — clickable hint */}
-                        <div className="hidden md:flex items-center gap-1 justify-end w-20">
-                          <MessageCircle className="size-3 text-blue-400" />
-                          <span className="text-sm font-medium">{fmt(comments)}</span>
-                        </div>
-
-                        {/* Engagement rate */}
-                        <div className="hidden md:block w-24 text-right">
-                          <span className={cn(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                            parseFloat(eng) >= 3
-                              ? "bg-emerald-500/10 text-emerald-600"
-                              : parseFloat(eng) >= 1
-                              ? "bg-amber-500/10 text-amber-600"
-                              : "bg-muted text-muted-foreground",
-                          )}>
-                            {eng}
-                          </span>
-                        </div>
-
-                        {/* Expand chevron */}
-                        <ChevronDown className={cn(
-                          "hidden md:block size-4 text-muted-foreground transition-transform duration-200",
-                          isExpanded && "rotate-180",
-                        )} />
-                      </motion.div>
-
-                      {/* Comments panel */}
-                      <AnimatePresence>
-                        {isExpanded && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.22, ease: "easeOut" }}
-                            className="overflow-hidden"
-                          >
-                            <CommentsPanel connectorId={activeId} postId={post.id} />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  );
-                })}
-              </div>
+                <CommentPanel
+                  connectorId={activeConnectorId}
+                  post={selectedPost}
+                  onClose={() => setSelectedPost(null)}
+                />
+              </motion.div>
             )}
-          </motion.div>
-        </>
+          </AnimatePresence>
+        </div>
       )}
     </div>
   );

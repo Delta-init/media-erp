@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import api from "@/lib/axios";
 
@@ -347,19 +347,27 @@ export function useInstagramLoginPostComments(connectorId: string, postId: strin
   });
 }
 
-export function useReplyToInstagramComment(connectorId: string, postId: string) {
-  const qc = useQueryClient();
+export function useReplyToInstagramComment() {
   return useMutation({
-    mutationFn: async ({ commentId, message }: { commentId: string; message: string }) => {
-      const params = new URLSearchParams({ connector_id: connectorId, message });
-      const { data } = await api.post<{ success: boolean; data: { id: string } }>(
-        `/social/instagram_login/comments/${commentId}/reply?${params.toString()}`
+    mutationFn: async ({
+      connectorId,
+      postId,
+      commentId,
+      message,
+    }: {
+      connectorId: string;
+      postId: string;
+      commentId: string;
+      message: string;
+    }) => {
+      const { data } = await api.post(
+        `/social/instagram_login/posts/${postId}/comments/${commentId}/reply?connector_id=${connectorId}`,
+        { message }
       );
-      return data.data;
+      return data;
     },
     onSuccess() {
       toast.success("Reply posted!");
-      qc.invalidateQueries({ queryKey: ["instagram-login-post-comments", connectorId, postId] });
     },
     onError(err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
@@ -485,40 +493,4 @@ export interface FBComment {
   from?: { name: string; id: string };
   created_time: string;
   like_count?: number;
-}
-
-// ── Instagram Login: Account-level Insights ───────────────────────────────────
-
-export interface IGInsightDay {
-  date: string;
-  impressions: number;
-  reach: number;
-  profile_views: number;
-}
-
-export interface IGInsightsData {
-  daily: IGInsightDay[];
-  totals: { impressions: number; reach: number; profile_views: number };
-}
-
-export function useInstagramLoginInsights(
-  connectorId: string,
-  dateFrom?: string,
-  dateTo?: string,
-) {
-  return useQuery({
-    queryKey: ["instagram-login-insights", connectorId, dateFrom, dateTo],
-    queryFn: async () => {
-      const params: Record<string, string> = { connector_id: connectorId };
-      if (dateFrom) params.date_from = dateFrom;
-      if (dateTo)   params.date_to   = dateTo;
-      const { data } = await api.get<{ success: boolean; data: IGInsightsData }>(
-        "/social/instagram_login/insights",
-        { params },
-      );
-      return data.data;
-    },
-    enabled: !!connectorId,
-    staleTime: 60_000,
-  });
 }

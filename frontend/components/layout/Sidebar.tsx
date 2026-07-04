@@ -48,6 +48,7 @@ const NAV_ITEMS = [
   { label: "Overview",   href: "/dashboard",  icon: LayoutDashboard, module: "dashboard" },
   { label: "Connectors", href: "/connectors", icon: Cable,           module: "connectors" },
   { label: "Reports",    href: "/reports",    icon: TrendingUp,      module: "reports" },
+  { label: "Analytics",  href: "/analytics",  icon: BarChart2 },
   { label: "Campaigns",  href: "/campaigns",  icon: Target,          module: "campaigns" },
   { label: "Schedule",      href: "/schedule",      icon: CalendarDays },
   { label: "Rules",         href: "/rules",         icon: Zap },
