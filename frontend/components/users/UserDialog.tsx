@@ -44,12 +44,13 @@ export function UserDialog({ open, onClose, user }: Props) {
     ? roles
     : roles.filter((r) => r.role_name !== "Super Admin" && r.role_name !== "Admin");
 
-  const [name, setName]           = useState("");
-  const [email, setEmail]         = useState("");
-  const [password, setPassword]   = useState("");
-  const [roleId, setRoleId]       = useState("");
-  const [designation, setDesg]    = useState("");
-  const [status, setStatus]       = useState<"active" | "inactive">("active");
+  const [name, setName]             = useState("");
+  const [email, setEmail]           = useState("");
+  const [password, setPassword]     = useState("");
+  const [roleId, setRoleId]         = useState("");
+  const [designation, setDesg]      = useState("");
+  const [status, setStatus]         = useState<"active" | "inactive">("active");
+  const [waPhone, setWaPhone]       = useState("");
 
   useEffect(() => {
     if (user) {
@@ -59,9 +60,11 @@ export function UserDialog({ open, onClose, user }: Props) {
       setRoleId(user.role_id ?? "");
       setDesg(user.designation ?? "");
       setStatus(user.status ?? "active");
+      setWaPhone((user as any).whatsapp_phone ?? "");
     } else {
       setName(""); setEmail(""); setPassword("");
       setRoleId(assignableRoles[0]?.id ?? ""); setDesg(""); setStatus("active");
+      setWaPhone("");
     }
   }, [user, open, assignableRoles]);
 
@@ -71,11 +74,11 @@ export function UserDialog({ open, onClose, user }: Props) {
     e.preventDefault();
     try {
       if (isEdit) {
-        const payload: Record<string, string> = { name, email, role_id: roleId, designation, status };
+        const payload: Record<string, string> = { name, email, role_id: roleId, designation, status, whatsapp_phone: waPhone };
         if (password) payload.password = password;
         await updateUser.mutateAsync({ id: user!.id, payload });
       } else {
-        await createUser.mutateAsync({ name, email, password, role_id: roleId, designation, status });
+        await createUser.mutateAsync({ name, email, password, role_id: roleId, designation, status, whatsapp_phone: waPhone });
       }
       close();
     } catch {
@@ -188,6 +191,20 @@ export function UserDialog({ open, onClose, user }: Props) {
                     </select>
                   </Field>
                 </div>
+
+                <Field label="WhatsApp Phone">
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm select-none">💬</span>
+                    <input
+                      type="tel"
+                      value={waPhone}
+                      onChange={(e) => setWaPhone(e.target.value)}
+                      placeholder="+91 98765 43210"
+                      className={`${inputCls} pl-8`}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Include country code. Used for WhatsApp task notifications.</p>
+                </Field>
               </div>
 
               {/* Footer */}

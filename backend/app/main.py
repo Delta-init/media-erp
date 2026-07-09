@@ -59,6 +59,7 @@ from app.routers import pipelines as pipelines_router
 from app.routers import email_settings as email_settings_router
 from app.routers import notification_prefs as notification_prefs_router
 from app.routers import media_schedule as media_schedule_router
+from app.routers import whatsapp as whatsapp_router
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.utils.response import success_response
 
@@ -147,6 +148,7 @@ app.include_router(pipelines_router.router)
 app.include_router(email_settings_router.router)
 app.include_router(notification_prefs_router.router)
 app.include_router(media_schedule_router.router)
+app.include_router(whatsapp_router.router)
 
 # Serve uploaded files at /uploads/<filename>
 # These are publicly reachable via ngrok so Instagram can fetch images.

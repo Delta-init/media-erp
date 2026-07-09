@@ -72,6 +72,7 @@ def _serialize_user(doc: dict, role_doc: Optional[dict] = None) -> dict:
         "designation": doc.get("designation", ""),
         "status": doc.get("status", "active"),
         "plan": doc.get("plan", "free"),
+        "whatsapp_phone": doc.get("whatsapp_phone", ""),
         "created_at": doc.get("created_at", "").isoformat() if isinstance(doc.get("created_at"), datetime) else doc.get("created_at", ""),
         "updated_at": doc.get("updated_at", "").isoformat() if isinstance(doc.get("updated_at"), datetime) else doc.get("updated_at", ""),
     }
@@ -154,6 +155,7 @@ async def create_user(
         "role_id": data.role_id,
         "designation": data.designation or "",
         "status": data.status,
+        "whatsapp_phone": data.whatsapp_phone or "",
         # Legacy fields kept for compatibility
         "role": "user",
         "plan": "free",
@@ -198,6 +200,8 @@ async def update_user(
     if data.status is not None:
         patch["status"] = data.status
         patch["is_active"] = data.status == "active"
+    if data.whatsapp_phone is not None:
+        patch["whatsapp_phone"] = data.whatsapp_phone
 
     await db["users"].update_one({"_id": oid}, {"$set": patch})
     updated = await db["users"].find_one({"_id": oid}, {"hashed_password": 0})

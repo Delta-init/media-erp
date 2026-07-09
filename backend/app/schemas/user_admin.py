@@ -9,6 +9,7 @@ class CreateUserRequest(BaseModel):
     role_id: str
     designation: Optional[str] = ""
     status: Literal["active", "inactive"] = "active"
+    whatsapp_phone: Optional[str] = ""
 
 
 class UpdateUserRequest(BaseModel):
@@ -18,3 +19,4 @@ class UpdateUserRequest(BaseModel):
     role_id: Optional[str] = None
     designation: Optional[str] = None
     status: Optional[Literal["active", "inactive"]] = None
+    whatsapp_phone: Optional[str] = None

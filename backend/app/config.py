@@ -102,6 +102,12 @@ class Settings(BaseSettings):
     #   https://pub-xxxx.r2.dev   or   https://files.yourdomain.com
     r2_public_url:        str = ""
 
+    # ── WhatsApp Cloud API ────────────────────────────────────────────────────
+    whatsapp_phone_number_id: str = ""
+    whatsapp_token: str = ""
+    whatsapp_business_account_id: str = ""
+    whatsapp_api_version: str = "v21.0"
+
     # ── Stripe ────────────────────────────────────────────────────────────────
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""

@@ -53,6 +53,7 @@ async def _fire_notifications(
     """
     from bson import ObjectId
     from app.services.notification_service import push_notification
+    from app.services import whatsapp_service as wa
 
     assigned_to   = task.get("assigned_to") or ""
     assigned_name = task.get("assigned_to_name") or "Someone"
@@ -60,7 +61,15 @@ async def _fire_notifications(
     task_id       = task.get("id") or str(task.get("_id", ""))
     task_title    = task.get("title") or "Task"
     reedit_reason = task.get("reedit_reason") or ""
+    due_date      = task.get("due_date") or "Not set"
     meta          = {"task_id": task_id, "task_title": task_title}
+
+    # Fetch assigned user's WhatsApp phone (optional — skipped if not set)
+    assigned_phone = ""
+    if assigned_to and ObjectId.is_valid(assigned_to):
+        _u = await db["users"].find_one({"_id": ObjectId(assigned_to)}, {"whatsapp_phone": 1})
+        if _u:
+            assigned_phone = _u.get("whatsapp_phone") or ""
 
     # ── 1. Notify assigned employee ───────────────────────────────────────────
     if event in ("created", "assigned") and assigned_to and assigned_to != actor_id:
@@ -70,6 +79,11 @@ async def _fire_notifications(
             f'"{task_title}" has been assigned to you.',
             meta,
         )
+        if assigned_phone:
+            try:
+                await wa.notify_task_assigned(assigned_phone, assigned_name, task_title, due_date)
+            except Exception as _wa_err:
+                print(f"[WA] task_assigned fire failed: {_wa_err}", flush=True)
 
     elif event == "pending_review" and assigned_to and assigned_to != actor_id:
         # Leader submitted the task on the employee's behalf — tell them
@@ -87,6 +101,11 @@ async def _fire_notifications(
             f'Your task "{task_title}" has been approved!',
             meta,
         )
+        if assigned_phone:
+            try:
+                await wa.notify_task_approved(assigned_phone, assigned_name, task_title, actor_name)
+            except Exception as _wa_err:
+                print(f"[WA] task_approved fire failed: {_wa_err}", flush=True)
 
     elif event == "reedit" and assigned_to:
         suffix = f" Reason: {reedit_reason}" if reedit_reason else ""
@@ -96,6 +115,11 @@ async def _fire_notifications(
             f'"{task_title}" needs revision.{suffix}',
             meta,
         )
+        if assigned_phone:
+            try:
+                await wa.notify_task_reedit(assigned_phone, assigned_name, task_title, actor_name, reedit_reason)
+            except Exception as _wa_err:
+                print(f"[WA] task_reedit fire failed: {_wa_err}", flush=True)
 
     # ── 2. Notify team leader(s) ──────────────────────────────────────────────
     leader_ids: list[str] = []
@@ -257,7 +281,6 @@ async def add_task(
 
     data = body.model_dump()
     data["created_by"] = str(current_user["_id"])
-    data["actor_name"] = current_user.get("name", "")
     data["status"] = "pending"  # new work always enters the workflow at Pending
 
     # Members can only create tasks for themselves; only admins / team leaders
@@ -339,17 +362,11 @@ async def leader_queue(
         "$or": [{"assigned_to": {"$in": ["", None]}}, {"assigned_to": uid}],
     }).sort("created_at", -1).to_list(500)
 
-    # Reedit tasks: returned by another leader (or sent back from pending_review)
-    reedit_tasks = await db["project_tasks"].find(
-        {"status": "reedit", "team_id": {"$in": team_ids}}
-    ).sort("updated_at", -1).to_list(500)
-
     return success_response(
         data={
             "is_leader": True,
             "review":   [_serialize(t) for t in review],
             "incoming": [_serialize(t) for t in incoming],
-            "reedit":   [_serialize(t) for t in reedit_tasks],
             "teams":    teams_out,
         },
         message="Leader queue",
@@ -392,17 +409,6 @@ async def edit_task(
                     "Only a team leader can approve a task or send it to reedit.",
                     status_code=403,
                 )
-        # Leader returning a routed pending task to reedit — also leader-only
-        if cur_status == "pending" and new_status == "reedit":
-            if not await workflow.can_approve(current_user, current, db):
-                return error_response(
-                    "Only a team leader can return a task to reedit.",
-                    status_code=403,
-                )
-            # Route the task back to its originating team so Leader1 sees it
-            former_team_id = current.get("former_team_id")
-            if former_team_id:
-                updates["team_id"] = former_team_id
         # Sending to reedit requires a reason
         if new_status == "reedit":
             if not (updates.get("reedit_reason") or "").strip():
@@ -428,51 +434,6 @@ async def edit_task(
     task = await update_task(db, task_id, updates)
     if not task:
         return error_response("Task not found", status_code=404)
-
-    # ── Append audit history entry ────────────────────────────────────────────
-    from datetime import datetime, timezone as tz
-    actor_id   = str(current_user["_id"])
-    actor_name = current_user.get("name", "")
-    history_entries = []
-
-    if new_status and new_status != cur_status:
-        _action_labels = {
-            "started":        "started",
-            "break":          "break",
-            "pending_review": "pending_review",
-            "approved":       "approved",
-            "reedit":         "reedit",
-        }
-        action = _action_labels.get(new_status, new_status)
-        note   = updates.get("reedit_reason") or None
-        history_entries.append({
-            "action":      action,
-            "actor_id":    actor_id,
-            "actor_name":  actor_name,
-            "timestamp":   datetime.now(tz.utc),
-            "from_status": cur_status,
-            "to_status":   new_status,
-            "note":        note,
-        })
-
-    # Assignment change (separate from status)
-    if "assigned_to" in updates and updates["assigned_to"] != current.get("assigned_to"):
-        new_assignee_name = updates.get("assigned_to_name") or updates["assigned_to"]
-        history_entries.append({
-            "action":      "assigned",
-            "actor_id":    actor_id,
-            "actor_name":  actor_name,
-            "timestamp":   datetime.now(tz.utc),
-            "from_status": None,
-            "to_status":   None,
-            "note":        f"Assigned to {new_assignee_name}",
-        })
-
-    if history_entries:
-        await db["project_tasks"].update_one(
-            {"_id": oid},
-            {"$push": {"history": {"$each": history_entries}}},
-        )
 
     # ── Fire notifications for status transition ───────────────────────────────
     _notif_event_map = {
@@ -528,16 +489,6 @@ async def edit_task(
             # Provenance: who worked on this in the originating team
             "former_assigned_to_name": task.get("assigned_to_name", "") or task.get("assigned_to", ""),
             "former_team_name": former_team_name,
-            "former_team_id": task.get("team_id", ""),
-            "history": [{
-                "action":      "routed",
-                "actor_id":    str(current_user["_id"]),
-                "actor_name":  current_user.get("name", ""),
-                "timestamp":   now,
-                "from_status": None,
-                "to_status":   "pending",
-                "note":        f"Routed from {former_team_name} (approved by {current_user.get('name', '')})",
-            }],
         })
         # Notify the destination team's leaders + elevated roles about the new task
         from app.services.project_service import _serialize
@@ -550,25 +501,6 @@ async def edit_task(
             )
 
     return success_response(data=task, message="Task updated")
-
-
-@router.get("/{task_id}")
-async def get_task(
-    task_id: str,
-    current_user: dict = Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_db),
-):
-    from bson import ObjectId
-    from bson.errors import InvalidId
-    from app.services.project_service import _serialize
-    try:
-        oid = ObjectId(task_id)
-    except (InvalidId, Exception):
-        return error_response("Invalid task ID", status_code=422)
-    doc = await db["project_tasks"].find_one({"_id": oid})
-    if not doc:
-        return error_response("Task not found", status_code=404)
-    return success_response(data=_serialize(doc), message="Task retrieved")
 
 
 @router.delete("/{task_id}", status_code=204)

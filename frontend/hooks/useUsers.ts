@@ -29,6 +29,7 @@ interface CreateUserPayload {
   role_id: string;
   designation?: string;
   status?: "active" | "inactive";
+  whatsapp_phone?: string;
 }
 
 interface UpdateUserPayload {
@@ -38,6 +39,7 @@ interface UpdateUserPayload {
   role_id?: string;
   designation?: string;
   status?: "active" | "inactive";
+  whatsapp_phone?: string;
 }
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
