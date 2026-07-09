@@ -346,7 +346,7 @@ async def get_account_insights(
             f"{_API_BASE}/{ig_user_id}/insights",
             params={
                 "access_token": access_token,
-                "metric": "impressions,reach,profile_views",
+                "metric": "total_interactions,reach,profile_views",
                 "period": "day",
                 "since": since_ts,
                 "until": until_ts,

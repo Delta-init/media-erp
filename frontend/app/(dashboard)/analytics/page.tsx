@@ -295,13 +295,13 @@ export default function AnalyticsPage() {
   // Build chart data by merging insight series on end_time
   const chartData = (() => {
     if (!insights) return [];
-    const imp = insights.impressions ?? [];
+    const intr = insights.total_interactions ?? [];
     const rch = insights.reach ?? [];
     const pv  = insights.profile_views ?? [];
-    const map: Record<string, { date: string; Impressions?: number; Reach?: number; "Profile Views"?: number }> = {};
-    for (const p of imp) {
+    const map: Record<string, { date: string; "Total Interactions"?: number; Reach?: number; "Profile Views"?: number }> = {};
+    for (const p of intr) {
       const d = fmtShort(p.end_time);
-      map[d] = { ...(map[d] ?? { date: d }), Impressions: p.value };
+      map[d] = { ...(map[d] ?? { date: d }), "Total Interactions": p.value };
     }
     for (const p of rch) {
       const d = fmtShort(p.end_time);
@@ -314,7 +314,7 @@ export default function AnalyticsPage() {
     return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
   })();
 
-  const totalImpressions  = insights?.impressions?.reduce((s, p) => s + p.value, 0);
+  const totalInteractions = insights?.total_interactions?.reduce((s, p) => s + p.value, 0);
   const totalReach        = insights?.reach?.reduce((s, p) => s + p.value, 0);
   const totalProfileViews = insights?.profile_views?.reduce((s, p) => s + p.value, 0);
 
@@ -463,8 +463,8 @@ export default function AnalyticsPage() {
             {/* KPI cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <KpiCard
-                label="Impressions"
-                value={totalImpressions}
+                label="Total Interactions"
+                value={totalInteractions}
                 icon={<Eye className="size-4 text-blue-500" />}
                 iconBg="bg-blue-500/10"
                 loading={insightsLoading}
@@ -496,7 +496,7 @@ export default function AnalyticsPage() {
                 <div className="flex items-center justify-center h-48 gap-2 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" /> Loading…
                 </div>
-              ) : chartData.length === 0 || chartData.every(d => !d.Impressions && !d.Reach && !d["Profile Views"]) ? (
+              ) : chartData.length === 0 || chartData.every(d => !d["Total Interactions"] && !d.Reach && !d["Profile Views"]) ? (
                 <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
                   No data for this period
                 </div>
@@ -511,7 +511,7 @@ export default function AnalyticsPage() {
                       labelStyle={{ fontWeight: 600 }}
                     />
                     <Legend wrapperStyle={{ fontSize: 12, paddingTop: 12 }} />
-                    <Line type="monotone" dataKey="Impressions"   stroke="#3b82f6" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="Total Interactions" stroke="#3b82f6" strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="Reach"         stroke="#a855f7" strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="Profile Views" stroke="#f43f5e" strokeWidth={2} dot={false} />
                   </LineChart>
