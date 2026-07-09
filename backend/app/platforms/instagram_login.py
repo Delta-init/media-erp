@@ -27,7 +27,7 @@ _SHORT_TOKEN_URL = "https://api.instagram.com/oauth/access_token"
 _LONG_TOKEN_URL = "https://graph.instagram.com/access_token"
 _REFRESH_URL = "https://graph.instagram.com/refresh_access_token"
 _API_BASE = f"https://graph.instagram.com/{_GRAPH_VERSION}"
-_SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages,instagram_business_manage_comments"
+_SCOPES = "instagram_business_basic,instagram_business_content_publish,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_manage_insights"
 _LONG_LIVED_EXPIRE_DAYS = 60
 
 
@@ -324,6 +324,56 @@ async def get_media_comments(media_id: str, access_token: str) -> list[dict]:
                 comments = resp2.json().get("comments", {}).get("data", [])
 
         return comments
+
+
+async def get_account_insights(
+    ig_user_id: str,
+    access_token: str,
+    since: str,
+    until: str,
+) -> dict:
+    """
+    Fetch daily account-level insights: impressions, reach, profile_views.
+    since/until are YYYY-MM-DD strings.
+    Returns {metric_name: [{end_time, value}, ...]}
+    """
+    from datetime import datetime, timezone
+    since_ts = int(datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+    until_ts = int(datetime.strptime(until, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()) + 86400
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{_API_BASE}/{ig_user_id}/insights",
+            params={
+                "access_token": access_token,
+                "metric": "total_interactions,reach,profile_views",
+                "period": "day",
+                "since": since_ts,
+                "until": until_ts,
+            },
+        )
+        if not resp.is_success:
+            _raise_meta_error(resp)
+        result: dict = {}
+        for m in resp.json().get("data", []):
+            result[m["name"]] = m.get("values", [])
+        return result
+
+
+async def reply_to_comment(
+    comment_id: str,
+    access_token: str,
+    message: str,
+) -> dict:
+    """Reply to an Instagram comment."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{_API_BASE}/{comment_id}/replies",
+            params={"access_token": access_token, "message": message},
+        )
+        if not resp.is_success:
+            _raise_meta_error(resp)
+        return resp.json()
 
 
 async def get_conversations(ig_user_id: str, access_token: str) -> list[dict]:

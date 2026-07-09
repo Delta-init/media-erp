@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Clock,
@@ -135,6 +135,13 @@ function CreateModal({ onClose }: { onClose: () => void }) {
   const [caption, setCaption]         = useState("");
   const [imageUrl, setImageUrl]       = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
+
+  // Sync connectorId once connectors finish loading (useState initialises before fetch resolves)
+  useEffect(() => {
+    if (!connectorId && eligible.length > 0) {
+      setConnectorId(eligible[0].id);
+    }
+  }, [eligible, connectorId]);
 
   const selectedConn = eligible.find(c => c.id === connectorId);
 
