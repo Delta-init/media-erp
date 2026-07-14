@@ -35,4 +35,6 @@ class UpdateTaskRequest(BaseModel):
     attachments: Optional[list[Attachment]] = None
     reedit_reason: Optional[str] = None       # why a review was sent back to reedit
     destination_team_id: Optional[str] = None # route a copy to this team on approve
+    next_leader_id: Optional[str] = None      # assign the routed copy to this leader
+    next_leader_name: Optional[str] = None
     caption: Optional[str] = None             # submission note added when sending to pending_review

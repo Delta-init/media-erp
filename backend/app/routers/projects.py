@@ -53,6 +53,7 @@ async def _fire_notifications(
     """
     from bson import ObjectId
     from app.services.notification_service import push_notification
+    from app.services import whatsapp_service as wa
 
     assigned_to   = task.get("assigned_to") or ""
     assigned_name = task.get("assigned_to_name") or "Someone"
@@ -60,7 +61,15 @@ async def _fire_notifications(
     task_id       = task.get("id") or str(task.get("_id", ""))
     task_title    = task.get("title") or "Task"
     reedit_reason = task.get("reedit_reason") or ""
+    due_date      = task.get("due_date") or "Not set"
     meta          = {"task_id": task_id, "task_title": task_title}
+
+    # Fetch assigned user's WhatsApp phone (optional — skipped if not set)
+    assigned_phone = ""
+    if assigned_to and ObjectId.is_valid(assigned_to):
+        _u = await db["users"].find_one({"_id": ObjectId(assigned_to)}, {"whatsapp_phone": 1})
+        if _u:
+            assigned_phone = _u.get("whatsapp_phone") or ""
 
     # ── 1. Notify assigned employee ───────────────────────────────────────────
     if event in ("created", "assigned") and assigned_to and assigned_to != actor_id:
@@ -70,6 +79,11 @@ async def _fire_notifications(
             f'"{task_title}" has been assigned to you.',
             meta,
         )
+        if assigned_phone:
+            try:
+                await wa.notify_task_assigned(assigned_phone, assigned_name, task_title, due_date)
+            except Exception as _wa_err:
+                print(f"[WA] task_assigned fire failed: {_wa_err}", flush=True)
 
     elif event == "pending_review" and assigned_to and assigned_to != actor_id:
         # Leader submitted the task on the employee's behalf — tell them
@@ -87,6 +101,11 @@ async def _fire_notifications(
             f'Your task "{task_title}" has been approved!',
             meta,
         )
+        if assigned_phone:
+            try:
+                await wa.notify_task_approved(assigned_phone, assigned_name, task_title, actor_name)
+            except Exception as _wa_err:
+                print(f"[WA] task_approved fire failed: {_wa_err}", flush=True)
 
     elif event == "reedit" and assigned_to:
         suffix = f" Reason: {reedit_reason}" if reedit_reason else ""
@@ -96,6 +115,11 @@ async def _fire_notifications(
             f'"{task_title}" needs revision.{suffix}',
             meta,
         )
+        if assigned_phone:
+            try:
+                await wa.notify_task_reedit(assigned_phone, assigned_name, task_title, actor_name, reedit_reason)
+            except Exception as _wa_err:
+                print(f"[WA] task_reedit fire failed: {_wa_err}", flush=True)
 
     # ── 2. Notify team leader(s) ──────────────────────────────────────────────
     leader_ids: list[str] = []
@@ -364,6 +388,8 @@ async def edit_task(
     updates = body.model_dump(exclude_none=True)
     new_status = updates.get("status")
     destination_team_id = updates.pop("destination_team_id", None)
+    next_leader_id   = updates.pop("next_leader_id", None)
+    next_leader_name = updates.pop("next_leader_name", None)
 
     try:
         oid = ObjectId(task_id)
@@ -452,8 +478,8 @@ async def edit_task(
             "description": task.get("description", ""),
             "priority": task.get("priority", "medium"),
             "status": "pending",
-            "assigned_to": "",
-            "assigned_to_name": "",
+            "assigned_to": next_leader_id or "",
+            "assigned_to_name": next_leader_name or "",
             "due_date": None,
             "team_id": destination_team_id,
             "attachments": task.get("attachments", []),
@@ -467,6 +493,7 @@ async def edit_task(
             "former_team_name": former_team_name,
         })
         # Notify the destination team's leaders + elevated roles about the new task
+        # If assigned to a specific leader, also send them a task_assigned notification
         from app.services.project_service import _serialize
         routed_task = await db["project_tasks"].find_one({"_id": routed_result.inserted_id})
         if routed_task:
@@ -475,6 +502,14 @@ async def edit_task(
                 str(current_user["_id"]),
                 current_user.get("name", ""),
             )
+            if next_leader_id:
+                from app.services.notification_service import push_notification
+                await push_notification(
+                    db, next_leader_id, "task_assigned",
+                    "Task assigned to you",
+                    f'"{task["title"]}" has been approved and assigned to you.',
+                    {"task_id": str(routed_result.inserted_id), "task_title": task["title"]},
+                )
 
     return success_response(data=task, message="Task updated")
 
