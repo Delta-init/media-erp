@@ -3,7 +3,7 @@ from pathlib import Path
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings
 
-# Resolve .env relative to this file so it works regardless of where uvicorn is launched from >>
+# Resolve .env relative to this file so it works regardless of where uvicorn is launched from >> >>>>
 _ENV_FILE = Path(__file__).parent.parent / ".env"
 
 
