@@ -45,31 +45,31 @@ import {
 } from "@/lib/animations";
 
 const NAV_ITEMS = [
-  { label: "Overview",   href: "/dashboard",  icon: LayoutDashboard, module: "dashboard" },
-  { label: "Connectors", href: "/connectors", icon: Cable,           module: "connectors" },
-  { label: "Reports",    href: "/reports",    icon: TrendingUp,      module: "reports" },
-  { label: "Analytics",  href: "/analytics",  icon: BarChart2 },
-  { label: "Campaigns",  href: "/campaigns",  icon: Target,          module: "campaigns" },
-  { label: "Schedule",      href: "/schedule",      icon: CalendarDays },
-  { label: "Rules",         href: "/rules",         icon: Zap },
-  { label: "Email Reports", href: "/email-reports",  icon: Mail },
-  { label: "Projects",      href: "/projects",      icon: Kanban,          module: "projects" },
+  { label: "Overview",      href: "/dashboard",      icon: LayoutDashboard, module: "dashboard" },
+  { label: "Connectors",    href: "/connectors",     icon: Cable,           module: "connectors" },
+  { label: "Reports",       href: "/reports",        icon: TrendingUp,      module: "reports",  hidden: true },
+  { label: "Analytics",     href: "/analytics",      icon: BarChart2,                           hidden: true },
+  { label: "Campaigns",     href: "/campaigns",      icon: Target,          module: "campaigns" },
+  { label: "Schedule",      href: "/schedule",       icon: CalendarDays,                        hidden: true },
+  { label: "Rules",         href: "/rules",          icon: Zap,                                 hidden: true },
+  { label: "Email Reports", href: "/email-reports",  icon: Mail,                                hidden: true },
+  { label: "Projects",      href: "/projects",       icon: Kanban,          module: "projects" },
   { label: "Media Schedule", href: "/media-schedule", icon: CalendarClock },
-  { label: "Teams",         href: "/teams",         icon: UsersRound,      module: "teams" },
-  { label: "Leader Desk",   href: "/leader",        icon: ClipboardCheck },
-  { label: "AI Queries", href: "/ai",         icon: Sparkles,        module: "ai" },
-  { label: "Publish",    href: "/social",     icon: Share2 },
-  { label: "Send DM",    href: "/social/dm",  icon: Send },
-  { label: "Chat",       href: "/chat",       icon: MessageCircle },
-  { label: "Clients",    href: "/clients",    icon: Building2 },
-  { label: "Users",      href: "/users",      icon: Users,           module: "users" },
-  { label: "Roles",      href: "/roles",      icon: ShieldCheck,     module: "roles" },
+  { label: "Teams",         href: "/teams",          icon: UsersRound,      module: "teams" },
+  { label: "Leader Desk",   href: "/leader",         icon: ClipboardCheck },
+  { label: "AI Queries",    href: "/ai",             icon: Sparkles,        module: "ai" },
+  { label: "Publish",       href: "/social",         icon: Share2,                              hidden: true },
+  { label: "Send DM",       href: "/social/dm",      icon: Send,                                hidden: true },
+  { label: "Chat",          href: "/chat",           icon: MessageCircle },
+  { label: "Clients",       href: "/clients",        icon: Building2,                           hidden: true },
+  { label: "Users",         href: "/users",          icon: Users,           module: "users" },
+  { label: "Roles",         href: "/roles",          icon: ShieldCheck,     module: "roles" },
 ];
 
 const BOTTOM_ITEMS = [
-  { label: "API Keys",       href: "/settings/api-keys",      icon: Key        },
-  { label: "Custom Metrics", href: "/settings/custom-metrics", icon: Calculator },
-  { label: "Settings",       href: "/settings",               icon: Settings,  module: "settings" },
+  { label: "API Keys",       href: "/settings/api-keys",       icon: Key,        hidden: true },
+  { label: "Custom Metrics", href: "/settings/custom-metrics", icon: Calculator, hidden: true },
+  { label: "Settings",       href: "/settings",                icon: Settings,   module: "settings" },
 ];
 
 interface NavItemProps {
@@ -179,11 +179,12 @@ function SidebarContent({
 
   // Filter nav items the user can see
   const visibleNav = NAV_ITEMS.filter((item) =>
+    !item.hidden &&
     (!item.module || hasPermission(item.module, "view")) &&
     (item.href !== "/leader" || showLeaderDesk)
   );
   const visibleBottom = BOTTOM_ITEMS.filter((item) =>
-    !item.module || hasPermission(item.module, "view")
+    !item.hidden && (!item.module || hasPermission(item.module, "view"))
   );
 
   const initials = user?.name
