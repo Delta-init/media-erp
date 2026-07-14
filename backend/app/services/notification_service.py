@@ -68,7 +68,7 @@ async def _send_email_if_opted_in(
             return  # No SMTP configured yet
 
         prefs = await db["notification_prefs"].find_one({"user_id": user_id})
-        if not (prefs or {}).get("email_enabled", False):
+        if not (prefs or {}).get("email_enabled", True):
             return
         email_types = (prefs or {}).get("email_types", {})
         if notif_type in email_types and not email_types[notif_type]:
