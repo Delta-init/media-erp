@@ -46,7 +46,7 @@ import {
 
 const NAV_ITEMS = [
   { label: "Overview",      href: "/dashboard",      icon: LayoutDashboard, module: "dashboard" },
-  { label: "Connectors",    href: "/connectors",     icon: Cable,           module: "connectors" },
+  { label: "Connectors",    href: "/connectors",     icon: Cable,           module: "connectors", hidden: true },
   { label: "Reports",       href: "/reports",        icon: TrendingUp,      module: "reports",  hidden: true },
   { label: "Analytics",     href: "/analytics",      icon: BarChart2,                           hidden: true },
   { label: "Campaigns",     href: "/campaigns",      icon: Target,          module: "campaigns" },
