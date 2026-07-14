@@ -388,6 +388,8 @@ async def edit_task(
     updates = body.model_dump(exclude_none=True)
     new_status = updates.get("status")
     destination_team_id = updates.pop("destination_team_id", None)
+    next_leader_id   = updates.pop("next_leader_id", None)
+    next_leader_name = updates.pop("next_leader_name", None)
 
     try:
         oid = ObjectId(task_id)
@@ -476,8 +478,8 @@ async def edit_task(
             "description": task.get("description", ""),
             "priority": task.get("priority", "medium"),
             "status": "pending",
-            "assigned_to": "",
-            "assigned_to_name": "",
+            "assigned_to": next_leader_id or "",
+            "assigned_to_name": next_leader_name or "",
             "due_date": None,
             "team_id": destination_team_id,
             "attachments": task.get("attachments", []),
@@ -491,6 +493,7 @@ async def edit_task(
             "former_team_name": former_team_name,
         })
         # Notify the destination team's leaders + elevated roles about the new task
+        # If assigned to a specific leader, also send them a task_assigned notification
         from app.services.project_service import _serialize
         routed_task = await db["project_tasks"].find_one({"_id": routed_result.inserted_id})
         if routed_task:
@@ -499,6 +502,14 @@ async def edit_task(
                 str(current_user["_id"]),
                 current_user.get("name", ""),
             )
+            if next_leader_id:
+                from app.services.notification_service import push_notification
+                await push_notification(
+                    db, next_leader_id, "task_assigned",
+                    "Task assigned to you",
+                    f'"{task["title"]}" has been approved and assigned to you.',
+                    {"task_id": str(routed_result.inserted_id), "task_title": task["title"]},
+                )
 
     return success_response(data=task, message="Task updated")
 

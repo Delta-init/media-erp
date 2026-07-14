@@ -382,6 +382,13 @@ export default function SocialDMPage() {
   }
 
   // ── Effects ────────────────────────────────────────────────────────────────
+  // Auto-select first connector when connectors load (avoids "Select connector" error)
+  useEffect(() => {
+    if (!connectorId && activeConnectors.length > 0) {
+      setConnectorId(activeConnectors[0].id);
+    }
+  }, [activeConnectors, connectorId]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);

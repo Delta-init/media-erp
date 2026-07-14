@@ -6,12 +6,15 @@ Provides helpers used by:
   - notifications router (FastAPI, async Motor)
 """
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from bson import ObjectId
 from bson.errors import InvalidId
 
 from app.models.notification import notification_doc
+
+logger = logging.getLogger(__name__)
 
 
 # ── Sync helpers (used by Celery / sync_service) ─────────────────────────────
@@ -65,10 +68,8 @@ async def _send_email_if_opted_in(
             return  # No SMTP configured yet
 
         prefs = await db["notification_prefs"].find_one({"user_id": user_id})
-        # Master switch — default OFF (user must opt in)
         if not (prefs or {}).get("email_enabled", False):
             return
-        # Per-type switch — default ON when master is on
         email_types = (prefs or {}).get("email_types", {})
         if notif_type in email_types and not email_types[notif_type]:
             return
@@ -78,8 +79,8 @@ async def _send_email_if_opted_in(
             return
 
         await send_email_db(db, user["email"], f"mediaERP: {title}", _notif_email_html(title, message))
-    except Exception:
-        pass  # email errors must never surface to the caller
+    except Exception as _e:
+        logger.error("Email notification failed for user %s / type %s: %s", user_id, notif_type, _e, exc_info=True)
 
 
 def _notif_email_html(title: str, message: str) -> str:

@@ -73,10 +73,11 @@ def _send_sync(to: str, subject: str, html_body: str, cfg: Optional[dict] = None
                 server.login(username, password)
                 server.sendmail(from_email, [to], msg.as_string())
         else:
-            # Port 587 (or other) — plain connect then STARTTLS upgrade
+            # Port 587 always requires STARTTLS (Gmail/standard); other ports
+            # respect the use_tls flag from the DB config.
             with smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT) as server:
                 server.ehlo()
-                if use_tls:
+                if use_tls or port == 587:
                     server.starttls(context=ctx)
                     server.ehlo()
                 server.login(username, password)

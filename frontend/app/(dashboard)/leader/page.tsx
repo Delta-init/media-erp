@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLeaderQueue, useUpdateTask, type LeaderTeam } from "@/hooks/useProjects";
-import { useAllTeams } from "@/hooks/useTeams";
+import { useAllTeams, useAssignableUsers } from "@/hooks/useTeams";
 import { TaskDetailModal } from "@/components/projects/TaskDetailModal";
 import type { Task } from "@/types/project";
 import { PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
@@ -22,12 +22,21 @@ type Tab = "review" | "assign" | "reedit";
 
 function ReeditModal({ task, onClose }: { task: Task; onClose: () => void }) {
   const [reason, setReason] = useState("");
+  const [leaderId, setLeaderId] = useState("");
   const update = useUpdateTask();
+  const { data: assignable = [] } = useAssignableUsers();
+  const leaders = assignable.filter((u) => u.role_name === "Team Leader");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!reason.trim()) return;
-    await update.mutateAsync({ id: task.id, payload: { status: "reedit", reedit_reason: reason.trim() } });
+    const payload: Record<string, string> = { status: "reedit", reedit_reason: reason.trim() };
+    if (leaderId) {
+      const leader = leaders.find((l) => l.id === leaderId);
+      payload.assigned_to = leaderId;
+      payload.assigned_to_name = leader?.name ?? "";
+    }
+    await update.mutateAsync({ id: task.id, payload });
     toast.success("Task sent to reedit");
     onClose();
   }
@@ -60,6 +69,27 @@ function ReeditModal({ task, onClose }: { task: Task; onClose: () => void }) {
               required
             />
           </div>
+          {leaders.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">
+                Assign to leader <span className="text-muted-foreground font-normal">(optional)</span>
+              </label>
+              <p className="text-xs text-muted-foreground">Route this reedit to a specific leader for reassignment.</p>
+              <div className="relative">
+                <select
+                  value={leaderId}
+                  onChange={(e) => setLeaderId(e.target.value)}
+                  className="w-full appearance-none rounded-lg border bg-background px-3 py-2 pr-8 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                >
+                  <option value="">No specific leader</option>
+                  {leaders.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+              </div>
+            </div>
+          )}
           <div className="flex justify-end gap-3 pt-1">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={!reason.trim() || update.isPending}
@@ -78,16 +108,28 @@ function ReeditModal({ task, onClose }: { task: Task; onClose: () => void }) {
 
 function ApproveRouteModal({ task, onClose }: { task: Task; onClose: () => void }) {
   const [destTeamId, setDestTeamId] = useState("");
+  const [nextLeaderId, setNextLeaderId] = useState("");
   const update = useUpdateTask();
   const { data: allTeams = [] } = useAllTeams();
+  const { data: assignable = [] } = useAssignableUsers();
+  const leaders = assignable.filter((u) => u.role_name === "Team Leader");
 
   async function confirm() {
-    const payload: { status: string; destination_team_id?: string } = { status: "approved" };
+    const payload: Record<string, string> = { status: "approved" };
     if (destTeamId) payload.destination_team_id = destTeamId;
+    if (destTeamId && nextLeaderId) {
+      const leader = leaders.find((l) => l.id === nextLeaderId);
+      payload.next_leader_id = nextLeaderId;
+      payload.next_leader_name = leader?.name ?? "";
+    }
     await update.mutateAsync({ id: task.id, payload });
     if (destTeamId) {
       const teamName = allTeams.find((t) => t.id === destTeamId)?.name ?? "the selected team";
-      toast.success(`Approved — copy sent to ${teamName}`);
+      const leaderName = nextLeaderId ? leaders.find((l) => l.id === nextLeaderId)?.name : null;
+      toast.success(leaderName
+        ? `Approved — copy sent to ${leaderName} (${teamName})`
+        : `Approved — copy sent to ${teamName}`
+      );
     } else {
       toast.success("Task approved");
     }
@@ -121,7 +163,7 @@ function ApproveRouteModal({ task, onClose }: { task: Task; onClose: () => void 
             <div className="relative">
               <select
                 value={destTeamId}
-                onChange={(e) => setDestTeamId(e.target.value)}
+                onChange={(e) => { setDestTeamId(e.target.value); setNextLeaderId(""); }}
                 className="w-full appearance-none rounded-lg border bg-background px-3 py-2 pr-8 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
               >
                 <option value="">No routing — approve only</option>
@@ -132,6 +174,29 @@ function ApproveRouteModal({ task, onClose }: { task: Task; onClose: () => void 
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             </div>
           </div>
+          {destTeamId && leaders.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">
+                Assign to leader <span className="text-muted-foreground font-normal">(optional)</span>
+              </label>
+              <p className="text-xs text-muted-foreground">
+                The routed copy will be directly assigned to this leader.
+              </p>
+              <div className="relative">
+                <select
+                  value={nextLeaderId}
+                  onChange={(e) => setNextLeaderId(e.target.value)}
+                  className="w-full appearance-none rounded-lg border bg-background px-3 py-2 pr-8 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                >
+                  <option value="">Leave unassigned</option>
+                  {leaders.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex justify-end gap-3 border-t px-5 py-4">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
