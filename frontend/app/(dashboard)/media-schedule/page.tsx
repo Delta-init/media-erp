@@ -1058,7 +1058,7 @@ export default function MediaSchedulePage() {
   function openEditFromDetail() { setEditTask(detailTask); setDetailTask(null); }
 
   const selectCls =
-    "rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-ring";
+    "w-full sm:w-auto max-w-full min-w-0 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-ring";
 
   // ── 3-tab switcher ─────────────────────────────────────────────────────────
   const TABS = [
@@ -1073,7 +1073,7 @@ export default function MediaSchedulePage() {
         title="Media Schedule"
         subtitle="Plan and assign media tasks on a timeline"
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => setActiveModal("task")}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground transition-colors shadow-sm">
               <ClipboardList className="size-3.5" /> New Task
@@ -1105,7 +1105,7 @@ export default function MediaSchedulePage() {
         </div>
         <Button size="sm" variant="outline" onClick={goToday}>Today</Button>
 
-        <div className="flex-1" />
+        <div className="hidden md:block md:flex-1" />
 
         <div className="flex rounded-lg border bg-card overflow-hidden text-xs font-medium">
           {(["both", "start", "due"] as const).map((v) => (

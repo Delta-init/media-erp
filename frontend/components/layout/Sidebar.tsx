@@ -57,7 +57,7 @@ const NAV_ITEMS = [
   { label: "Media Schedule", href: "/media-schedule", icon: CalendarClock },
   { label: "Teams",         href: "/teams",          icon: UsersRound,      module: "teams" },
   { label: "Leader Desk",   href: "/leader",         icon: ClipboardCheck },
-  { label: "AI Queries",    href: "/ai",             icon: Sparkles,        module: "ai" },
+  { label: "AI Queries",    href: "/ai",             icon: Sparkles,        module: "ai", hidden: true },
   { label: "Publish",       href: "/social",         icon: Share2,                              hidden: true },
   { label: "Send DM",       href: "/social/dm",      icon: Send,                                hidden: true },
   { label: "Chat",          href: "/chat",           icon: MessageCircle },

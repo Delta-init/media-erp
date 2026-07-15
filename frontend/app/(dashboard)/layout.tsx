@@ -7,6 +7,7 @@ import { Glasses, LogOut } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { useOnboardingStatus, useCompleteOnboarding, useStopImpersonation } from "@/hooks/useAuth";
 
@@ -115,6 +116,9 @@ export default function DashboardLayout({
           />
         )}
       </AnimatePresence>
+
+      {/* Install-app prompt (PWA) */}
+      <PWAInstallPrompt />
     </div>
   );
 }

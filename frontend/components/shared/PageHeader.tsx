@@ -14,7 +14,7 @@ export default function PageHeader({ title, subtitle, action }: PageHeaderProps)
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
-      className="flex items-start justify-between gap-4"
+      className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
     >
       <div>
         <h1 className="text-2xl font-extrabold tracking-tight">{title}</h1>

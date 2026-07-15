@@ -588,12 +588,12 @@ export default function LeaderPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 rounded-xl bg-muted/50 p-1 border w-fit">
+      <div className="flex gap-1 rounded-xl bg-muted/50 p-1 border w-fit max-w-full overflow-x-auto">
         {tabs.map(({ id, icon, label, count, danger }) => (
           <button
             key={id} onClick={() => setTab(id)}
             className={cn(
-              "flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all",
+              "flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-all sm:px-4",
               tab === id ? "bg-card text-foreground shadow-sm border" : "text-muted-foreground hover:text-foreground"
             )}
           >
