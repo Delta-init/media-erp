@@ -1,17 +1,21 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
   Mail, Briefcase, ShieldCheck, Calendar, Loader2,
-  User as UserIcon, KeyRound, LogOut, BadgeCheck,
+  User as UserIcon, KeyRound, LogOut, BadgeCheck, Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { useMe, useUpdateProfile, useUpdatePassword, useLogout } from "@/hooks/useAuth";
+import { useNotificationPrefs, useUpdateNotificationPrefs } from "@/hooks/useNotificationPrefs";
+import { NOTIF_DEFS, ROLE_LABEL, getNotifCategory } from "@/lib/notifications";
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -49,6 +53,118 @@ function Field({ icon, label, value }: { icon: React.ReactNode; label: string; v
         <p className="truncate text-sm font-medium">{value || "—"}</p>
       </div>
     </div>
+  );
+}
+
+// ── Toggle switch ─────────────────────────────────────────────────────────────
+
+function Toggle({
+  checked, onChange, label, desc, disabled,
+}: { checked: boolean; onChange: () => void; label: string; desc?: string; disabled?: boolean }) {
+  return (
+    <div className={cn("flex items-center justify-between gap-3 py-2.5", disabled && "opacity-50")}>
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{label}</p>
+        {desc && <p className="text-xs text-muted-foreground">{desc}</p>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={onChange}
+        className={cn(
+          "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+          checked ? "bg-primary" : "bg-muted-foreground/30",
+          disabled && "cursor-not-allowed"
+        )}
+      >
+        <span
+          className={cn(
+            "absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform",
+            checked ? "translate-x-[22px]" : "translate-x-0.5"
+          )}
+        />
+      </button>
+    </div>
+  );
+}
+
+// ── Email notifications card ──────────────────────────────────────────────────
+
+function EmailNotificationsCard() {
+  const user = useAuthStore((s) => s.user);
+  const { data, isLoading } = useNotificationPrefs();
+  const update = useUpdateNotificationPrefs();
+
+  const [enabled, setEnabled] = useState(true);
+  const [types, setTypes] = useState<Record<string, boolean>>({});
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    if (data) {
+      setEnabled(data.email_enabled ?? true);
+      setTypes(data.email_types ?? {});
+      setDirty(false);
+    }
+  }, [data]);
+
+  const category = getNotifCategory(user);
+  const defs = NOTIF_DEFS[category];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.12 }}
+      className="rounded-2xl border bg-card p-6 shadow-sm"
+    >
+      <div className="mb-1 flex items-center gap-2">
+        <Bell className="size-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Email Notifications</h2>
+      </div>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Choose which updates land in your inbox ({ROLE_LABEL[category]}).
+      </p>
+
+      {isLoading ? (
+        <div className="flex justify-center py-6"><Loader2 className="size-5 animate-spin text-muted-foreground/50" /></div>
+      ) : (
+        <div className="divide-y">
+          <Toggle
+            checked={enabled}
+            onChange={() => { setEnabled((v) => !v); setDirty(true); }}
+            label="Email notifications"
+            desc="Master switch — turn all email updates on or off"
+          />
+          {defs.map((d) => (
+            <Toggle
+              key={d.key}
+              checked={enabled ? (types[d.key] ?? true) : false}
+              disabled={!enabled}
+              onChange={() => { setTypes((p) => ({ ...p, [d.key]: !(p[d.key] ?? true) })); setDirty(true); }}
+              label={d.label}
+              desc={d.desc}
+            />
+          ))}
+        </div>
+      )}
+
+      <p className="mt-3 rounded-lg border bg-muted/20 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+        Always sent (can’t be turned off): password resets, account invitations, and system/security emails.
+      </p>
+
+      <div className="mt-4 flex justify-end">
+        <Button
+          size="sm"
+          onClick={() => update.mutate({ email_enabled: enabled, email_types: types }, { onSuccess: () => setDirty(false) })}
+          disabled={!dirty || update.isPending}
+        >
+          {update.isPending && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+          Save preferences
+        </Button>
+      </div>
+    </motion.div>
   );
 }
 
@@ -209,6 +325,9 @@ export default function ProfilePage() {
           </Button>
         </div>
       </motion.form>
+
+      {/* Email notifications */}
+      <EmailNotificationsCard />
 
       {/* Sign out */}
       <div className="flex justify-end">

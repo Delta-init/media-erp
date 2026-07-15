@@ -23,12 +23,15 @@ async def get_prefs(
     doc = await db["notification_prefs"].find_one({"user_id": uid})
     if doc:
         return success_response({
-            "email_enabled": doc.get("email_enabled", False),
+            # Default ON to match the send logic (_send_email_if_opted_in), which
+            # treats a missing pref as enabled — otherwise the UI showed OFF while
+            # emails were actually being sent.
+            "email_enabled": doc.get("email_enabled", True),
             "email_types":   doc.get("email_types", {t: True for t in _ALL_TYPES}),
         }, "Preferences retrieved")
-    # First-time default: master off, all individual types on so the user just flips one switch
+    # First-time default: everything on (matches actual send behaviour).
     return success_response({
-        "email_enabled": False,
+        "email_enabled": True,
         "email_types":   {t: True for t in _ALL_TYPES},
     }, "Preferences retrieved")
 

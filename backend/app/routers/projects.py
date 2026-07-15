@@ -62,7 +62,7 @@ async def _fire_notifications(
     task_title    = task.get("title") or "Task"
     reedit_reason = task.get("reedit_reason") or ""
     due_date      = task.get("due_date") or "Not set"
-    meta          = {"task_id": task_id, "task_title": task_title}
+    meta          = {"task_id": task_id, "task_title": task_title, "team_id": team_id}
 
     # Fetch assigned user's WhatsApp phone (optional — skipped if not set)
     assigned_phone = ""
@@ -123,9 +123,11 @@ async def _fire_notifications(
 
     # ── 2. Notify team leader(s) ──────────────────────────────────────────────
     leader_ids: list[str] = []
+    team_member_ids: list[str] = []
     if team_id and ObjectId.is_valid(team_id):
         team_doc = await db["teams"].find_one({"_id": ObjectId(team_id)})
         if team_doc:
+            team_member_ids = [m["user_id"] for m in team_doc.get("members", [])]
             leader_ids = [
                 m["user_id"]
                 for m in team_doc.get("members", [])
@@ -156,6 +158,8 @@ async def _fire_notifications(
             "role_name": {"$in": ["Admin", "Coordinator", "Super Admin"]},
         }).to_list(20)
         role_id_strs = [str(r["_id"]) for r in elevated_roles]
+        # Map role_id → role_name so we can scope Coordinators to their own teams.
+        role_name_by_id = {str(r["_id"]): r.get("role_name", "") for r in elevated_roles}
         if role_id_strs:
             elevated_users = await db["users"].find(
                 {"role_id": {"$in": role_id_strs}, "is_active": {"$ne": False}}
@@ -176,6 +180,10 @@ async def _fire_notifications(
                 uid = str(u["_id"])
                 if uid in (actor_id, assigned_to) or uid in leader_ids:
                     continue  # avoid duplicate / self-notify
+                # Coordinators only oversee the teams they belong to; Admin and
+                # Super Admin stay global (company-wide oversight).
+                if role_name_by_id.get(u.get("role_id", "")) == "Coordinator" and uid not in team_member_ids:
+                    continue
                 await push_notification(db, uid, ntype, ntitle, nmsg, meta)
 
 

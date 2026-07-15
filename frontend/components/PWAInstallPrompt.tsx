@@ -27,34 +27,52 @@ export default function PWAInstallPrompt() {
       (window.navigator as unknown as { standalone?: boolean }).standalone === true;
     if (standalone) return;
 
-    // Recently dismissed → respect it.
-    const dismissedAt = Number(localStorage.getItem(DISMISS_KEY) || 0);
-    if (dismissedAt && Date.now() - dismissedAt < DISMISS_DAYS * 86_400_000) return;
+    const recentlyDismissed = () => {
+      const at = Number(localStorage.getItem(DISMISS_KEY) || 0);
+      return at && Date.now() - at < DISMISS_DAYS * 86_400_000;
+    };
 
     // iOS has no beforeinstallprompt — show manual instructions instead.
     const ua = window.navigator.userAgent;
     const ios = /iphone|ipad|ipod/i.test(ua) && !(window as unknown as { MSStream?: unknown }).MSStream;
     if (ios) {
-      setIsIOS(true);
-      setShow(true);
+      if (!recentlyDismissed()) {
+        setIsIOS(true);
+        setShow(true);
+      }
       return;
     }
 
-    const onBeforeInstall = (e: Event) => {
-      e.preventDefault(); // stop the mini-infobar; we show our own UI
-      setDeferred(e as BeforeInstallPromptEvent);
-      // Respect a recent dismissal even if the browser re-fires the event.
-      const at = Number(localStorage.getItem(DISMISS_KEY) || 0);
-      if (at && Date.now() - at < DISMISS_DAYS * 86_400_000) return;
-      setShow(true);
+    const g = window as unknown as { __pwaPrompt?: BeforeInstallPromptEvent | null };
+
+    const reveal = () => {
+      const evt = g.__pwaPrompt;
+      if (!evt) return;
+      setDeferred(evt);
+      if (!recentlyDismissed()) setShow(true);
     };
+
+    // The event may have already fired (captured early in the root layout).
+    reveal();
+
+    // …or it may fire after mount.
+    const onBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      g.__pwaPrompt = e as BeforeInstallPromptEvent;
+      reveal();
+    };
+    const onInstallable = () => reveal();
     const onInstalled = () => setShow(false);
 
     window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("pwa-installable", onInstallable);
     window.addEventListener("appinstalled", onInstalled);
+    window.addEventListener("pwa-installed", onInstalled);
     return () => {
       window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("pwa-installable", onInstallable);
       window.removeEventListener("appinstalled", onInstalled);
+      window.removeEventListener("pwa-installed", onInstalled);
     };
   }, []);
 

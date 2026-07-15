@@ -49,7 +49,7 @@ async def push_notification(
         result = await db["notifications"].insert_one(doc)
         # Fire email in background — never blocks the request
         asyncio.create_task(
-            _send_email_if_opted_in(db, user_id, notification_type, title, message)
+            _send_email_if_opted_in(db, user_id, notification_type, title, message, metadata)
         )
         return str(result.inserted_id)
     except Exception:
@@ -57,15 +57,28 @@ async def push_notification(
 
 
 async def _send_email_if_opted_in(
-    db, user_id: str, notif_type: str, title: str, message: str
+    db, user_id: str, notif_type: str, title: str, message: str, metadata: dict | None = None
 ) -> None:
-    """Send an email notification if SMTP is configured and the user has opted in."""
+    """Send an email notification if SMTP is configured and both the user AND the
+    task's team have this type enabled.
+
+    Gate = SMTP configured AND user master-on AND user allows type AND team allows type.
+    A team leader can suppress a type team-wide via the team's `email_types` map.
+    """
     try:
         from app.utils.email import get_smtp_config, send_email_db
 
         smtp = await get_smtp_config(db)
         if not smtp:
             return  # No SMTP configured yet
+
+        # ── Team-level override (leader controls the team's emails) ──────────────
+        team_id = (metadata or {}).get("team_id")
+        if team_id and ObjectId.is_valid(team_id):
+            team = await db["teams"].find_one({"_id": ObjectId(team_id)}, {"email_types": 1})
+            team_types = (team or {}).get("email_types") or {}
+            if notif_type in team_types and not team_types[notif_type]:
+                return  # team leader suppressed this type for the whole team
 
         prefs = await db["notification_prefs"].find_one({"user_id": user_id})
         if not (prefs or {}).get("email_enabled", True):

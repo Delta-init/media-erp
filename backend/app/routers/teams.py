@@ -874,3 +874,70 @@ async def member_activity(
         "recent":      [_ser_task(t) for t in recent[:12]],
     }
     return success_response(data=report, message="Member activity retrieved")
+
+
+# ── Team-level email notification settings (leader/admin controls the team) ────
+
+_TEAM_EMAIL_TYPES = [
+    "task_assigned", "task_approved", "task_reedit", "due_date_reminder",
+    "pending_review", "team_task_assigned", "task_started", "task_break",
+]
+
+
+def _team_email_types(team: dict) -> dict:
+    """Resolve a team's email_types, defaulting every type to True (enabled)."""
+    stored = team.get("email_types") or {}
+    return {t: bool(stored.get(t, True)) for t in _TEAM_EMAIL_TYPES}
+
+
+@router.get("/{team_id}/email-prefs")
+async def get_team_email_prefs(
+    team_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """A team's email-notification toggles. Visible to the team's leader or admins."""
+    team, err = await _get_team_or_404(db, team_id)
+    if err:
+        return err
+    caller_id = str(current_user["_id"])
+    if not (_can_see_all_teams(current_user) or _is_leader_of(team, caller_id)):
+        return error_response("Only a team leader or admin can view team email settings", status_code=403)
+    return success_response(data={"email_types": _team_email_types(team)}, message="Team email preferences retrieved")
+
+
+@router.put("/{team_id}/email-prefs")
+async def update_team_email_prefs(
+    team_id: str,
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Turn email notification types on/off for the whole team. A disabled type is
+    suppressed for every member of the team (see notification_service gate).
+    """
+    team, err = await _get_team_or_404(db, team_id)
+    if err:
+        return err
+    caller_id = str(current_user["_id"])
+    if not (_can_see_all_teams(current_user) or _is_leader_of(team, caller_id)):
+        return error_response("Only a team leader or admin can change team email settings", status_code=403)
+
+    incoming = body.get("email_types")
+    if not isinstance(incoming, dict):
+        return error_response("An 'email_types' object is required", status_code=422)
+
+    merged = {**(team.get("email_types") or {})}
+    for t in _TEAM_EMAIL_TYPES:
+        if t in incoming:
+            merged[t] = bool(incoming[t])
+
+    await db["teams"].update_one(
+        {"_id": team["_id"]},
+        {"$set": {"email_types": merged, "updated_at": datetime.now(timezone.utc)}},
+    )
+    return success_response(
+        data={"email_types": {t: bool(merged.get(t, True)) for t in _TEAM_EMAIL_TYPES}},
+        message="Team email preferences saved",
+    )

@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, Crown, User, ArrowLeft, Plus, Trash2,
   X, Loader2, Search, Shield, ChevronRight,
   CheckCircle2, Clock, AlertCircle, BarChart3,
-  MessageCircle, Settings, TrendingUp,
+  MessageCircle, Settings, TrendingUp, Bell,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
@@ -23,6 +23,9 @@ import {
   type TeamMember, type ReportPeriod,
 } from "@/hooks/useTeams";
 import { UserPicker } from "@/components/teams/UserPicker";
+import { useTeamEmailPrefs, useUpdateTeamEmailPrefs } from "@/hooks/useTeamEmailPrefs";
+import { TEAM_EMAIL_TYPES } from "@/lib/notifications";
+import { cn } from "@/lib/utils";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -473,7 +476,10 @@ export default function TeamDetailPage() {
 
       {/* Settings tab */}
       {tab === "settings" && canManage && (
-        <TeamSettingsPanel team={team} />
+        <div className="space-y-6">
+          <TeamSettingsPanel team={team} />
+          <TeamEmailPrefsCard teamId={teamId} />
+        </div>
       )}
 
       <AnimatePresence>
@@ -486,6 +492,76 @@ export default function TeamDetailPage() {
           />
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ── Team email notification settings (leader/admin) ───────────────────────────
+
+function TeamEmailPrefsCard({ teamId }: { teamId: string }) {
+  const { data, isLoading } = useTeamEmailPrefs(teamId);
+  const update = useUpdateTeamEmailPrefs(teamId);
+  const [types, setTypes] = useState<Record<string, boolean>>({});
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    if (data) { setTypes(data); setDirty(false); }
+  }, [data]);
+
+  return (
+    <div className="rounded-2xl border bg-card p-6 space-y-4 max-w-lg">
+      <div className="flex items-center gap-2">
+        <Bell className="size-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Team Email Notifications</h2>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Turn email types on or off for the whole team. A type turned off here is
+        suppressed for every member — even if they enabled it in their own profile.
+      </p>
+
+      {isLoading ? (
+        <div className="flex justify-center py-6"><Loader2 className="size-5 animate-spin text-muted-foreground/50" /></div>
+      ) : (
+        <div className="divide-y">
+          {TEAM_EMAIL_TYPES.map((d) => {
+            const checked = types[d.key] ?? true;
+            return (
+              <div key={d.key} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{d.label}</p>
+                  <p className="text-xs text-muted-foreground">{d.desc}</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={checked}
+                  onClick={() => { setTypes((p) => ({ ...p, [d.key]: !checked })); setDirty(true); }}
+                  className={cn(
+                    "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+                    checked ? "bg-primary" : "bg-muted-foreground/30"
+                  )}
+                >
+                  <span className={cn(
+                    "absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform",
+                    checked ? "translate-x-[22px]" : "translate-x-0.5"
+                  )} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          onClick={() => update.mutate(types, { onSuccess: () => setDirty(false) })}
+          disabled={!dirty || update.isPending}
+        >
+          {update.isPending && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+          Save
+        </Button>
+      </div>
     </div>
   );
 }
