@@ -27,6 +27,24 @@ logger = logging.getLogger(__name__)
 _SMTP_TIMEOUT = 20  # seconds
 
 
+def _load_smtp_config_sync() -> Optional[dict]:
+    """
+    Read SMTP config from the `email_settings` collection using the SYNCHRONOUS
+    PyMongo client, so it works from `_send_sync` (thread pool) regardless of
+    which caller/event-loop triggered the send. Returns None if not configured
+    (callers then fall back to `.env`). This is what makes `send_email()` use the
+    DB config too — not just `send_email_db()`.
+    """
+    try:
+        from app.database import get_sync_db
+        doc = get_sync_db()["email_settings"].find_one({"_id": "smtp"})
+        if doc and doc.get("host") and doc.get("username") and doc.get("password"):
+            return doc
+    except Exception:
+        pass
+    return None
+
+
 def _log_email(to: str, subject: str, status: str, error: Optional[str], from_email: str, category: str) -> None:
     """
     Record an email send attempt in the `email_logs` collection.
@@ -65,7 +83,13 @@ async def get_smtp_config(db) -> Optional[dict]:
 
 
 def _send_sync(to: str, subject: str, html_body: str, cfg: Optional[dict] = None, category: str = "general") -> None:
-    """Blocking SMTP send — runs in a thread-pool executor."""
+    """Blocking SMTP send — runs in a thread-pool executor.
+
+    Config priority: explicit `cfg` (from `send_email_db`) → DB `email_settings`
+    (read here via sync client) → `.env`. So every caller uses the DB SMTP.
+    """
+    if cfg is None:
+        cfg = _load_smtp_config_sync()
     host       = (cfg or {}).get("host")       or settings.mail_server
     port       = int((cfg or {}).get("port")   or settings.mail_port or 587)
     username   = (cfg or {}).get("username")   or settings.mail_username

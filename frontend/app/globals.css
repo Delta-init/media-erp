@@ -348,3 +348,29 @@
   z-index: 10;
   animation: skeletonSweep 6s ease-in-out infinite;
 }
+/* ─────────────────────────────────────────────────────────────────────────
+   Mobile PWA fixes
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* iOS zooms the page when focusing a form control whose font-size < 16px.
+   Force 16px on small screens so focusing an input never triggers a zoom. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Installed PWA (standalone): the webview extends under the status bar / notch
+   (viewport-fit=cover). Pad the top so content clears it. env() is 0 when there
+   is no inset, so this is a no-op in a normal browser tab. */
+.pwa-safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+@media (display-mode: standalone) {
+  body {
+    /* also pad the bottom home-indicator area on gesture-nav phones */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

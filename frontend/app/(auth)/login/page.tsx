@@ -217,7 +217,7 @@ export default function LoginPage() {
                   onMouseEnter={e => (e.currentTarget.style.opacity = "1")}
                   onMouseLeave={e => (e.currentTarget.style.opacity = "0.8")}
                 >
-                  Forgot?
+                  Forgot password?
                 </Link>
               </div>
               <div style={{ position: "relative" }}>
@@ -291,24 +291,6 @@ export default function LoginPage() {
               </button>
             </motion.div>
           </form>
-
-          {/* Sign-up link */}
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.36, duration: 0.35 }}
-            style={{ marginTop: 24, textAlign: "center", fontSize: 13, color: "hsl(215 16% 55%)" }}
-          >
-            Don&apos;t have an account?{" "}
-            <Link
-              href="/register"
-              style={{ color: BLUE, fontWeight: 700, textDecoration: "none" }}
-              onMouseEnter={e => (e.currentTarget.style.textDecoration = "underline")}
-              onMouseLeave={e => (e.currentTarget.style.textDecoration = "none")}
-            >
-              Sign up
-            </Link>
-          </motion.p>
         </div>
       </div>
     </motion.div>
