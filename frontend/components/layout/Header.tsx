@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 import { Menu, Search } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useUiStore } from "@/stores/uiStore";
 import { useAuthStore } from "@/stores/authStore";
-import { useLogout } from "@/hooks/useAuth";
 import { headerVariants } from "@/lib/animations";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
@@ -22,6 +22,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/users":      "Users",
   "/roles":      "Roles",
   "/settings":   "Settings",
+  "/profile":    "Profile",
 };
 
 function getPageLabel(pathname: string): string {
@@ -36,7 +37,6 @@ function getPageLabel(pathname: string): string {
 export function Header() {
   const { setMobileOpen } = useUiStore();
   const user = useAuthStore((s) => s.user);
-  const logout = useLogout();
   const pathname = usePathname();
   const pageLabel = getPageLabel(pathname);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -102,16 +102,16 @@ export function Header() {
         {/* Notifications */}
         <NotificationBell />
 
-        {/* Avatar */}
-        <motion.button
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
-          onClick={() => logout.mutate()}
-          title={`Signed in as ${user?.email ?? ""}\nClick to sign out`}
-          className="ml-1 flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity"
-        >
-          {initials}
-        </motion.button>
+        {/* Avatar → profile */}
+        <motion.div whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }} className="ml-1">
+          <Link
+            href="/profile"
+            title={`Signed in as ${user?.email ?? ""}\nView your profile`}
+            className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold hover:opacity-90 transition-opacity"
+          >
+            {initials}
+          </Link>
+        </motion.div>
       </div>
     </motion.header>
 
