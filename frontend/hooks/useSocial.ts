@@ -3,23 +3,24 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import api from "@/lib/axios";
+import { uploadFilesDirect } from "@/lib/directUpload";
 
 // ── Media Upload ──────────────────────────────────────────────────────────────
 
+/**
+ * Upload a single media file **directly to R2** (via a pre-signed URL) and
+ * return its public URL. Used by the social post composer.
+ */
 export function useUploadMedia() {
   return useMutation({
     mutationFn: async (file: File): Promise<{ url: string; filename: string; size: number }> => {
-      const form = new FormData();
-      form.append("file", file);
-      const { data } = await api.post<{ success: boolean; data: { url: string; filename: string; size: number } }>(
-        "/media/upload",
-        form,
-        { headers: { "Content-Type": "multipart/form-data" } }
-      );
-      return data.data;
+      const [a] = await uploadFilesDirect([file], { prefix: "social" });
+      return { url: a.url, filename: a.filename, size: a.size };
     },
     onError(err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      const msg =
+        (err as { message?: string })?.message ||
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg ?? "Failed to upload file");
     },
   });

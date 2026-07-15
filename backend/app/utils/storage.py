@@ -52,6 +52,92 @@ def _safe_key(filename: str, prefix: str = "attachments") -> str:
     return f"{prefix}/{uuid.uuid4().hex}{suffix}"
 
 
+def presign_put(
+    filename: str,
+    content_type: str = "application/octet-stream",
+    prefix: str = "attachments",
+    expires: int = 3600,
+) -> dict:
+    """
+    Generate a short-lived pre-signed URL the browser can PUT a file to
+    **directly** (bytes never pass through this backend).
+
+    Returns:
+        {upload_url, method, headers, public_url, key, filename,
+         content_type, backend}
+
+    When R2 is not configured, falls back to a backend PUT endpoint that
+    stores to local disk (dev only) — same interface, so the frontend flow
+    is identical regardless of backend.
+    """
+    original_name = Path(filename or "file").name
+    key = _safe_key(original_name, prefix)
+    content_type = content_type or "application/octet-stream"
+
+    if settings.r2_enabled:
+        client = _get_r2_client()
+        upload_url = client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": settings.r2_bucket,
+                "Key": key,
+                "ContentType": content_type,
+            },
+            ExpiresIn=expires,
+        )
+        base = (settings.r2_public_url or "").rstrip("/")
+        public_url = f"{base}/{key}" if base else key
+        return {
+            "upload_url": upload_url,
+            "method": "PUT",
+            # The browser MUST send exactly this Content-Type or the signature fails.
+            "headers": {"Content-Type": content_type},
+            "public_url": public_url,
+            "key": key,
+            "filename": original_name,
+            "content_type": content_type,
+            "backend": "r2",
+        }
+
+    # ── Local-disk fallback (dev) — PUT lands on the backend's /media/local-blob ─
+    base = settings.public_base_url.rstrip("/")
+    unique_name = Path(key).name
+    return {
+        "upload_url": f"{base}/api/v1/media/local-blob/{key}",
+        "method": "PUT",
+        "headers": {"Content-Type": content_type},
+        "public_url": f"{base}/uploads/{unique_name}",
+        "key": key,
+        "filename": original_name,
+        "content_type": content_type,
+        "backend": "local",
+    }
+
+
+def ensure_bucket_cors(origins: list[str]) -> dict:
+    """
+    Configure the R2 bucket's CORS policy so browsers on the given origins may
+    PUT (upload) directly via pre-signed URLs and GET/HEAD (view) objects.
+    Idempotent — safe to call repeatedly. No-op when R2 is not configured.
+    """
+    if not settings.r2_enabled:
+        return {"ok": False, "reason": "R2 not enabled"}
+    client = _get_r2_client()
+    cors = {
+        "CORSRules": [
+            {
+                "AllowedOrigins": origins,
+                "AllowedMethods": ["GET", "PUT", "HEAD"],
+                "AllowedHeaders": ["*"],
+                "ExposeHeaders": ["ETag"],
+                "MaxAgeSeconds": 3600,
+            }
+        ]
+    }
+    client.put_bucket_cors(Bucket=settings.r2_bucket, CORSConfiguration=cors)
+    return {"ok": True, "origins": origins}
+
+
 def upload_bytes(
     contents: bytes,
     filename: str,

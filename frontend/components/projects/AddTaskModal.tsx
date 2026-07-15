@@ -1,14 +1,11 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  X, Plus, Paperclip, Upload, Loader2, File as FileIcon,
-  FileText, FileImage, FileVideo, Trash2, Link,
-} from "lucide-react";
+import { X, Plus, Paperclip, Link } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCreateTask } from "@/hooks/useProjects";
-import { useUploadAttachments } from "@/hooks/useUpload";
+import { FileUploader } from "@/components/shared/FileUploader";
 import { useTeams, useTeam } from "@/hooks/useTeams";
 import { useUsersList } from "@/hooks/useUsers";
 import { useAuthStore } from "@/stores/authStore";
@@ -22,24 +19,8 @@ interface Props {
   defaultTeamId?: string;
 }
 
-function fileIcon(contentType: string) {
-  if (contentType.startsWith("image/")) return <FileImage className="size-4 text-blue-500" />;
-  if (contentType.startsWith("video/")) return <FileVideo className="size-4 text-purple-500" />;
-  if (contentType.includes("pdf") || contentType.includes("document") || contentType.includes("text"))
-    return <FileText className="size-4 text-orange-500" />;
-  return <FileIcon className="size-4 text-muted-foreground" />;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 export function AddTaskModal({ open, onClose, defaultStatus = "pending", defaultTeamId = "" }: Props) {
   const create = useCreateTask();
-  const upload = useUploadAttachments();
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle]           = useState("");
   const [description, setDesc]      = useState("");
@@ -80,12 +61,6 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
   }
 
   function close() { reset(); onClose(); }
-
-  async function handleFiles(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) return;
-    const uploaded = await upload.mutateAsync(Array.from(fileList));
-    setAttachments((prev) => [...prev, ...uploaded]);
-  }
 
   function addLink() {
     let url = linkUrl.trim();
@@ -267,50 +242,22 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
                   <Paperclip className="size-3" /> Attachments
                 </label>
 
-                <input
-                  ref={fileRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
-                />
+                {/* Direct-to-R2 uploader (files up to 1 GB) + combined file/link list */}
+                <FileUploader value={attachments} onChange={setAttachments} label="Upload files" />
 
-                {/* Two-button row */}
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => fileRef.current?.click()}
-                    disabled={upload.isPending}
-                    className={cn(
-                      "flex items-center justify-center gap-2 rounded-lg border-2 border-dashed py-3 transition-colors",
-                      upload.isPending
-                        ? "opacity-60 pointer-events-none border-border"
-                        : "border-border hover:border-primary/50 hover:bg-muted/30"
-                    )}
-                  >
-                    {upload.isPending
-                      ? <Loader2 className="size-4 text-primary animate-spin" />
-                      : <Upload className="size-4 text-muted-foreground" />
-                    }
-                    <span className="text-xs font-medium">
-                      {upload.isPending ? "Uploading…" : "Upload file"}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowLinkForm(v => !v)}
-                    className={cn(
-                      "flex items-center justify-center gap-2 rounded-lg border-2 border-dashed py-3 transition-colors",
-                      showLinkForm
-                        ? "border-primary/60 bg-primary/5 text-primary"
-                        : "border-border hover:border-primary/50 hover:bg-muted/30"
-                    )}
-                  >
-                    <Link className="size-4" />
-                    <span className="text-xs font-medium">Add link</span>
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowLinkForm(v => !v)}
+                  className={cn(
+                    "flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed py-2.5 transition-colors",
+                    showLinkForm
+                      ? "border-primary/60 bg-primary/5 text-primary"
+                      : "border-border hover:border-primary/50 hover:bg-muted/30"
+                  )}
+                >
+                  <Link className="size-4" />
+                  <span className="text-xs font-medium">Add link</span>
+                </button>
 
                 {/* Inline link form */}
                 <AnimatePresence>
@@ -360,40 +307,6 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
                     </motion.div>
                   )}
                 </AnimatePresence>
-
-                {/* Attachment list */}
-                {attachments.length > 0 && (
-                  <div className="space-y-1.5">
-                    {attachments.map((a, i) => (
-                      <div key={`${a.key}-${i}`} className="flex items-center gap-2 rounded-lg border bg-muted/30 px-2.5 py-1.5">
-                        {a.content_type === "url"
-                          ? <Link className="size-4 text-blue-500 shrink-0" />
-                          : fileIcon(a.content_type)
-                        }
-                        <div className="flex-1 min-w-0">
-                          <a
-                            href={a.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs font-medium truncate block hover:underline"
-                          >
-                            {a.filename}
-                          </a>
-                          {a.content_type !== "url" && (
-                            <span className="text-[10px] text-muted-foreground">{formatSize(a.size)}</span>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                          className="p-1 rounded-md text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                        >
-                          <Trash2 className="size-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
 
               {/* Footer */}
@@ -401,7 +314,7 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
                 <Button type="button" variant="outline" size="sm" onClick={close}>
                   Cancel
                 </Button>
-                <Button type="submit" size="sm" disabled={!title.trim() || create.isPending || upload.isPending}>
+                <Button type="submit" size="sm" disabled={!title.trim() || create.isPending}>
                   {create.isPending ? "Creating…" : "Create Task"}
                 </Button>
               </div>

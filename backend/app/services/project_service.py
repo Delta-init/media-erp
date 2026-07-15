@@ -60,6 +60,76 @@ def _serialize(doc: dict) -> dict:
     return out
 
 
+async def get_chain_history(db: AsyncIOMotorDatabase, doc: dict) -> tuple[list[dict], list[dict]]:
+    """
+    Aggregate the full routing-chain history for a task.
+
+    A task that is routed to another team spawns a *new* task document (the
+    routed copy) linked by ``root_task_id``. To show the complete story —
+    who assigned, who worked, who approved, who sent it back, and across which
+    teams — we gather the root task plus every copy sharing that root, merge
+    their per-event ``history`` arrays, tag each event with the team it happened
+    in, order everything chronologically, and derive a compact ``team_flow``
+    (the ordered team "stops", e.g. video → content (reedit) → video → content
+    (approved)).
+
+    Returns ``(merged_history, team_flow)``.
+    """
+    root_id = str(doc.get("root_task_id") or doc["_id"])
+    try:
+        root_oid = ObjectId(root_id)
+    except Exception:
+        root_oid = doc["_id"]
+
+    chain = await db["project_tasks"].find(
+        {"$or": [{"_id": root_oid}, {"root_task_id": root_id}]}
+    ).to_list(200)
+    if not any(str(t["_id"]) == str(doc["_id"]) for t in chain):
+        chain.append(doc)
+
+    # Resolve team_id -> name for every team referenced in the chain / its events.
+    team_ids: set[str] = {t.get("team_id") for t in chain if t.get("team_id")}
+    for t in chain:
+        for e in t.get("history", []) or []:
+            if e.get("team_id"):
+                team_ids.add(e["team_id"])
+    name_map: dict[str, str] = {}
+    valid_ids = [ObjectId(i) for i in team_ids if i and ObjectId.is_valid(i)]
+    if valid_ids:
+        async for tm in db["teams"].find({"_id": {"$in": valid_ids}}, {"name": 1}):
+            name_map[str(tm["_id"])] = tm.get("name", "")
+
+    merged: list[dict] = []
+    for t in chain:
+        t_team = t.get("team_id") or ""
+        for e in t.get("history", []) or []:
+            tid = e.get("team_id") or t_team
+            merged.append({
+                "action":      e.get("action"),
+                "actor_id":    e.get("actor_id", ""),
+                "actor_name":  e.get("actor_name", ""),
+                "timestamp":   _dt_to_utc_iso(e.get("timestamp")),
+                "from_status": e.get("from_status"),
+                "to_status":   e.get("to_status"),
+                "note":        e.get("note"),
+                "team_id":     tid,
+                "team_name":   e.get("team_name") or name_map.get(tid, ""),
+            })
+    merged.sort(key=lambda x: x.get("timestamp") or "")
+
+    # team_flow — walk chronologically, opening a new stop each time the team
+    # changes; the stop's "outcome" is the last milestone reached in that team.
+    flow: list[dict] = []
+    for e in merged:
+        tname = e.get("team_name") or "—"
+        if not flow or flow[-1]["team_name"] != tname:
+            flow.append({"team_name": tname, "team_id": e.get("team_id", ""), "outcome": None})
+        if e.get("action") in ("approved", "reedit", "routed"):
+            flow[-1]["outcome"] = e["action"]
+
+    return merged, flow
+
+
 async def list_tasks(
     db: AsyncIOMotorDatabase,
     search: str = "",

@@ -1,22 +1,21 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  X, Paperclip, Upload, Loader2,
-  File as FileIcon, FileText, FileVideo,
-  Trash2, CheckCircle2, Send, Users, Calendar,
-  MessageSquare, ArrowRight, UserCircle2, ExternalLink,
+  X, Paperclip, Loader2,
+  CheckCircle2, Send, Users, Calendar,
+  MessageSquare, ArrowRight, UserCircle2,
   History, ClipboardCheck, Play, Pause, RotateCcw,
   UserPlus, GitBranch, Circle, AlertTriangle, BarChart2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUpdateTask, useTaskDetail } from "@/hooks/useProjects";
 import { TaskHistoryReport } from "@/components/projects/TaskHistoryReport";
-import { useUploadAttachments } from "@/hooks/useUpload";
+import { FileUploader } from "@/components/shared/FileUploader";
 import { useTeams } from "@/hooks/useTeams";
-import type { Task, Attachment, TaskHistoryEntry } from "@/types/project";
+import type { Task, Attachment, TaskHistoryEntry, TeamFlowStep } from "@/types/project";
 import { PRIORITY_META, BOARD_COLUMNS, assigneeLabel } from "@/types/project";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -26,12 +25,6 @@ interface Props {
   teamName?: string;
   readOnly?: boolean;
   onClose: () => void;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // ── History helpers ───────────────────────────────────────────────────────────
@@ -45,6 +38,7 @@ const ACTION_META: Record<string, { label: string; icon: React.ReactNode; color:
   approved:       { label: "Approved",               icon: <CheckCircle2 className="size-3.5" />, color: "text-green-600 bg-green-500/10 border-green-500/30" },
   reedit:         { label: "Sent for Revision",      icon: <RotateCcw className="size-3.5" />,    color: "text-rose-600 bg-rose-500/10 border-rose-500/30" },
   routed:         { label: "Routed to Team",         icon: <GitBranch className="size-3.5" />,    color: "text-amber-600 bg-amber-500/10 border-amber-500/30" },
+  received:       { label: "Received by Team",        icon: <GitBranch className="size-3.5" />,    color: "text-teal-600 bg-teal-500/10 border-teal-500/30" },
 };
 
 function fmtHistoryTime(iso: string) {
@@ -55,7 +49,88 @@ function fmtHistoryTime(iso: string) {
   });
 }
 
-function HistoryTimeline({ entries }: { entries: TaskHistoryEntry[] }) {
+// Deterministic accent color for a team name (stable across renders).
+const TEAM_PALETTE = [
+  "#6366f1", "#0ea5e9", "#f59e0b", "#10b981",
+  "#ec4899", "#8b5cf6", "#ef4444", "#14b8a6",
+];
+function teamColor(name?: string): string {
+  if (!name) return "#6b7280";
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return TEAM_PALETTE[h % TEAM_PALETTE.length];
+}
+
+const OUTCOME_META: Record<string, { label: string; color: string }> = {
+  approved: { label: "approved", color: "#22c55e" },
+  reedit:   { label: "reedit",   color: "#f43f5e" },
+  routed:   { label: "routed",   color: "#f59e0b" },
+};
+
+function TeamChip({ name, small }: { name?: string; small?: boolean }) {
+  if (!name) return null;
+  const c = teamColor(name);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border font-semibold whitespace-nowrap",
+        small ? "px-1.5 py-0.5 text-[9px]" : "px-2 py-0.5 text-[10px]"
+      )}
+      style={{ color: c, borderColor: `${c}55`, backgroundColor: `${c}15` }}
+    >
+      <span className="size-1.5 rounded-full" style={{ backgroundColor: c }} />
+      {name}
+    </span>
+  );
+}
+
+// Horizontal ribbon summarising the cross-team journey.
+function TeamFlowRibbon({ flow }: { flow: TeamFlowStep[] }) {
+  if (!flow || flow.length < 2) return null;
+  return (
+    <div className="mb-4 rounded-xl border bg-muted/20 p-3">
+      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1 mb-2">
+        <GitBranch className="size-3" /> Team Flow
+      </p>
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+        {flow.map((s, i) => {
+          const c = teamColor(s.team_name);
+          const oc = s.outcome ? OUTCOME_META[s.outcome] : null;
+          return (
+            <div key={i} className="flex items-center gap-1.5 shrink-0">
+              <div
+                className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5"
+                style={{ borderColor: `${c}55`, backgroundColor: `${c}12` }}
+              >
+                <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: c }} />
+                <span className="text-xs font-semibold" style={{ color: c }}>{s.team_name}</span>
+                {oc && (
+                  <span
+                    className="rounded-full px-1.5 py-0.5 text-[9px] font-bold"
+                    style={{ color: oc.color, backgroundColor: `${oc.color}20` }}
+                  >
+                    {oc.label}
+                  </span>
+                )}
+              </div>
+              {i < flow.length - 1 && (
+                <ArrowRight className="size-3.5 text-muted-foreground shrink-0" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HistoryTimeline({
+  entries,
+  teamFlow,
+}: {
+  entries: TaskHistoryEntry[];
+  teamFlow?: TeamFlowStep[];
+}) {
   if (!entries.length) {
     return (
       <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground/50">
@@ -70,72 +145,79 @@ function HistoryTimeline({ entries }: { entries: TaskHistoryEntry[] }) {
   );
 
   return (
-    <div className="relative">
-      {/* Vertical line */}
-      <div className="absolute left-[18px] top-2 bottom-2 w-px bg-border" />
+    <div>
+      {teamFlow && <TeamFlowRibbon flow={teamFlow} />}
 
-      <div className="space-y-0">
-        {sorted.map((e, i) => {
-          const m = ACTION_META[e.action] ?? {
-            label: e.action,
-            icon: <Circle className="size-3.5" />,
-            color: "text-muted-foreground bg-muted border-border",
-          };
-          return (
-            <div key={i} className="relative flex gap-3 pb-4 last:pb-0">
-              {/* Icon bubble */}
-              <div className={cn(
-                "relative z-10 flex size-9 shrink-0 items-center justify-center rounded-full border",
-                m.color
-              )}>
-                {m.icon}
-              </div>
+      <div className="relative">
+        {/* Vertical line */}
+        <div className="absolute left-[18px] top-2 bottom-2 w-px bg-border" />
 
-              {/* Content */}
-              <div className="flex-1 pt-1 min-w-0">
-                <div className="flex items-start justify-between gap-2 flex-wrap">
-                  <span className="text-sm font-semibold leading-tight">{m.label}</span>
-                  <span className="text-[10px] text-muted-foreground shrink-0 leading-tight">
-                    {fmtHistoryTime(e.timestamp)}
-                  </span>
+        <div className="space-y-0">
+          {sorted.map((e, i) => {
+            const m = ACTION_META[e.action] ?? {
+              label: e.action,
+              icon: <Circle className="size-3.5" />,
+              color: "text-muted-foreground bg-muted border-border",
+            };
+            return (
+              <div key={i} className="relative flex gap-3 pb-4 last:pb-0">
+                {/* Icon bubble */}
+                <div className={cn(
+                  "relative z-10 flex size-9 shrink-0 items-center justify-center rounded-full border",
+                  m.color
+                )}>
+                  {m.icon}
                 </div>
 
-                {/* Actor */}
-                {e.actor_name && (
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    by <span className="font-medium text-foreground">{e.actor_name}</span>
-                  </p>
-                )}
-
-                {/* Status transition */}
-                {e.from_status && e.to_status && (
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <StatusChip status={e.from_status} />
-                    <ArrowRight className="size-3 text-muted-foreground shrink-0" />
-                    <StatusChip status={e.to_status} />
+                {/* Content */}
+                <div className="flex-1 pt-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2 flex-wrap">
+                    <span className="text-sm font-semibold leading-tight">{m.label}</span>
+                    <span className="text-[10px] text-muted-foreground shrink-0 leading-tight">
+                      {fmtHistoryTime(e.timestamp)}
+                    </span>
                   </div>
-                )}
 
-                {/* Note (reedit reason, assignment note, etc.) */}
-                {e.note && (
-                  <div className={cn(
-                    "mt-1.5 rounded-md border px-2.5 py-1.5 text-xs leading-relaxed",
-                    e.action === "reedit"
-                      ? "border-rose-400/30 bg-rose-500/5 text-rose-700 dark:text-rose-400"
-                      : "border-border bg-muted/30 text-foreground/70"
-                  )}>
-                    {e.action === "reedit" && (
-                      <span className="flex items-center gap-1 font-semibold mb-0.5 text-rose-600 dark:text-rose-400">
-                        <AlertTriangle className="size-3" /> Reason
-                      </span>
+                  {/* Actor + team */}
+                  <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                    {e.actor_name && (
+                      <p className="text-xs text-muted-foreground">
+                        by <span className="font-medium text-foreground">{e.actor_name}</span>
+                      </p>
                     )}
-                    {e.note}
+                    <TeamChip name={e.team_name} small />
                   </div>
-                )}
+
+                  {/* Status transition */}
+                  {e.from_status && e.to_status && (
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <StatusChip status={e.from_status} />
+                      <ArrowRight className="size-3 text-muted-foreground shrink-0" />
+                      <StatusChip status={e.to_status} />
+                    </div>
+                  )}
+
+                  {/* Note (reedit reason, assignment note, etc.) */}
+                  {e.note && (
+                    <div className={cn(
+                      "mt-1.5 rounded-md border px-2.5 py-1.5 text-xs leading-relaxed",
+                      e.action === "reedit"
+                        ? "border-rose-400/30 bg-rose-500/5 text-rose-700 dark:text-rose-400"
+                        : "border-border bg-muted/30 text-foreground/70"
+                    )}>
+                      {e.action === "reedit" && (
+                        <span className="flex items-center gap-1 font-semibold mb-0.5 text-rose-600 dark:text-rose-400">
+                          <AlertTriangle className="size-3" /> Reason
+                        </span>
+                      )}
+                      {e.note}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -155,109 +237,6 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-// ── Attachment renderer ───────────────────────────────────────────────────────
-
-function AttachmentList({
-  attachments,
-  readOnly,
-  onRemove,
-}: {
-  attachments: Attachment[];
-  readOnly: boolean;
-  onRemove?: (i: number) => void;
-}) {
-  if (attachments.length === 0)
-    return <p className="text-xs text-muted-foreground/50 italic">No attachments yet</p>;
-
-  const images = attachments.filter((a) => a.content_type.startsWith("image/"));
-  const others = attachments.filter((a) => !a.content_type.startsWith("image/"));
-
-  return (
-    <div className="space-y-3">
-      {images.length > 0 && (
-        <div className="grid grid-cols-3 gap-2">
-          {images.map((a) => {
-            const globalIdx = attachments.indexOf(a);
-            return (
-              <div key={a.key} className="group relative aspect-square">
-                <a href={a.url} target="_blank" rel="noopener noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={a.url}
-                    alt={a.filename}
-                    className="w-full h-full rounded-lg object-cover border border-border hover:brightness-90 transition"
-                  />
-                  <span className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                    <ExternalLink className="size-4 text-white drop-shadow" />
-                  </span>
-                </a>
-                {!readOnly && onRemove && (
-                  <button
-                    type="button"
-                    onClick={() => onRemove(globalIdx)}
-                    className="absolute top-1 right-1 rounded-full bg-black/60 p-0.5 opacity-0 group-hover:opacity-100 transition hover:bg-destructive"
-                  >
-                    <X className="size-2.5 text-white" />
-                  </button>
-                )}
-                <span className="absolute bottom-0 left-0 right-0 rounded-b-lg bg-black/40 px-1 py-0.5 text-[9px] text-white truncate">
-                  {a.filename}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {others.length > 0 && (
-        <div className="space-y-1.5">
-          {others.map((a) => {
-            const globalIdx = attachments.indexOf(a);
-            const isVideo = a.content_type.startsWith("video/");
-            const isPdf =
-              a.content_type.includes("pdf") ||
-              a.content_type.includes("document") ||
-              a.content_type.includes("text");
-            return (
-              <div
-                key={a.key}
-                className="flex items-center gap-2 rounded-lg border bg-muted/30 px-2.5 py-1.5"
-              >
-                {isVideo ? (
-                  <FileVideo className="size-4 text-purple-500 shrink-0" />
-                ) : isPdf ? (
-                  <FileText className="size-4 text-orange-500 shrink-0" />
-                ) : (
-                  <FileIcon className="size-4 text-muted-foreground shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <a
-                    href={a.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-medium truncate block hover:underline"
-                  >
-                    {a.filename}
-                  </a>
-                  <span className="text-[10px] text-muted-foreground">{formatSize(a.size)}</span>
-                </div>
-                {!readOnly && onRemove && (
-                  <button
-                    type="button"
-                    onClick={() => onRemove(globalIdx)}
-                    className="p-1 rounded-md text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 type ModalTab = "details" | "history";
@@ -269,8 +248,6 @@ export function TaskDetailModal({
   onClose,
 }: Props) {
   const update = useUpdateTask();
-  const upload = useUploadAttachments();
-  const fileRef = useRef<HTMLInputElement>(null);
   const { data: teams = [] } = useTeams();
   const { data: taskDetail, isLoading: historyLoading } = useTaskDetail(task.id);
 
@@ -293,18 +270,6 @@ export function TaskDetailModal({
 
   // Use live-fetched history if available, fall back to task.history
   const historyEntries = taskDetail?.history ?? task.history ?? [];
-
-  async function handleFiles(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) return;
-    const uploaded = await upload.mutateAsync(Array.from(fileList));
-    setAttachments((prev) => [...prev, ...uploaded]);
-    setDirty(true);
-  }
-
-  function removeAttachment(i: number) {
-    setAttachments((prev) => prev.filter((_, idx) => idx !== i));
-    setDirty(true);
-  }
 
   async function save() {
     await update.mutateAsync({
@@ -537,39 +502,12 @@ export function TaskDetailModal({
                       </span>
                     )}
                   </p>
-                  <AttachmentList
-                    attachments={attachments}
+                  <FileUploader
+                    value={attachments}
+                    onChange={readOnly ? undefined : (a) => { setAttachments(a); setDirty(true); }}
                     readOnly={readOnly}
-                    onRemove={readOnly ? undefined : removeAttachment}
+                    label="Add media or files"
                   />
-                  {!readOnly && (
-                    <>
-                      <input
-                        ref={fileRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => fileRef.current?.click()}
-                        disabled={upload.isPending}
-                        className={cn(
-                          "w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed py-3 text-xs font-medium transition-colors",
-                          upload.isPending
-                            ? "opacity-60 pointer-events-none border-border"
-                            : "border-border hover:border-primary/50 hover:bg-muted/30"
-                        )}
-                      >
-                        {upload.isPending ? (
-                          <><Loader2 className="size-4 animate-spin" /> Uploading…</>
-                        ) : (
-                          <><Upload className="size-4 text-muted-foreground" /> Add media or files</>
-                        )}
-                      </button>
-                    </>
-                  )}
                 </div>
 
                 {/* Caption input (submit for review flow) */}
@@ -618,7 +556,7 @@ export function TaskDetailModal({
                     )}
                   </div>
                 </div>
-                <HistoryTimeline entries={historyEntries} />
+                <HistoryTimeline entries={historyEntries} teamFlow={taskDetail?.team_flow} />
               </motion.div>
             )}
           </AnimatePresence>

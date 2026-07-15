@@ -63,6 +63,15 @@ export interface TaskHistoryEntry {
   from_status?: string | null;
   to_status?: string | null;
   note?: string | null;
+  team_id?: string;
+  team_name?: string;
+}
+
+/** One "stop" in a task's cross-team journey (video → content → …). */
+export interface TeamFlowStep {
+  team_name: string;
+  team_id?: string;
+  outcome?: "approved" | "reedit" | "routed" | null;
 }
 
 export interface Task {
@@ -85,6 +94,8 @@ export interface Task {
   updated_at: string;
   timing?: TaskTiming | null;
   history?: TaskHistoryEntry[];
+  /** Full cross-team journey summary — only present on the detail endpoint. */
+  team_flow?: TeamFlowStep[];
 }
 
 export interface CreateTaskPayload {

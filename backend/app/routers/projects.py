@@ -289,6 +289,7 @@ async def add_task(
 
     data = body.model_dump()
     data["created_by"] = str(current_user["_id"])
+    data["actor_name"] = current_user.get("name", "")
     data["status"] = "pending"  # new work always enters the workflow at Pending
 
     # Members can only create tasks for themselves; only admins / team leaders
@@ -345,7 +346,7 @@ async def leader_queue(
 
     if not teams:
         return success_response(
-            data={"is_leader": is_elevated, "review": [], "incoming": [], "teams": []},
+            data={"is_leader": is_elevated, "review": [], "incoming": [], "reedit": [], "teams": []},
             message="Leader queue",
         )
 
@@ -377,11 +378,20 @@ async def leader_queue(
         "$or": [{"assigned_to": {"$in": ["", None]}}, {"assigned_to": uid}],
     }).sort("created_at", -1).to_list(500)
 
+    # Reedit desk — tasks returned for revision that now live in one of this
+    # leader's teams. When a leader routes a task to another team and that team
+    # sends it back to reedit, it is returned to the routing leader's team (see
+    # edit_task), so it surfaces here for the leader who originally routed it.
+    reedit = await db["project_tasks"].find(
+        {"status": "reedit", "team_id": {"$in": team_ids}}
+    ).sort("updated_at", -1).to_list(500)
+
     return success_response(
         data={
             "is_leader": True,
             "review":   [_serialize(t) for t in review],
             "incoming": [_serialize(t) for t in incoming],
+            "reedit":   [_serialize(t) for t in reedit],
             "teams":    teams_out,
         },
         message="Leader queue",
@@ -424,7 +434,14 @@ async def get_task_detail(
     if not allowed:
         return error_response("You don't have access to this task", status_code=403)
 
-    return success_response(data=_serialize(doc), message="Task retrieved")
+    # Aggregate the full routing-chain history (across every team the task
+    # passed through) plus a compact team-flow summary.
+    from app.services.project_service import get_chain_history
+    merged_history, team_flow = await get_chain_history(db, doc)
+    out = _serialize(doc)
+    out["history"] = merged_history
+    out["team_flow"] = team_flow
+    return success_response(data=out, message="Task retrieved")
 
 
 @router.put("/{task_id}")
@@ -486,9 +503,80 @@ async def edit_task(
         if not await workflow.can_assign_to_others(current_user, current.get("team_id"), db):
             return error_response("Only a team leader can assign tasks to others.", status_code=403)
 
+    # ── Reedit return-to-origin ────────────────────────────────────────────────
+    # When a leader sends a *routed* task back to reedit, it returns to the
+    # leader (and team) that routed it, appearing in their Leader Desk › Reedit.
+    # Only a leader/admin of the current team may return it.
+    if new_status == "reedit" and current.get("origin_team_id"):
+        origin_team_id = current.get("origin_team_id") or ""
+        if origin_team_id and origin_team_id != current.get("team_id"):
+            if not await workflow.can_approve(current_user, current, db):
+                return error_response(
+                    "Only a team leader can send a task back to reedit.",
+                    status_code=403,
+                )
+            from bson import ObjectId as _OID
+            returning_team_name = ""
+            if current.get("team_id") and _OID.is_valid(current["team_id"]):
+                _rt = await db["teams"].find_one({"_id": _OID(current["team_id"])}, {"name": 1})
+                returning_team_name = (_rt or {}).get("name", "")
+            # Send it home: origin team, unassigned so that leader can redistribute.
+            updates["team_id"] = origin_team_id
+            updates["assigned_to"] = ""
+            updates["assigned_to_name"] = ""
+            updates["former_team_name"] = returning_team_name
+            updates["former_assigned_to_name"] = (
+                current.get("assigned_to_name", "") or current.get("assigned_to", "")
+            )
+
     task = await update_task(db, task_id, updates)
     if not task:
         return error_response("Task not found", status_code=404)
+
+    # ── Append audit history (tagged with the team the action happened in) ──────
+    # `current` still holds the pre-update team, so a reedit that returns a task
+    # to its origin team is correctly attributed to the team that raised it.
+    from datetime import datetime as _dtm, timezone as _tz
+    actor_id   = str(current_user["_id"])
+    actor_name = current_user.get("name", "")
+    acting_team_id = current.get("team_id") or ""
+    acting_team_name = ""
+    if acting_team_id and ObjectId.is_valid(acting_team_id):
+        _t = await db["teams"].find_one({"_id": ObjectId(acting_team_id)}, {"name": 1})
+        acting_team_name = (_t or {}).get("name", "")
+    _hist: list[dict] = []
+    if new_status and new_status != cur_status:
+        _hist.append({
+            "action":      new_status,
+            "actor_id":    actor_id,
+            "actor_name":  actor_name,
+            "timestamp":   _dtm.now(_tz.utc),
+            "from_status": cur_status,
+            "to_status":   new_status,
+            "note":        (updates.get("reedit_reason") or None) if new_status == "reedit" else None,
+            "team_id":     acting_team_id,
+            "team_name":   acting_team_name,
+        })
+    if (
+        "assigned_to" in updates
+        and updates["assigned_to"]
+        and updates["assigned_to"] != current.get("assigned_to")
+    ):
+        _hist.append({
+            "action":      "assigned",
+            "actor_id":    actor_id,
+            "actor_name":  actor_name,
+            "timestamp":   _dtm.now(_tz.utc),
+            "from_status": None,
+            "to_status":   None,
+            "note":        f"Assigned to {updates.get('assigned_to_name') or updates['assigned_to']}",
+            "team_id":     acting_team_id,
+            "team_name":   acting_team_name,
+        })
+    if _hist:
+        await db["project_tasks"].update_one(
+            {"_id": oid}, {"$push": {"history": {"$each": _hist}}}
+        )
 
     # ── Fire notifications for status transition ───────────────────────────────
     _notif_event_map = {
@@ -504,8 +592,12 @@ async def edit_task(
             str(current_user["_id"]),
             current_user.get("name", ""),
         )
-    # Re-assignment to a different person
-    if "assigned_to" in updates and updates["assigned_to"] != current.get("assigned_to"):
+    # Re-assignment to a different person (skip when clearing the assignee)
+    if (
+        "assigned_to" in updates
+        and updates["assigned_to"]
+        and updates["assigned_to"] != current.get("assigned_to")
+    ):
         await _fire_notifications(
             db, task, "assigned",
             str(current_user["_id"]),
@@ -528,7 +620,7 @@ async def edit_task(
         from datetime import datetime, timezone as tz
         from bson import ObjectId
         now = datetime.now(tz.utc)
-        # Look up the former team name so the receiving leader can see provenance
+        # Look up the former + destination team names for provenance / history.
         former_team_name = ""
         if task.get("team_id"):
             try:
@@ -537,6 +629,33 @@ async def edit_task(
                     former_team_name = former_team_doc.get("name", "")
             except Exception:
                 pass
+        dest_team_name = ""
+        if ObjectId.is_valid(destination_team_id):
+            _dt_doc = await db["teams"].find_one({"_id": ObjectId(destination_team_id)}, {"name": 1})
+            dest_team_name = (_dt_doc or {}).get("name", "")
+
+        # Record the hand-off on the SOURCE task so its history shows the exit.
+        await db["project_tasks"].update_one(
+            {"_id": oid},
+            {"$push": {"history": {
+                "action":      "routed",
+                "actor_id":    actor_id,
+                "actor_name":  actor_name,
+                "timestamp":   now,
+                "from_status": "approved",
+                "to_status":   None,
+                "note":        f"Routed to {dest_team_name}" if dest_team_name else "Routed to another team",
+                "team_id":     task.get("team_id", ""),
+                "team_name":   former_team_name,
+            }}},
+        )
+
+        # The whole routing chain shares one root, so the full cross-team history
+        # can be aggregated regardless of which copy is opened.
+        root_task_id = str(current.get("root_task_id") or current["_id"])
+        _received_note = f"Received from {former_team_name}" if former_team_name else "Received via routing"
+        if next_leader_name:
+            _received_note += f" · assigned to {next_leader_name}"
         routed_result = await db["project_tasks"].insert_one({
             "title": task["title"],
             "description": task.get("description", ""),
@@ -555,6 +674,26 @@ async def edit_task(
             # Provenance: who worked on this in the originating team
             "former_assigned_to_name": task.get("assigned_to_name", "") or task.get("assigned_to", ""),
             "former_team_name": former_team_name,
+            # Routing provenance — so a reedit from the destination team can be
+            # returned to the leader (and team) that routed it here.
+            "routed_by_id": str(current_user["_id"]),
+            "routed_by_name": current_user.get("name", ""),
+            "origin_team_id": task.get("team_id", ""),
+            # Chain linkage for full-history aggregation.
+            "root_task_id": root_task_id,
+            "parent_task_id": task_id,
+            # Seed the copy's own history with the hand-off it received.
+            "history": [{
+                "action":      "received",
+                "actor_id":    actor_id,
+                "actor_name":  actor_name,
+                "timestamp":   now,
+                "from_status": None,
+                "to_status":   "pending",
+                "note":        _received_note,
+                "team_id":     destination_team_id,
+                "team_name":   dest_team_name,
+            }],
         })
         # Notify the destination team's leaders + elevated roles about the new task
         # If assigned to a specific leader, also send them a task_assigned notification

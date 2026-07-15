@@ -12,18 +12,22 @@ import uuid
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 
 from app.middleware.auth import get_current_user
 from app.config import settings
 from app.utils.response import success_response, error_response
-from app.utils.storage import upload_bytes
+from app.utils.storage import upload_bytes, presign_put
 
 router = APIRouter(prefix="/api/v1/media", tags=["media"])
 
 # Max attachment size: 25 MB per file
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
+# Max size for direct (pre-signed) browser → R2 uploads: 1 GB per file
+MAX_DIRECT_BYTES = 1024 * 1024 * 1024
 
 # Directory where files are stored — two levels up from this file → repo_root/uploads/
 UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads"
@@ -120,6 +124,74 @@ async def upload_attachments(
         message=f"{len(results)} file{'s' if len(results) != 1 else ''} uploaded",
         status_code=201,
     )
+
+
+# ── Direct (pre-signed) browser → R2 uploads ──────────────────────────────────
+
+class PresignFile(BaseModel):
+    filename: str
+    content_type: str = "application/octet-stream"
+    size: int = 0
+
+
+class PresignRequest(BaseModel):
+    files: list[PresignFile]
+    prefix: str = "attachments"
+
+
+@router.post("/presign")
+async def presign_uploads(
+    body: PresignRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Issue short-lived pre-signed PUT URLs so the browser can upload files
+    **directly** to R2 (bytes never transit this backend → supports up to 1 GB).
+
+    Body: {"files": [{filename, content_type, size}], "prefix"?}
+    Returns a list of {upload_url, method, headers, public_url, key,
+    filename, content_type, backend} — one per file, in order.
+    """
+    if not body.files:
+        return error_response("No files provided", status_code=400)
+    if len(body.files) > 20:
+        return error_response("Maximum 20 files per request", status_code=400)
+
+    results = []
+    for f in body.files:
+        if f.size and f.size > MAX_DIRECT_BYTES:
+            mb = f.size // (1024 * 1024)
+            return error_response(
+                f"'{f.filename}' is too large ({mb} MB). Maximum is 1 GB per file.",
+                status_code=413,
+            )
+        meta = await run_in_threadpool(
+            presign_put,
+            f.filename or "file",
+            f.content_type or "application/octet-stream",
+            body.prefix or "attachments",
+        )
+        results.append(meta)
+
+    return success_response(data=results, message="Pre-signed upload URLs issued")
+
+
+@router.put("/local-blob/{key:path}")
+async def local_blob_put(key: str, request: Request):
+    """
+    Local-disk fallback target for pre-signed uploads when R2 is not configured
+    (development only). Stores the raw request body under uploads/. No auth —
+    the pre-signed key is the capability. Never used when R2 is enabled.
+    """
+    if settings.r2_enabled:
+        return error_response("Not available when R2 is enabled", status_code=404)
+    body = await request.body()
+    if len(body) > MAX_DIRECT_BYTES:
+        return error_response("File too large (max 1 GB)", status_code=413)
+    name = Path(key).name
+    dest = UPLOAD_DIR / name
+    await run_in_threadpool(_write_file, dest, body)
+    return success_response(data={"key": key}, message="Stored")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

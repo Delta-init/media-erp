@@ -183,3 +183,21 @@
 ```
 
 ---
+
+## projects router — leader queue + reedit return-to-origin (2026-07-15)
+- `GET /projects/leader/queue` now returns a **`reedit`** list (status=reedit tasks in the leader's teams). Previously missing entirely → the frontend Reedit tab was always empty. Added to both the empty-state and normal responses.
+- **Approve & route** now stamps the routed copy with `routed_by_id`, `routed_by_name`, `origin_team_id` (the routing leader's team).
+- **`PUT /projects/{id}` → status=reedit:** if the task carries `origin_team_id` (i.e. it was routed here), it is returned home — `team_id` set back to `origin_team_id`, `assigned_to` cleared, `former_team_name` set to the returning team. Only a leader/admin of the current team may return it (`workflow.can_approve`). The reedit notification then fires to the origin team's leaders.
+- Guarded the re-assignment notification so it only fires when a *new* assignee is set (skips the misleading "assigned" DM when clearing the assignee).
+
+## project history recording restored + cross-team aggregation (2026-07-15)
+- **Regression fixed:** the per-transition history append from commit d895a43 was lost in merge 782271a, so status changes recorded NO history. Restored in `edit_task` — every status change and assignment now pushes a history entry, each tagged with `team_id` + `team_name` (the team the action happened in; uses the pre-update team so a reedit-return is attributed to the team that raised it).
+- **Chain linkage:** Approve & Route now (a) pushes a `routed` entry to the source task, (b) stamps the copy with `root_task_id` + `parent_task_id`, and (c) seeds the copy with a `received` history entry ("Received from <team>").
+- **Aggregation:** new `project_service.get_chain_history(db, doc)` gathers the root + all copies sharing `root_task_id`, merges their histories chronologically (tagging each with its team), and derives a `team_flow` summary (ordered team stops with outcome). `GET /projects/{id}` now returns the merged `history` + `team_flow`.
+- Verified end-to-end via API: a video→content(reedit)→video→content(approved) run produced the exact team_flow and a 15-entry merged history.
+
+## media router — pre-signed direct-to-R2 uploads (2026-07-15)
+- `POST /media/presign` (auth): issues short-lived pre-signed PUT URLs so the browser uploads file bytes straight to R2 (bypassing the backend → up to 1 GB/file). Body `{files:[{filename,content_type,size}], prefix?}`; returns `{upload_url, method, headers, public_url, key, ...}` per file. Enforces the 1 GB cap.
+- `storage.presign_put()` generates the signed URL (R2) or a local-disk PUT fallback (`PUT /media/local-blob/{key}`) when R2 is disabled — identical frontend flow either way.
+- `storage.ensure_bucket_cors()` + `scripts/set_r2_cors.py` configure the R2 bucket CORS (GET/PUT/HEAD for the app origins) so browser PUTs from localhost/prod succeed. Run once per bucket.
+- Legacy multipart endpoints (`/media/upload`, `/media/upload-attachments`) remain but are no longer used by the frontend.

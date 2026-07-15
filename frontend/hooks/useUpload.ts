@@ -2,27 +2,20 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import api from "@/lib/axios";
+import { uploadFilesDirect } from "@/lib/directUpload";
 import type { Attachment } from "@/types/project";
 
 /**
- * Upload one or more files (any type) to the backend, which stores them in
- * Cloudflare R2 (or local disk fallback) and returns public URLs.
+ * Upload one or more files (any type) **directly to Cloudflare R2** via a
+ * pre-signed URL. The bytes never pass through our backend, so files up to
+ * 1 GB are supported. Returns Attachment metadata (incl. the public view URL).
  */
 export function useUploadAttachments() {
   return useMutation({
-    mutationFn: async (files: File[]): Promise<Attachment[]> => {
-      const form = new FormData();
-      files.forEach((f) => form.append("files", f));
-      const { data } = await api.post<{ success: boolean; data: Attachment[] }>(
-        "/media/upload-attachments",
-        form,
-        { headers: { "Content-Type": "multipart/form-data" }, timeout: 120_000 }
-      );
-      return data.data;
-    },
+    mutationFn: (files: File[]): Promise<Attachment[]> => uploadFilesDirect(files),
     onError(err: unknown) {
       const msg =
+        (err as { message?: string })?.message ||
         (err as { response?: { data?: { detail?: string; message?: string } } })
           ?.response?.data?.detail ||
         (err as { response?: { data?: { detail?: string; message?: string } } })
