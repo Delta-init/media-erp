@@ -23,6 +23,8 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Exclude API routes (`/api/*`) so the auth gate never intercepts the
   // backend proxy — otherwise login/register requests get 307-redirected to
-  // /login and never reach the API.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/|[^/]*\\.[^/]*$).*)"],
+  // /login and never reach the API. Also exclude PWA assets under `/icons/`
+  // (multi-segment paths that the trailing-file rule below doesn't catch) so
+  // the manifest's icons load without auth for the install prompt.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icons/|api/|[^/]*\\.[^/]*$).*)"],
 };

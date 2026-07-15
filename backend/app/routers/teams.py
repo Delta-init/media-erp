@@ -12,10 +12,11 @@ Endpoints
   DELETE /api/v1/teams/{id}/members/{user_id}   — remove member (leader / admin)
   PUT    /api/v1/teams/{id}/members/{user_id}/role  — change member role
   GET    /api/v1/teams/{id}/members/{user_id}/report — member performance report
+  GET    /api/v1/teams/{id}/report               — team report (daily/weekly/monthly/custom)
   GET    /api/v1/teams/all                      — admin: list ALL teams
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -543,7 +544,7 @@ async def member_report(
         by_status[s]   = by_status.get(s, 0) + 1
         by_priority[p] = by_priority.get(p, 0) + 1
 
-    completed  = by_status.get("currently_working", 0)
+    completed  = by_status.get(_COMPLETED_STATUS, 0)
     total      = len(team_tasks)
     completion = round(completed / total * 100) if total > 0 else 0
 
@@ -589,3 +590,287 @@ async def member_report(
         },
     }
     return success_response(data=report, message="Member report retrieved")
+
+
+# ── Team report (daily / weekly / monthly / custom) ────────────────────────────
+
+# A task is "completed" when it reaches the terminal workflow state.
+_COMPLETED_STATUS = "approved"
+
+
+def _resolve_period(period: str, date_from: str, date_to: str) -> tuple[datetime, datetime, str]:
+    """
+    Resolve a reporting window (UTC) from a preset period or a custom range.
+
+    Returns (start, end, resolved_period). Presets are rolling windows anchored
+    to the start of the current UTC day:
+      daily   → today
+      weekly  → last 7 days (incl. today)
+      monthly → last 30 days (incl. today)
+      custom  → [date_from 00:00, date_to 23:59:59]; falls back to last 30 days
+                when the dates are missing or malformed.
+    """
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    period = (period or "monthly").lower()
+
+    if period == "daily":
+        return today_start, now, "daily"
+    if period == "weekly":
+        return today_start - timedelta(days=6), now, "weekly"
+    if period == "custom":
+        try:
+            start = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            end = datetime.strptime(date_to, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, tzinfo=timezone.utc
+            )
+            if end >= start:
+                return start, end, "custom"
+        except (ValueError, TypeError):
+            pass
+        # Malformed / missing custom dates → sensible default
+        return today_start - timedelta(days=29), now, "monthly"
+    # Default & explicit "monthly"
+    return today_start - timedelta(days=29), now, "monthly"
+
+
+def _as_utc(value) -> datetime | None:
+    """Coerce a stored datetime to tz-aware UTC (Mongo may return naive datetimes)."""
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+@router.get("/{team_id}/report")
+async def team_report(
+    team_id: str,
+    period: str = "monthly",
+    date_from: str = "",
+    date_to: str = "",
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Team activity report over a period (daily / weekly / monthly / custom).
+
+    Visible to team members and elevated roles (same access as team detail).
+    Aggregates the team's project tasks: created vs completed in the window,
+    a per-day timeseries, status/priority breakdowns, and a per-member table.
+    """
+    team, err = await _get_team_or_404(db, team_id)
+    if err:
+        return err
+
+    uid = str(current_user["_id"])
+    member_ids = [m["user_id"] for m in team.get("members", [])]
+    if not _can_see_all_teams(current_user) and uid not in member_ids:
+        return error_response("Not a member of this team", status_code=403)
+
+    start, end, resolved = _resolve_period(period, date_from, date_to)
+
+    tasks = await db["project_tasks"].find({"team_id": team_id}).to_list(5000)
+
+    # ── Windowed aggregation ────────────────────────────────────────────────────
+    created_in: list[dict] = []
+    completed_in: list[dict] = []
+    active_now = 0
+    by_status: dict[str, int] = {}
+    by_priority: dict[str, int] = {}
+
+    # Per-day buckets for the timeseries
+    day_count = (end.date() - start.date()).days + 1
+    day_keys = [(start.date() + timedelta(days=i)).isoformat() for i in range(max(day_count, 1))]
+    series = {d: {"date": d, "created": 0, "completed": 0} for d in day_keys}
+
+    # Per-member accumulators
+    per_member: dict[str, dict] = {
+        m["user_id"]: {"assigned": 0, "completed": 0} for m in team.get("members", [])
+    }
+
+    for t in tasks:
+        status = t.get("status", "pending")
+        if status == "started":
+            active_now += 1
+
+        created_at = _as_utc(t.get("created_at"))
+        updated_at = _as_utc(t.get("updated_at"))
+        assignee = t.get("assigned_to", "")
+
+        if created_at and start <= created_at <= end:
+            created_in.append(t)
+            by_status[status] = by_status.get(status, 0) + 1
+            by_priority[t.get("priority", "medium")] = by_priority.get(t.get("priority", "medium"), 0) + 1
+            key = created_at.date().isoformat()
+            if key in series:
+                series[key]["created"] += 1
+            if assignee in per_member:
+                per_member[assignee]["assigned"] += 1
+
+        if status == _COMPLETED_STATUS and updated_at and start <= updated_at <= end:
+            completed_in.append(t)
+            key = updated_at.date().isoformat()
+            if key in series:
+                series[key]["completed"] += 1
+            if assignee in per_member:
+                per_member[assignee]["completed"] += 1
+
+    total_created = len(created_in)
+    total_completed = len(completed_in)
+    completion_pct = round(total_completed / total_created * 100) if total_created > 0 else 0
+
+    # Enrich per-member rows with profile info
+    member_rows = []
+    enriched = await _enrich_members(db, team.get("members", []))
+    for m in enriched:
+        stats = per_member.get(m["user_id"], {"assigned": 0, "completed": 0})
+        member_rows.append({
+            "user_id":   m["user_id"],
+            "name":      m.get("name", ""),
+            "role":      m.get("role", "member"),
+            "avatar":    m.get("avatar", ""),
+            "assigned":  stats["assigned"],
+            "completed": stats["completed"],
+        })
+    member_rows.sort(key=lambda r: (r["completed"], r["assigned"]), reverse=True)
+
+    report = {
+        "team_id":     team_id,
+        "team_name":   team.get("name", ""),
+        "period":      resolved,
+        "date_from":   start.date().isoformat(),
+        "date_to":     end.date().isoformat(),
+        "summary": {
+            "created":        total_created,
+            "completed":      total_completed,
+            "completion_pct": completion_pct,
+            "active":         active_now,          # snapshot: tasks currently "started"
+            "members":        len(team.get("members", [])),
+        },
+        "by_status":   by_status,
+        "by_priority": by_priority,
+        "timeseries":  [series[d] for d in day_keys],
+        "members":     member_rows,
+    }
+    return success_response(data=report, message="Team report retrieved")
+
+
+@router.get("/{team_id}/members/{user_id}/activity")
+async def member_activity(
+    team_id: str,
+    user_id: str,
+    period: str = "daily",
+    date_from: str = "",
+    date_to: str = "",
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    A single member's task activity over a period (daily / weekly / monthly / custom).
+
+    Powers the "Daily Report" on the member profile page. Visible to the member
+    themselves, their team leaders, and elevated roles (same gate as the member
+    performance report).
+    """
+    team, err = await _get_team_or_404(db, team_id)
+    if err:
+        return err
+
+    caller_id = str(current_user["_id"])
+    if not (_can_see_all_teams(current_user) or _is_leader_of(team, caller_id) or caller_id == user_id):
+        return error_response("Access denied — leaders and admins only", status_code=403)
+
+    if not ObjectId.is_valid(user_id):
+        return error_response("Invalid user ID", status_code=422)
+    user = await db["users"].find_one({"_id": ObjectId(user_id)})
+    if not user:
+        return error_response("User not found", status_code=404)
+
+    start, end, resolved = _resolve_period(period, date_from, date_to)
+
+    tasks = await db["project_tasks"].find(
+        {"team_id": team_id, "assigned_to": user_id}
+    ).to_list(5000)
+
+    created_in: list[dict] = []
+    completed = 0
+    active_now = 0
+    by_status: dict[str, int] = {}
+    by_priority: dict[str, int] = {}
+    recent: list[dict] = []
+
+    day_count = (end.date() - start.date()).days + 1
+    day_keys = [(start.date() + timedelta(days=i)).isoformat() for i in range(max(day_count, 1))]
+    series = {d: {"date": d, "created": 0, "completed": 0} for d in day_keys}
+
+    for t in tasks:
+        status = t.get("status", "pending")
+        if status == "started":
+            active_now += 1
+
+        created_at = _as_utc(t.get("created_at"))
+        updated_at = _as_utc(t.get("updated_at"))
+
+        in_created = created_at and start <= created_at <= end
+        in_completed = status == _COMPLETED_STATUS and updated_at and start <= updated_at <= end
+
+        if in_created:
+            created_in.append(t)
+            by_status[status] = by_status.get(status, 0) + 1
+            by_priority[t.get("priority", "medium")] = by_priority.get(t.get("priority", "medium"), 0) + 1
+            key = created_at.date().isoformat()
+            if key in series:
+                series[key]["created"] += 1
+
+        if in_completed:
+            completed += 1
+            key = updated_at.date().isoformat()
+            if key in series:
+                series[key]["completed"] += 1
+
+        if in_created or in_completed:
+            recent.append(t)
+
+    total_created = len(created_in)
+    completion_pct = round(completed / total_created * 100) if total_created > 0 else 0
+
+    recent.sort(
+        key=lambda x: _as_utc(x.get("updated_at")) or _as_utc(x.get("created_at")) or start,
+        reverse=True,
+    )
+
+    def _ser_task(t):
+        return {
+            "id":         str(t["_id"]),
+            "title":      t.get("title", ""),
+            "status":     t.get("status", "pending"),
+            "priority":   t.get("priority", "medium"),
+            "due_date":   t.get("due_date"),
+            "updated_at": t["updated_at"].isoformat() if hasattr(t.get("updated_at"), "isoformat") else None,
+        }
+
+    report = {
+        "user": {
+            "id":          str(user["_id"]),
+            "name":        user.get("name", ""),
+            "email":       user.get("email", ""),
+            "designation": user.get("designation", ""),
+            "avatar":      user.get("avatar", ""),
+            "status":      user.get("status", "active"),
+        },
+        "team_id":   team_id,
+        "team_name": team.get("name", ""),
+        "period":    resolved,
+        "date_from": start.date().isoformat(),
+        "date_to":   end.date().isoformat(),
+        "summary": {
+            "created":        total_created,
+            "completed":      completed,
+            "completion_pct": completion_pct,
+            "active":         active_now,
+        },
+        "by_status":   by_status,
+        "by_priority": by_priority,
+        "timeseries":  [series[d] for d in day_keys],
+        "recent":      [_ser_task(t) for t in recent[:12]],
+    }
+    return success_response(data=report, message="Member activity retrieved")

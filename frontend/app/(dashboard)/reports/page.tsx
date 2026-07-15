@@ -303,14 +303,14 @@ export default function ReportsPage() {
       />
 
       {/* Tab bar */}
-      <div className="flex gap-1 rounded-xl border bg-muted/40 p-1 w-fit">
+      <div className="flex gap-1 rounded-xl border bg-muted/40 p-1 w-fit max-w-full overflow-x-auto">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
             onClick={() => setActiveTab(id)}
             className={cn(
-              "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all",
+              "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all",
               activeTab === id
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
@@ -401,7 +401,7 @@ export default function ReportsPage() {
 
             {/* Trend + Donut */}
             <div className="grid gap-4 lg:grid-cols-3">
-              <div className="lg:col-span-2 rounded-xl border bg-card p-5 shadow-sm">
+              <div className="lg:col-span-2 min-w-0 rounded-xl border bg-card p-5 shadow-sm">
                 <div className="mb-4 flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">Trend</span>
                   <div className="ml-auto flex gap-1">
@@ -427,7 +427,7 @@ export default function ReportsPage() {
                 />
               </div>
 
-              <div className="rounded-xl border bg-card p-5 shadow-sm">
+              <div className="min-w-0 rounded-xl border bg-card p-5 shadow-sm">
                 <p className="mb-4 text-sm font-medium">Spend by Platform</p>
                 <PlatformDonut
                   data={platformData}

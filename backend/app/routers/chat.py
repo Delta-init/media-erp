@@ -28,6 +28,7 @@ from app.services.chat_service import (
     mark_read as db_mark_read,
     unread_counts as db_unread_counts,
 )
+from app.services import group_chat_service as groups
 from app.utils.jwt import decode_access_token
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
@@ -124,17 +125,54 @@ async def chat_ws(ws: WebSocket, token: str = Query(...)) -> None:
             if data.get("type") == "message":
                 to_id = str(data.get("to_user_id", "")).strip()
                 content = str(data.get("content", "")).strip()
-                if not to_id or not content:
+                attachments = data.get("attachments") or []
+                task_ids = [str(t) for t in (data.get("task_ids") or []) if t]
+                client_id = str(data.get("client_id", "")).strip()
+                if not to_id or not (content or attachments or task_ids):
                     continue
-                doc = await db_save_message(user_id, to_id, content)
-                envelope = {"type": "message", **message_to_dict(doc)}
+                doc = await db_save_message(user_id, to_id, content, attachments, task_ids)
+                from app.services.chat_service import resolve_task_snapshots
+                snapshots = await resolve_task_snapshots(task_ids)
+                envelope = {"type": "message", **message_to_dict(doc), "tasks": snapshots, "client_id": client_id}
                 await manager.send(user_id, envelope)
                 await manager.send(to_id, envelope)
+
+            elif data.get("type") == "group_message":
+                gid = str(data.get("group_id", "")).strip()
+                content = str(data.get("content", "")).strip()
+                attachments = data.get("attachments") or []
+                task_ids = [str(t) for t in (data.get("task_ids") or []) if t]
+                client_id = str(data.get("client_id", "")).strip()
+                if not gid or not (content or attachments or task_ids):
+                    continue
+                db = get_db()
+                member_ids = await groups.group_member_ids(db, gid)
+                if user_id not in member_ids and not await groups.is_elevated(db, user_id):
+                    continue  # not a member and not elevated — ignore
+                # Resolve sender name
+                sender_name = "Unknown"
+                try:
+                    sender = await db["users"].find_one({"_id": ObjectId(user_id)}, {"name": 1})
+                    if sender:
+                        sender_name = sender.get("name", "Unknown")
+                except (InvalidId, Exception):
+                    pass
+                doc = await groups.save_group_message(
+                    db, gid, user_id, sender_name, content,
+                    attachments=attachments, task_ids=task_ids,
+                )
+                from app.services.chat_service import resolve_task_snapshots
+                snapshots = await resolve_task_snapshots(task_ids)
+                envelope = {"type": "group_message", **groups.group_message_to_dict(doc), "tasks": snapshots, "client_id": client_id}
+                for mid in set(member_ids) | {user_id}:
+                    await manager.send(mid, envelope)
 
             elif data.get("type") == "read":
                 from_id = str(data.get("from_user_id", "")).strip()
                 if from_id:
                     await db_mark_read(from_id, user_id)
+                    # Tell the original sender their messages were read → live ✓✓
+                    await manager.send(from_id, {"type": "read", "by": user_id})
 
     except WebSocketDisconnect:
         pass
@@ -187,7 +225,8 @@ async def get_messages(
     docs = await db_get_messages(
         str(current_user["_id"]), other_id, limit, before_id
     )
-    return [message_to_dict(d) for d in docs]
+    from app.services.chat_service import attach_task_snapshots
+    return await attach_task_snapshots([message_to_dict(d) for d in docs])
 
 
 @router.put("/messages/{other_id}/read")
@@ -202,6 +241,79 @@ async def mark_read_endpoint(
 @router.get("/unread")
 async def get_unread_counts(current_user: dict = Depends(get_current_user)):
     return await db_unread_counts(str(current_user["_id"]))
+
+
+# ── Group chat endpoints ──────────────────────────────────────────────────────
+
+@router.get("/groups")
+async def list_groups(current_user: dict = Depends(get_current_user)):
+    """List team chat groups the caller belongs to (auto-provisions per team).
+
+    Elevated roles (Super Admin / Admin / Coordinator) see every team group.
+    """
+    db = get_db()
+    role_name = (current_user.get("_role") or {}).get("role_name", "")
+    include_all = role_name in ("Super Admin", "Admin", "Coordinator")
+    return await groups.list_groups_for_user(db, str(current_user["_id"]), include_all=include_all)
+
+
+@router.get("/groups/{group_id}/messages")
+async def get_group_messages_endpoint(
+    group_id: str,
+    limit: int = Query(50, le=100),
+    before_id: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_db()
+    uid = str(current_user["_id"])
+    role_name = (current_user.get("_role") or {}).get("role_name", "")
+    members = await groups.group_member_ids(db, group_id)
+    if uid not in members and role_name not in ("Super Admin", "Admin", "Coordinator"):
+        raise HTTPException(status_code=403, detail="Not a member of this group")
+    docs = await groups.get_group_messages(db, group_id, limit, before_id)
+    from app.services.chat_service import attach_task_snapshots
+    return await attach_task_snapshots([groups.group_message_to_dict(d) for d in docs])
+
+
+@router.post("/groups/{group_id}/report/send-now")
+async def send_group_report_now(
+    group_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Post the team's daily report into the group immediately.
+    Allowed for Super Admin/Admin/Coordinator and the team's leader.
+    """
+    db = get_db()
+    group = await groups.get_group(db, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    team = None
+    if ObjectId.is_valid(group.get("team_id", "")):
+        team = await db["teams"].find_one({"_id": ObjectId(group["team_id"])})
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    uid = str(current_user["_id"])
+    role_name = (current_user.get("_role") or {}).get("role_name", "")
+    is_leader = any(
+        m.get("user_id") == uid and m.get("role") == "leader"
+        for m in team.get("members", [])
+    )
+    if role_name not in ("Super Admin", "Admin", "Coordinator") and not is_leader:
+        raise HTTPException(status_code=403, detail="Leader or admin access required")
+
+    await groups.post_daily_report(db, group, team)
+    docs = await groups.get_group_messages(db, group_id, 1)
+    posted = groups.group_message_to_dict(docs[-1]) if docs else None
+
+    # Push live to any online members
+    for mid in group.get("members", []):
+        if posted:
+            await manager.send(mid, {"type": "group_message", **posted})
+
+    return {"ok": True, "message": posted}
 
 
 # ── Super Admin monitor endpoints ─────────────────────────────────────────────

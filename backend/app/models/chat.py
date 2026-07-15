@@ -5,5 +5,7 @@ def message_to_dict(doc: dict) -> dict:
         "to_user_id": doc["to_user_id"],
         "content": doc["content"],
         "read": doc.get("read", False),
+        "attachments": doc.get("attachments", []),
+        "task_ids": doc.get("task_ids", []),
         "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
     }

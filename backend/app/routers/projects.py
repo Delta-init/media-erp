@@ -297,6 +297,13 @@ async def add_task(
         current_user.get("name", ""),
     )
 
+    # Chat DM: notify the assignee + creator when work is assigned on creation
+    if task.get("assigned_to"):
+        from app.services import chat_notify
+        await chat_notify.dm_task_assigned(
+            db, task, str(current_user["_id"]), current_user.get("name", "")
+        )
+
     return success_response(data=task, message="Task created", status_code=201)
 
 
@@ -372,6 +379,44 @@ async def leader_queue(
         message="Leader queue",
     )
 
+
+
+@router.get("/{task_id}")
+async def get_task_detail(
+    task_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """
+    Full detail for a single task (used by the detail modal, incl. from chat
+    task references). Visible to elevated roles, the assignee, the creator, or
+    any member of the task's team.
+    """
+    from bson import ObjectId
+    from bson.errors import InvalidId
+    from app.services.project_service import _serialize
+
+    try:
+        oid = ObjectId(task_id)
+    except InvalidId:
+        return error_response("Invalid task ID", status_code=422)
+    doc = await db["project_tasks"].find_one({"_id": oid})
+    if not doc:
+        return error_response("Task not found", status_code=404)
+
+    uid = str(current_user["_id"])
+    role_name = (current_user.get("_role") or {}).get("role_name", "")
+    allowed = role_name in ("Super Admin", "Admin", "Coordinator")
+    if not allowed and uid in (doc.get("assigned_to", ""), doc.get("created_by", "")):
+        allowed = True
+    if not allowed and doc.get("team_id") and ObjectId.is_valid(doc["team_id"]):
+        team = await db["teams"].find_one({"_id": ObjectId(doc["team_id"])}, {"members": 1})
+        if team and any(m.get("user_id") == uid for m in team.get("members", [])):
+            allowed = True
+    if not allowed:
+        return error_response("You don't have access to this task", status_code=403)
+
+    return success_response(data=_serialize(doc), message="Task retrieved")
 
 
 @router.put("/{task_id}")
@@ -457,6 +502,17 @@ async def edit_task(
             db, task, "assigned",
             str(current_user["_id"]),
             current_user.get("name", ""),
+        )
+        from app.services import chat_notify
+        await chat_notify.dm_task_assigned(
+            db, task, str(current_user["_id"]), current_user.get("name", "")
+        )
+
+    # Chat DM: notify team leader(s) + creator when a task is completed (approved)
+    if new_status == "approved" and cur_status != "approved":
+        from app.services import chat_notify
+        await chat_notify.dm_task_completed(
+            db, task, str(current_user["_id"]), current_user.get("name", "")
         )
 
     # ── Destination routing (only on approve) ─────────────────────────────────

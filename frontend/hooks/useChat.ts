@@ -1,9 +1,29 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import api from "@/lib/axios";
-import type { ChatMessage, ChatUser, ConversationPair, WsIncoming } from "@/types/chat";
+import type {
+  ChatAttachment,
+  ChatGroup,
+  ChatMessage,
+  ChatUser,
+  ConversationPair,
+  GroupMessage,
+  TaskRef,
+  WsIncoming,
+} from "@/types/chat";
+
+export interface SendExtras {
+  attachments?: ChatAttachment[];
+  taskIds?: string[];
+}
+
+function newClientId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 // ── REST queries ──────────────────────────────────────────────────────────────
 
@@ -13,6 +33,26 @@ export function useChatUsers() {
     queryFn: () => api.get("/chat/users").then((r) => r.data),
     refetchInterval: 30_000,
     staleTime: 10_000,
+  });
+}
+
+/** Tasks the current user can reference (@mention) in chat. */
+export function useMentionableTasks(search: string) {
+  return useQuery<TaskRef[]>({
+    queryKey: ["chat", "mention-tasks", search],
+    queryFn: async () => {
+      const { data } = await api.get<{ success: boolean; data: Array<{ id: string; title: string; status: string; priority: string }> }>(
+        "/projects",
+        { params: search ? { search } : {} }
+      );
+      return (data.data ?? []).map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        priority: t.priority,
+      }));
+    },
+    staleTime: 15_000,
   });
 }
 
@@ -31,6 +71,42 @@ export function useUnreadCounts() {
     queryFn: () => api.get("/chat/unread").then((r) => r.data),
     refetchInterval: 20_000,
     staleTime: 5_000,
+  });
+}
+
+// ── Group chat ────────────────────────────────────────────────────────────────
+
+export function useGroups() {
+  return useQuery<ChatGroup[]>({
+    queryKey: ["chat", "groups"],
+    queryFn: () => api.get("/chat/groups").then((r) => r.data),
+    refetchInterval: 20_000,
+    staleTime: 10_000,
+  });
+}
+
+export function useGroupMessages(groupId: string | null) {
+  return useQuery<GroupMessage[]>({
+    queryKey: ["chat", "group-messages", groupId],
+    queryFn: () => api.get(`/chat/groups/${groupId}/messages`).then((r) => r.data),
+    enabled: !!groupId,
+    // Poll so the automated 9 PM IST report (posted by the backend daemon) shows up
+    refetchInterval: 12_000,
+    staleTime: 0,
+  });
+}
+
+export function useSendGroupReportNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (groupId: string) =>
+      api.post(`/chat/groups/${groupId}/report/send-now`).then((r) => r.data),
+    onSuccess: (_data, groupId) => {
+      qc.invalidateQueries({ queryKey: ["chat", "group-messages", groupId] });
+      qc.invalidateQueries({ queryKey: ["chat", "groups"] });
+      toast.success("Daily report posted to the group");
+    },
+    onError: () => toast.error("Failed to post daily report"),
   });
 }
 
@@ -98,17 +174,28 @@ export function useChatSocket(currentUserId: string | null) {
           )
         );
       } else if (data.type === "message") {
-        const msg = data as ChatMessage & { type: "message" };
+        const msg = { ...(data as ChatMessage & { type: "message" }), status: "sent" as const };
         const partnerId =
           msg.from_user_id === currentUserId
             ? msg.to_user_id
             : msg.from_user_id;
 
-        // Append message to the right conversation cache
+        // Reconcile an optimistic message (matched by client_id) or append
         qc.setQueryData<ChatMessage[]>(
           ["chat", "messages", partnerId],
-          (prev = []) =>
-            prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
+          (prev = []) => {
+            if (msg.client_id) {
+              const idx = prev.findIndex(
+                (m) => m.client_id === msg.client_id || m.id === msg.client_id
+              );
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = msg;
+                return next;
+              }
+            }
+            return prev.some((m) => m.id === msg.id) ? prev : [...prev, msg];
+          }
         );
 
         // Increment unread badge for incoming messages only
@@ -121,6 +208,35 @@ export function useChatSocket(currentUserId: string | null) {
             })
           );
         }
+      } else if (data.type === "read") {
+        // The partner (data.by) read our messages → flip our ✓ to ✓✓
+        qc.setQueryData<ChatMessage[]>(
+          ["chat", "messages", data.by],
+          (prev = []) =>
+            prev.map((m) =>
+              m.from_user_id === currentUserId ? { ...m, read: true } : m
+            )
+        );
+      } else if (data.type === "group_message") {
+        const gm = { ...(data as GroupMessage & { type: "group_message" }), status: "sent" as const };
+        qc.setQueryData<GroupMessage[]>(
+          ["chat", "group-messages", gm.group_id],
+          (prev = []) => {
+            if (gm.client_id) {
+              const idx = prev.findIndex(
+                (m) => m.client_id === gm.client_id || m.id === gm.client_id
+              );
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = gm;
+                return next;
+              }
+            }
+            return prev.some((m) => m.id === gm.id) ? prev : [...prev, gm];
+          }
+        );
+        // Refresh the group list preview
+        qc.invalidateQueries({ queryKey: ["chat", "groups"] });
       }
     };
 
@@ -149,14 +265,81 @@ export function useChatSocket(currentUserId: string | null) {
   // ── Actions ───────────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(
-    (toUserId: string, content: string) => {
+    (toUserId: string, content: string, extras?: SendExtras) => {
+      const clientId = newClientId();
+      // Optimistic: show the message instantly with a "sending" state
+      if (currentUserId) {
+        const optimistic: ChatMessage = {
+          id: clientId,
+          client_id: clientId,
+          from_user_id: currentUserId,
+          to_user_id: toUserId,
+          content,
+          read: false,
+          attachments: extras?.attachments ?? [],
+          task_ids: extras?.taskIds ?? [],
+          tasks: [],
+          status: "sending",
+          created_at: new Date().toISOString(),
+        };
+        qc.setQueryData<ChatMessage[]>(["chat", "messages", toUserId], (prev = []) => [
+          ...prev,
+          optimistic,
+        ]);
+      }
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(
-          JSON.stringify({ type: "message", to_user_id: toUserId, content })
+          JSON.stringify({
+            type: "message",
+            to_user_id: toUserId,
+            content,
+            attachments: extras?.attachments ?? [],
+            task_ids: extras?.taskIds ?? [],
+            client_id: clientId,
+          })
         );
       }
     },
-    []
+    [currentUserId, qc]
+  );
+
+  const sendGroupMessage = useCallback(
+    (groupId: string, content: string, extras?: SendExtras) => {
+      const clientId = newClientId();
+      if (currentUserId) {
+        const optimistic: GroupMessage = {
+          id: clientId,
+          client_id: clientId,
+          group_id: groupId,
+          from_user_id: currentUserId,
+          from_user_name: "",
+          content,
+          is_system: false,
+          attachments: extras?.attachments ?? [],
+          task_ids: extras?.taskIds ?? [],
+          tasks: [],
+          status: "sending",
+          created_at: new Date().toISOString(),
+        };
+        qc.setQueryData<GroupMessage[]>(["chat", "group-messages", groupId], (prev = []) => [
+          ...prev,
+          optimistic,
+        ]);
+      }
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "group_message",
+            group_id: groupId,
+            content,
+            attachments: extras?.attachments ?? [],
+            task_ids: extras?.taskIds ?? [],
+            client_id: clientId,
+          })
+        );
+      }
+    },
+    [currentUserId, qc]
   );
 
   const sendRead = useCallback(
@@ -176,5 +359,5 @@ export function useChatSocket(currentUserId: string | null) {
     [qc]
   );
 
-  return { sendMessage, sendRead };
+  return { sendMessage, sendGroupMessage, sendRead };
 }

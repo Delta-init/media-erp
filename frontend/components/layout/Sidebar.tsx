@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -38,8 +39,6 @@ import { useTeams } from "@/hooks/useTeams";
 import { useLeaderQueue } from "@/hooks/useProjects";
 import ThemeToggle from "@/components/shared/ThemeToggle";
 import {
-  backdropVariants,
-  drawerVariants,
   listVariants,
   navItemVariants,
 } from "@/lib/animations";
@@ -49,7 +48,7 @@ const NAV_ITEMS = [
   { label: "Connectors",    href: "/connectors",     icon: Cable,           module: "connectors", hidden: true },
   { label: "Reports",       href: "/reports",        icon: TrendingUp,      module: "reports",  hidden: true },
   { label: "Analytics",     href: "/analytics",      icon: BarChart2,                           hidden: true },
-  { label: "Campaigns",     href: "/campaigns",      icon: Target,          module: "campaigns" },
+  { label: "Campaigns",     href: "/campaigns",      icon: Target,          module: "campaigns", hidden: true },
   { label: "Schedule",      href: "/schedule",       icon: CalendarDays,                        hidden: true },
   { label: "Rules",         href: "/rules",          icon: Zap,                                 hidden: true },
   { label: "Email Reports", href: "/email-reports",  icon: Mail,                                hidden: true },
@@ -332,6 +331,14 @@ function SidebarContent({
 export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mobileOpen, setMobileOpen } =
     useUiStore();
+  const pathname = usePathname();
+
+  // Always close the mobile drawer when the route changes. Otherwise the drawer
+  // and its full-screen backdrop can linger (AnimatePresence can skip the
+  // unmount when navigation re-renders the tree mid-exit) and swallow every tap.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname, setMobileOpen]);
 
   return (
     <>
@@ -361,35 +368,32 @@ export function Sidebar() {
         </motion.button>
       </motion.aside>
 
-      {/* Mobile overlay */}
-      <AnimatePresence>
-        {mobileOpen && (
-          <>
-            <motion.div
-              key="backdrop"
-              variants={backdropVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="fixed inset-0 z-40 bg-black/50 lg:hidden"
-              onClick={() => setMobileOpen(false)}
-            />
-            <motion.aside
-              key="drawer"
-              variants={drawerVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
-              className="fixed left-0 top-0 z-50 h-full w-64 lg:hidden"
-            >
-              <SidebarContent
-                collapsed={false}
-                onNavClick={() => setMobileOpen(false)}
-              />
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
+      {/* Mobile overlay — always mounted, toggled via `animate` + `pointer-events`.
+          A conditional AnimatePresence overlay could get its unmount skipped when
+          a nav tap navigates mid-exit, leaving an invisible backdrop that
+          swallowed every click. Gating pointer-events on `mobileOpen` guarantees a
+          closed overlay can never block interaction. */}
+      <motion.div
+        aria-hidden={!mobileOpen}
+        initial={false}
+        animate={{ opacity: mobileOpen ? 1 : 0 }}
+        transition={{ duration: 0.2 }}
+        style={{ pointerEvents: mobileOpen ? "auto" : "none" }}
+        className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+        onClick={() => setMobileOpen(false)}
+      />
+      <motion.aside
+        initial={false}
+        animate={{ x: mobileOpen ? 0 : "-100%" }}
+        transition={{ type: "spring", stiffness: 320, damping: 34 }}
+        style={{ pointerEvents: mobileOpen ? "auto" : "none" }}
+        className="fixed left-0 top-0 z-50 h-full w-64 lg:hidden"
+      >
+        <SidebarContent
+          collapsed={false}
+          onNavClick={() => setMobileOpen(false)}
+        />
+      </motion.aside>
     </>
   );
 }

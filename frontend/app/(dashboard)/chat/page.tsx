@@ -1,15 +1,25 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  ArrowLeft,
+  AtSign,
+  Check,
+  CheckCheck,
+  Clock,
   Eye,
+  FileText,
   Loader2,
   MessageSquare,
+  Paperclip,
   Search,
   Send,
   ShieldAlert,
   Users,
+  UsersRound,
+  Megaphone,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -20,9 +30,17 @@ import {
   useChatMessages,
   useChatSocket,
   useChatUsers,
+  useGroups,
+  useGroupMessages,
+  useMentionableTasks,
+  useSendGroupReportNow,
   useUnreadCounts,
+  type SendExtras,
 } from "@/hooks/useChat";
-import type { ChatMessage, ChatUser, ConversationPair } from "@/types/chat";
+import { useUploadAttachments } from "@/hooks/useUpload";
+import { useTaskDetail } from "@/hooks/useProjects";
+import { TaskDetailModal } from "@/components/projects/TaskDetailModal";
+import type { ChatAttachment, ChatGroup, ChatMessage, ChatUser, ConversationPair, GroupMessage, TaskRef } from "@/types/chat";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +92,286 @@ function groupByDate(msgs: ChatMessage[]) {
     else groups[groups.length - 1].msgs.push(m);
   }
   return groups;
+}
+
+// ── Attachments + task refs + composer ────────────────────────────────────────
+
+const TASK_STATUS_META: Record<string, { label: string; color: string }> = {
+  pending:        { label: "Pending",   color: "#6366f1" },
+  started:        { label: "Started",   color: "#3b82f6" },
+  break:          { label: "Break",     color: "#f97316" },
+  reedit:         { label: "Reedit",    color: "#ef4444" },
+  pending_review: { label: "In Review", color: "#8b5cf6" },
+  approved:       { label: "Approved",  color: "#22c55e" },
+};
+
+function isImage(ct: string) {
+  return (ct || "").startsWith("image/");
+}
+
+function ChatTaskModal({ taskId, onClose }: { taskId: string; onClose: () => void }) {
+  const { data: task, isLoading, isError } = useTaskDetail(taskId);
+
+  if (isLoading || (!task && !isError)) {
+    return createPortal(
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      >
+        <Loader2 className="size-6 animate-spin text-white" />
+      </div>,
+      document.body
+    );
+  }
+
+  if (isError || !task) {
+    return createPortal(
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+        onClick={onClose}
+      >
+        <div className="rounded-2xl border bg-card p-6 text-center" onClick={(e) => e.stopPropagation()}>
+          <p className="text-sm text-muted-foreground">Task not found or access denied.</p>
+          <button onClick={onClose} className="mt-3 text-xs font-medium text-primary">Close</button>
+        </div>
+      </div>,
+      document.body
+    );
+  }
+
+  return <TaskDetailModal task={task} readOnly onClose={onClose} />;
+}
+
+function MessageExtras({ attachments, tasks }: { attachments?: ChatAttachment[]; tasks?: TaskRef[] }) {
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const hasAny = (attachments && attachments.length) || (tasks && tasks.length);
+  if (!hasAny) return null;
+  return (
+    <div className="mt-1.5 space-y-1.5">
+      {attachments?.map((a, i) =>
+        isImage(a.content_type) ? (
+          <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={a.url} alt={a.filename} className="max-h-52 max-w-full rounded-lg border object-cover" />
+          </a>
+        ) : (
+          <a
+            key={i}
+            href={a.url}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 rounded-lg border bg-background/70 px-3 py-2 text-xs hover:bg-muted transition-colors"
+          >
+            <FileText className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{a.filename}</span>
+          </a>
+        )
+      )}
+      {tasks?.map((t) => {
+        const meta = TASK_STATUS_META[t.status] ?? { label: t.status, color: "#6366f1" };
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setOpenTaskId(t.id)}
+            className="flex w-full items-center gap-2 rounded-lg border bg-background/70 px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors"
+          >
+            <AtSign className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate font-medium">{t.title}</span>
+            <span
+              className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white"
+              style={{ background: meta.color }}
+            >
+              {meta.label}
+            </span>
+          </button>
+        );
+      })}
+      {openTaskId && <ChatTaskModal taskId={openTaskId} onClose={() => setOpenTaskId(null)} />}
+    </div>
+  );
+}
+
+function ChatComposer({
+  placeholder,
+  onSend,
+}: {
+  placeholder: string;
+  onSend: (content: string, extras: SendExtras) => void;
+}) {
+  const [text, setText] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [tasks, setTasks] = useState<TaskRef[]>([]);
+  const [showMention, setShowMention] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState("");
+  const upload = useUploadAttachments();
+  const { data: mentionTasks = [], isLoading: tasksLoading } = useMentionableTasks(mentionSearch);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  const canSend = !!(text.trim() || attachments.length || tasks.length);
+
+  function doSend() {
+    if (!canSend) return;
+    onSend(text.trim(), { attachments, taskIds: tasks.map((t) => t.id) });
+    setText("");
+    setAttachments([]);
+    setTasks([]);
+    setShowMention(false);
+    if (taRef.current) taRef.current.style.height = "auto";
+  }
+
+  function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      doSend();
+    }
+  }
+
+  function onInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setText(e.target.value);
+    const el = e.target;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }
+
+  async function onPickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    const uploaded = await upload.mutateAsync(files);
+    setAttachments((prev) => [
+      ...prev,
+      ...uploaded.map((u) => ({
+        url: u.url,
+        filename: u.filename,
+        content_type: u.content_type,
+        size: u.size,
+      })),
+    ]);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  function toggleTask(t: TaskRef) {
+    setTasks((prev) => (prev.some((x) => x.id === t.id) ? prev.filter((x) => x.id !== t.id) : [...prev, t]));
+  }
+
+  return (
+    <div className="shrink-0 border-t bg-card/60 px-4 py-3">
+      {/* Pending attachments / task chips */}
+      {(attachments.length > 0 || tasks.length > 0) && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {attachments.map((a, i) => (
+            <span key={`a-${i}`} className="flex items-center gap-1.5 rounded-lg border bg-background px-2 py-1 text-xs">
+              {isImage(a.content_type) ? <Paperclip className="size-3" /> : <FileText className="size-3" />}
+              <span className="max-w-[140px] truncate">{a.filename}</span>
+              <button type="button" onClick={() => setAttachments((p) => p.filter((_, j) => j !== i))}>
+                <X className="size-3 text-muted-foreground hover:text-destructive" />
+              </button>
+            </span>
+          ))}
+          {tasks.map((t) => (
+            <span key={`t-${t.id}`} className="flex items-center gap-1.5 rounded-lg border bg-primary/10 px-2 py-1 text-xs text-primary">
+              <AtSign className="size-3" />
+              <span className="max-w-[140px] truncate">{t.title}</span>
+              <button type="button" onClick={() => toggleTask(t)}>
+                <X className="size-3 hover:text-destructive" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Mention picker */}
+      {showMention && (
+        <div className="mb-2 rounded-xl border bg-card shadow-lg">
+          <div className="border-b p-2">
+            <input
+              autoFocus
+              value={mentionSearch}
+              onChange={(e) => setMentionSearch(e.target.value)}
+              placeholder="Search tasks to mention…"
+              className="w-full rounded-lg bg-muted/50 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto p-1">
+            {tasksLoading ? (
+              <div className="flex justify-center py-4"><Loader2 className="size-4 animate-spin text-muted-foreground/50" /></div>
+            ) : mentionTasks.length === 0 ? (
+              <p className="py-4 text-center text-xs text-muted-foreground">No tasks found</p>
+            ) : (
+              mentionTasks.slice(0, 20).map((t) => {
+                const meta = TASK_STATUS_META[t.status] ?? { label: t.status, color: "#6366f1" };
+                const selected = tasks.some((x) => x.id === t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => toggleTask(t)}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
+                      selected ? "bg-primary/10" : "hover:bg-muted"
+                    )}
+                  >
+                    <span className="flex-1 truncate">{t.title}</span>
+                    <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{ background: meta.color }}>
+                      {meta.label}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-end gap-2">
+        <input ref={fileRef} type="file" multiple className="hidden" onChange={onPickFiles} />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={upload.isPending}
+          className="flex size-[42px] shrink-0 items-center justify-center rounded-2xl border hover:bg-muted transition-colors disabled:opacity-50"
+          title="Attach file"
+        >
+          {upload.isPending ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowMention((v) => !v)}
+          className={cn(
+            "flex size-[42px] shrink-0 items-center justify-center rounded-2xl border transition-colors",
+            showMention ? "bg-primary/10 text-primary" : "hover:bg-muted"
+          )}
+          title="Mention a task"
+        >
+          <AtSign className="size-4" />
+        </button>
+        <textarea
+          ref={taRef}
+          value={text}
+          onChange={onInput}
+          onKeyDown={onKey}
+          placeholder={placeholder}
+          rows={1}
+          className="flex-1 resize-none overflow-hidden rounded-2xl border bg-background px-4 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/25 transition"
+          style={{ minHeight: "42px", maxHeight: "120px" }}
+        />
+        <button
+          type="button"
+          onClick={doSend}
+          disabled={!canSend}
+          className={cn(
+            "flex size-[42px] shrink-0 items-center justify-center rounded-2xl transition-all",
+            canSend
+              ? "bg-primary text-primary-foreground hover:bg-primary/90 active:scale-95 shadow-sm"
+              : "bg-muted text-muted-foreground/40 cursor-not-allowed"
+          )}
+        >
+          <Send className="size-4" />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── Shared UI atoms ───────────────────────────────────────────────────────────
@@ -170,9 +468,12 @@ function Bubble({
             : "bg-card border text-foreground rounded-bl-[5px] shadow-sm"
         )}
       >
-        <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-          {msg.content}
-        </p>
+        {msg.content && (
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+            {msg.content}
+          </p>
+        )}
+        <MessageExtras attachments={msg.attachments} tasks={msg.tasks} />
         <p
           className={cn(
             "mt-0.5 text-right text-[10px]",
@@ -181,7 +482,15 @@ function Bubble({
         >
           {fmtTime(msg.created_at)}
           {isOwn && !monitorMode && (
-            <span className="ml-1">{msg.read ? "✓✓" : "✓"}</span>
+            <span className="ml-1 inline-flex items-center align-middle">
+              {msg.status === "sending" ? (
+                <Clock className="size-3 opacity-70" />
+              ) : msg.read ? (
+                <CheckCheck className="size-3.5 text-sky-300" />
+              ) : (
+                <Check className="size-3.5" />
+              )}
+            </span>
           )}
         </p>
       </div>
@@ -195,46 +504,33 @@ function MyChatWindow({
   partner,
   myId,
   sendMessage,
+  onBack,
 }: {
   partner: ChatUser;
   myId: string;
-  sendMessage: (to: string, text: string) => void;
+  sendMessage: (to: string, text: string, extras?: SendExtras) => void;
+  onBack?: () => void;
 }) {
   const { data: messages = [], isLoading } = useChatMessages(partner.id);
-  const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
-  const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const send = useCallback(() => {
-    const t = text.trim();
-    if (!t) return;
-    sendMessage(partner.id, t);
-    setText("");
-    if (taRef.current) taRef.current.style.height = "auto";
-  }, [text, partner.id, sendMessage]);
-
-  function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
-  }
-
-  function onInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setText(e.target.value);
-    const el = e.target;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-  }
-
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
-      <div className="flex items-center gap-3 shrink-0 border-b bg-card/60 px-5 py-3.5">
+      <div className="flex items-center gap-3 shrink-0 border-b bg-card/60 px-4 py-3 lg:px-5 lg:py-3.5">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="-ml-1 rounded-lg p-1.5 text-muted-foreground hover:bg-muted lg:hidden"
+            aria-label="Back to conversations"
+          >
+            <ArrowLeft className="size-5" />
+          </button>
+        )}
         <Avatar name={partner.name} online={partner.online} size="sm" />
         <div>
           <p className="text-sm font-semibold leading-tight">{partner.name}</p>
@@ -273,38 +569,212 @@ function MyChatWindow({
         <div ref={endRef} />
       </div>
 
-      {/* Input */}
-      <div className="shrink-0 border-t bg-card/60 px-4 py-3">
-        <div className="flex items-end gap-2.5">
-          <textarea
-            ref={taRef}
-            value={text}
-            onChange={onInput}
-            onKeyDown={onKey}
-            placeholder={`Message ${partner.name.split(" ")[0]}…`}
-            rows={1}
-            className="flex-1 resize-none overflow-hidden rounded-2xl border bg-background px-4 py-2.5 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/25 transition"
-            style={{ minHeight: "42px", maxHeight: "120px" }}
-          />
-          <button
-            type="button"
-            onClick={send}
-            disabled={!text.trim()}
-            className={cn(
-              "flex size-[42px] shrink-0 items-center justify-center rounded-2xl transition-all",
-              text.trim()
-                ? "bg-primary text-primary-foreground hover:bg-primary/90 active:scale-95 shadow-sm"
-                : "bg-muted text-muted-foreground/40 cursor-not-allowed"
-            )}
-          >
-            <Send className="size-4" />
-          </button>
+      <ChatComposer
+        placeholder={`Message ${partner.name.split(" ")[0]}…`}
+        onSend={(content, extras) => sendMessage(partner.id, content, extras)}
+      />
+    </div>
+  );
+}
+
+// ── Group chat ────────────────────────────────────────────────────────────────
+
+function GroupAvatar({ name, color, size = "md" }: { name: string; color: string; size?: "sm" | "md" }) {
+  const sz = size === "sm" ? "size-8" : "size-10";
+  return (
+    <div
+      className={cn(sz, "flex items-center justify-center rounded-xl text-xs font-bold text-white shrink-0 select-none")}
+      style={{ background: color || "#6366f1" }}
+    >
+      {(name || "?").charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+function groupMsgsByDate(msgs: GroupMessage[]) {
+  const groups: { date: string; msgs: GroupMessage[] }[] = [];
+  for (const m of msgs) {
+    const d = fmtDate(m.created_at);
+    if (!groups.length || groups[groups.length - 1].date !== d) groups.push({ date: d, msgs: [m] });
+    else groups[groups.length - 1].msgs.push(m);
+  }
+  return groups;
+}
+
+function GroupBubble({ msg, isOwn }: { msg: GroupMessage; isOwn: boolean }) {
+  if (msg.is_system) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex justify-center"
+      >
+        <div className="max-w-[85%] rounded-2xl border border-primary/20 bg-primary/5 px-4 py-2.5">
+          <div className="flex items-center gap-1.5 mb-1 text-primary">
+            <Megaphone className="size-3.5" />
+            <span className="text-[11px] font-semibold">{msg.from_user_name}</span>
+          </div>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words text-foreground">{msg.content}</p>
+          <MessageExtras attachments={msg.attachments} tasks={msg.tasks} />
+          <p className="mt-1 text-right text-[10px] text-muted-foreground">{fmtTime(msg.created_at)}</p>
         </div>
-        <p className="mt-1 text-center text-[10px] text-muted-foreground/35">
-          Enter to send · Shift + Enter for new line
+      </motion.div>
+    );
+  }
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: "spring", stiffness: 420, damping: 36 }}
+      className={cn("flex flex-col", isOwn ? "items-end" : "items-start")}
+    >
+      {!isOwn && (
+        <span className="mb-0.5 px-1 text-[10px] font-medium text-muted-foreground">{msg.from_user_name}</span>
+      )}
+      <div
+        className={cn(
+          "max-w-[72%] rounded-2xl px-4 py-2.5",
+          isOwn
+            ? "bg-primary text-primary-foreground rounded-br-[5px] shadow-sm"
+            : "bg-card border text-foreground rounded-bl-[5px] shadow-sm"
+        )}
+      >
+        {msg.content && (
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
+        )}
+        <MessageExtras attachments={msg.attachments} tasks={msg.tasks} />
+        <p className={cn("mt-0.5 flex items-center justify-end gap-1 text-[10px]", isOwn ? "text-primary-foreground/60" : "text-muted-foreground")}>
+          {fmtTime(msg.created_at)}
+          {isOwn && (
+            msg.status === "sending"
+              ? <Clock className="size-3 opacity-70" />
+              : <Check className="size-3.5" />
+          )}
         </p>
       </div>
+    </motion.div>
+  );
+}
+
+function GroupChatWindow({
+  group,
+  myId,
+  isPrivileged,
+  sendGroupMessage,
+  onBack,
+}: {
+  group: ChatGroup;
+  myId: string;
+  isPrivileged: boolean;
+  sendGroupMessage: (groupId: string, text: string, extras?: SendExtras) => void;
+  onBack?: () => void;
+}) {
+  const { data: messages = [], isLoading } = useGroupMessages(group.id);
+  const sendReport = useSendGroupReportNow();
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Header */}
+      <div className="flex items-center gap-3 shrink-0 border-b bg-card/60 px-4 py-3 lg:px-5">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="-ml-1 rounded-lg p-1.5 text-muted-foreground hover:bg-muted lg:hidden"
+            aria-label="Back to conversations"
+          >
+            <ArrowLeft className="size-5" />
+          </button>
+        )}
+        <GroupAvatar name={group.name} color={group.color} size="sm" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold leading-tight truncate">{group.name}</p>
+          <p className="text-[11px] text-muted-foreground truncate">
+            {group.member_count} member{group.member_count !== 1 ? "s" : ""} · Daily report at 9 PM IST
+          </p>
+        </div>
+        {isPrivileged && (
+          <button
+            type="button"
+            onClick={() => sendReport.mutate(group.id)}
+            disabled={sendReport.isPending}
+            className="ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+            title="Post today's report now"
+          >
+            {sendReport.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Megaphone className="size-3.5" />}
+            <span className="hidden sm:inline">Send report now</span>
+          </button>
+        )}
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="size-5 animate-spin text-muted-foreground/50" />
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground/40">
+            <UsersRound className="size-10" />
+            <div className="text-center">
+              <p className="text-sm font-medium">No messages yet</p>
+              <p className="text-xs mt-0.5">The daily report posts here at 9 PM IST.</p>
+            </div>
+          </div>
+        ) : (
+          groupMsgsByDate(messages).map((g) => (
+            <div key={g.date}>
+              <DateSeparator label={g.date} />
+              <div className="space-y-1.5">
+                {g.msgs.map((m) => (
+                  <GroupBubble key={m.id} msg={m} isOwn={m.from_user_id === myId} />
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+        <div ref={endRef} />
+      </div>
+
+      <ChatComposer
+        placeholder={`Message ${group.name}…`}
+        onSend={(content, extras) => sendGroupMessage(group.id, content, extras)}
+      />
     </div>
+  );
+}
+
+function GroupRow({ group, selected, onClick }: { group: ChatGroup; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left cursor-pointer transition-all duration-150 outline-none",
+        selected ? "bg-primary/10 shadow-sm" : "hover:bg-muted/70 active:bg-muted"
+      )}
+    >
+      <GroupAvatar name={group.name} color={group.color} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <span className={cn("text-sm font-medium truncate", selected ? "text-primary" : "text-foreground")}>
+            {group.name}
+          </span>
+          {group.last_at && (
+            <span className="shrink-0 text-[10px] text-muted-foreground">{fmtRelative(group.last_at)}</span>
+          )}
+        </div>
+        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+          {group.last_message
+            ? `${group.last_sender_name ? group.last_sender_name + ": " : ""}${group.last_message}`
+            : `${group.member_count} member${group.member_count !== 1 ? "s" : ""}`}
+        </p>
+      </div>
+    </button>
   );
 }
 
@@ -364,7 +834,7 @@ function ConvRow({
 
 // ── Monitor: read-only thread ─────────────────────────────────────────────────
 
-function MonitorThread({ conv }: { conv: ConversationPair }) {
+function MonitorThread({ conv, onBack }: { conv: ConversationPair; onBack?: () => void }) {
   const { data: messages = [], isLoading } = useAdminMessages(conv.user_a_id, conv.user_b_id);
   const endRef = useRef<HTMLDivElement>(null);
   const userNames: Record<string, string> = {
@@ -379,7 +849,16 @@ function MonitorThread({ conv }: { conv: ConversationPair }) {
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Monitoring banner */}
-      <div className="shrink-0 flex items-center gap-3 border-b bg-amber-500/5 px-5 py-3">
+      <div className="shrink-0 flex items-center gap-3 border-b bg-amber-500/5 px-4 py-3 lg:px-5">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="-ml-1 rounded-lg p-1.5 text-muted-foreground hover:bg-muted lg:hidden"
+            aria-label="Back to conversations"
+          >
+            <ArrowLeft className="size-5" />
+          </button>
+        )}
         <div className="flex items-center gap-2">
           <div className="relative h-8 w-10 shrink-0">
             <div className="absolute left-0"><Avatar name={conv.user_a_name} size="sm" color="amber" /></div>
@@ -448,9 +927,11 @@ function MonitorThread({ conv }: { conv: ConversationPair }) {
 function MonitorPanel({
   selected,
   onSelect,
+  hideOnMobile = false,
 }: {
   selected: ConversationPair | null;
   onSelect: (c: ConversationPair) => void;
+  hideOnMobile?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const { data: convs = [], isLoading, isError } = useAdminConversations(true);
@@ -462,7 +943,7 @@ function MonitorPanel({
   );
 
   return (
-    <div className="flex flex-col w-72 shrink-0 border-r">
+    <div className={cn("flex-col w-full lg:w-72 shrink-0 border-r", hideOnMobile ? "hidden lg:flex" : "flex")}>
       {/* Header */}
       <div className="shrink-0 px-4 py-4 border-b bg-amber-500/5">
         <div className="flex items-center justify-between">
@@ -545,13 +1026,24 @@ function MonitorPanel({
 function PeoplePanel({
   selectedId,
   onSelect,
+  selectedGroupId,
+  onSelectGroup,
+  hideOnMobile = false,
 }: {
   selectedId: string | null;
   onSelect: (id: string) => void;
+  selectedGroupId: string | null;
+  onSelectGroup: (id: string) => void;
+  hideOnMobile?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const { data: users = [], isLoading, isError } = useChatUsers();
   const { data: unread = {} } = useUnreadCounts();
+  const { data: groups = [] } = useGroups();
+
+  const filteredGroups = groups.filter((g) =>
+    g.name.toLowerCase().includes(search.toLowerCase())
+  );
 
   const sorted = [...users]
     .filter(
@@ -567,7 +1059,7 @@ function PeoplePanel({
   const onlineCount = users.filter((u) => u.online).length;
 
   return (
-    <div className="flex flex-col w-72 shrink-0 border-r bg-card/30">
+    <div className={cn("flex-col w-full lg:w-72 shrink-0 border-r bg-card/30", hideOnMobile ? "hidden lg:flex" : "flex")}>
       <div className="shrink-0 px-4 py-4 border-b">
         <div className="flex items-center justify-between">
           <div>
@@ -616,6 +1108,27 @@ function PeoplePanel({
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-3 space-y-0.5">
+        {/* Team groups */}
+        {filteredGroups.length > 0 && (
+          <>
+            <p className="px-2 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              Team Groups
+            </p>
+            {filteredGroups.map((g) => (
+              <GroupRow
+                key={g.id}
+                group={g}
+                selected={selectedGroupId === g.id}
+                onClick={() => onSelectGroup(g.id)}
+              />
+            ))}
+            <div className="my-2 border-t" />
+            <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              Direct Messages
+            </p>
+          </>
+        )}
+
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="size-5 animate-spin text-muted-foreground/50" />
@@ -719,8 +1232,26 @@ export default function ChatPage() {
 
   // Normal chat state
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const { data: users = [] } = useChatUsers();
-  const { sendMessage, sendRead } = useChatSocket(myId);
+  const { data: groups = [] } = useGroups();
+  const { sendMessage, sendGroupMessage, sendRead } = useChatSocket(myId);
+
+  const isPrivileged =
+    !!me?.role && ["Super Admin", "Admin", "Coordinator"].includes(me.role.role_name);
+
+  function selectUser(id: string) {
+    setSelectedGroupId(null);
+    setSelectedUserId(id);
+  }
+  function selectGroup(id: string) {
+    setSelectedUserId(null);
+    setSelectedGroupId(id);
+  }
+  function clearSelection() {
+    setSelectedUserId(null);
+    setSelectedGroupId(null);
+  }
 
   // Monitor state
   const [selectedConv, setSelectedConv] = useState<ConversationPair | null>(null);
@@ -735,10 +1266,13 @@ export default function ChatPage() {
   function switchMode(m: "chat" | "monitor") {
     setMode(m);
     setSelectedUserId(null);
+    setSelectedGroupId(null);
     setSelectedConv(null);
   }
 
   const selectedUser = users.find((u) => u.id === selectedUserId) ?? null;
+  const selectedGroup = groups.find((g) => g.id === selectedGroupId) ?? null;
+  const hasSelection = !!(selectedUser || selectedGroup);
 
   return (
     <div
@@ -795,10 +1329,10 @@ export default function ChatPage() {
               className="flex flex-1 min-h-0"
             >
               {/* Monitor left panel */}
-              <MonitorPanel selected={selectedConv} onSelect={setSelectedConv} />
+              <MonitorPanel selected={selectedConv} onSelect={setSelectedConv} hideOnMobile={!!selectedConv} />
 
               {/* Monitor right panel */}
-              <div className="flex flex-1 min-w-0 min-h-0 bg-muted/10">
+              <div className={cn("flex-1 min-w-0 min-h-0 bg-muted/10", selectedConv ? "flex" : "hidden lg:flex")}>
                 <AnimatePresence mode="wait">
                   {selectedConv ? (
                     <motion.div
@@ -809,7 +1343,7 @@ export default function ChatPage() {
                       transition={{ duration: 0.15 }}
                       className="flex flex-1 min-h-0"
                     >
-                      <MonitorThread conv={selectedConv} />
+                      <MonitorThread conv={selectedConv} onBack={() => setSelectedConv(null)} />
                     </motion.div>
                   ) : (
                     <motion.div
@@ -845,12 +1379,35 @@ export default function ChatPage() {
               className="flex flex-1 min-h-0"
             >
               {/* Normal chat left panel */}
-              <PeoplePanel selectedId={selectedUserId} onSelect={setSelectedUserId} />
+              <PeoplePanel
+                selectedId={selectedUserId}
+                onSelect={selectUser}
+                selectedGroupId={selectedGroupId}
+                onSelectGroup={selectGroup}
+                hideOnMobile={hasSelection}
+              />
 
               {/* Normal chat right panel */}
-              <div className="flex flex-1 min-w-0 min-h-0 bg-muted/10">
+              <div className={cn("flex-1 min-w-0 min-h-0 bg-muted/10", hasSelection ? "flex" : "hidden lg:flex")}>
                 <AnimatePresence mode="wait">
-                  {selectedUser && myId ? (
+                  {selectedGroup && myId ? (
+                    <motion.div
+                      key={`group-${selectedGroup.id}`}
+                      initial={{ opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="flex flex-1 min-h-0"
+                    >
+                      <GroupChatWindow
+                        group={selectedGroup}
+                        myId={myId}
+                        isPrivileged={isPrivileged}
+                        sendGroupMessage={sendGroupMessage}
+                        onBack={clearSelection}
+                      />
+                    </motion.div>
+                  ) : selectedUser && myId ? (
                     <motion.div
                       key={selectedUser.id}
                       initial={{ opacity: 0, x: 10 }}
@@ -863,6 +1420,7 @@ export default function ChatPage() {
                         partner={selectedUser}
                         myId={myId}
                         sendMessage={sendMessage}
+                        onBack={clearSelection}
                       />
                     </motion.div>
                   ) : (

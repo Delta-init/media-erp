@@ -88,6 +88,11 @@ async def lifespan(app: FastAPI):
     from app.services.media_schedule_service import start_media_scheduler
     threading.Thread(target=start_media_scheduler, daemon=True, name="media-scheduler").start()
     logger.info("Media schedule scheduler started")
+
+    # Team group daily-report daemon thread (posts at 21:00 IST)
+    from app.services.group_chat_service import start_group_report_scheduler
+    threading.Thread(target=start_group_report_scheduler, daemon=True, name="group-report-scheduler").start()
+    logger.info("Group daily-report scheduler started")
     yield
     await close_db()
 

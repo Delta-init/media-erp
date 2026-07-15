@@ -1,14 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   ArrowLeft, Loader2, AlertCircle, Crown, User,
   CheckCircle2, Clock, AlertTriangle, BarChart3,
-  Calendar, Mail, Briefcase, TrendingUp,
+  Calendar, Mail, Briefcase, TrendingUp, PlayCircle,
+  PauseCircle, RefreshCw, Send, CheckCheck,
 } from "lucide-react";
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
+  CartesianGrid, Tooltip, Legend,
+} from "recharts";
 import { Button } from "@/components/ui/button";
-import { useMemberReport } from "@/hooks/useTeams";
+import { Input } from "@/components/ui/input";
+import { useMemberReport, useMemberActivity, type ReportPeriod } from "@/hooks/useTeams";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -25,10 +32,12 @@ function Avatar({ name, size = "lg" }: { name: string; size?: "sm" | "md" | "lg"
 }
 
 const STATUS_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  pending:           { label: "Pending",     color: "#6366f1", icon: <Clock className="size-3.5" /> },
-  upcoming:          { label: "Upcoming",    color: "#f97316", icon: <AlertTriangle className="size-3.5" /> },
-  currently_working: { label: "In Progress", color: "#3b82f6", icon: <TrendingUp className="size-3.5" /> },
-  updation_needed:   { label: "Needs Update",color: "#ef4444", icon: <AlertCircle className="size-3.5" /> },
+  pending:        { label: "Pending",        color: "#6366f1", icon: <Clock className="size-3.5" /> },
+  started:        { label: "Started",        color: "#3b82f6", icon: <PlayCircle className="size-3.5" /> },
+  break:          { label: "Break",          color: "#f97316", icon: <PauseCircle className="size-3.5" /> },
+  reedit:         { label: "Reedit",         color: "#ef4444", icon: <RefreshCw className="size-3.5" /> },
+  pending_review: { label: "Pending Review", color: "#8b5cf6", icon: <Send className="size-3.5" /> },
+  approved:       { label: "Approved",       color: "#22c55e", icon: <CheckCheck className="size-3.5" /> },
 };
 
 const PRIORITY_COLOR: Record<string, string> = {
@@ -143,9 +152,12 @@ export default function MemberReportPage() {
         </div>
       </motion.div>
 
+      {/* Daily report (period-scoped activity) */}
+      <DailyReportPanel teamId={teamId} userId={memberId} />
+
       {/* Overview stats */}
       <div>
-        <h2 className="text-sm font-semibold mb-3">Task Overview</h2>
+        <h2 className="text-sm font-semibold mb-3">Task Overview (all time)</h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard value={total}        label="Total Tasks"  icon={<BarChart3 className="size-5" />} />
           <StatCard value={completed}    label="Completed"    icon={<CheckCircle2 className="size-5" />} color="#22c55e" />
@@ -275,6 +287,145 @@ export default function MemberReportPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Daily report panel (period-scoped activity) ───────────────────────────────
+
+const PERIODS: { id: ReportPeriod; label: string }[] = [
+  { id: "daily",   label: "Daily" },
+  { id: "weekly",  label: "Weekly" },
+  { id: "monthly", label: "Monthly" },
+  { id: "custom",  label: "Custom" },
+];
+
+function shortDate(iso: string) {
+  return iso.length === 10
+    ? new Date(iso + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : iso;
+}
+
+function DailyReportPanel({ teamId, userId }: { teamId: string; userId: string }) {
+  const [period, setPeriod] = useState<ReportPeriod>("daily");
+  const [from, setFrom] = useState("");
+  const [to, setTo]     = useState("");
+
+  const { data, isLoading, isError } = useMemberActivity(teamId, userId, period, from, to);
+
+  const chartData = (data?.timeseries ?? []).map((d) => ({ ...d, label: shortDate(d.date) }));
+  const hasChartData = chartData.some((d) => d.created > 0 || d.completed > 0);
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <h2 className="text-sm font-semibold">Daily Report</h2>
+        <div className="flex gap-1 rounded-xl bg-muted/50 p-1 border w-fit">
+          {PERIODS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPeriod(p.id)}
+              className={`rounded-lg px-3 py-1 text-xs font-medium transition-all ${
+                period === p.id ? "bg-card text-foreground shadow-sm border" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {period === "custom" && (
+          <div className="flex items-center gap-2">
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-auto text-xs" />
+            <span className="text-muted-foreground text-xs">to</span>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-auto text-xs" />
+          </div>
+        )}
+        {data && (
+          <span className="text-xs text-muted-foreground ml-auto">
+            {shortDate(data.date_from)}{data.date_from !== data.date_to ? ` – ${shortDate(data.date_to)}` : ""}
+          </span>
+        )}
+      </div>
+
+      {period === "custom" && !(from && to) ? (
+        <div className="rounded-2xl border bg-card py-12 text-center text-sm text-muted-foreground">
+          Pick a start and end date to view the report.
+        </div>
+      ) : isLoading ? (
+        <div className="flex items-center justify-center rounded-2xl border bg-card py-16">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : isError || !data ? (
+        <div className="rounded-2xl border bg-card py-12 text-center text-sm text-muted-foreground">
+          Couldn’t load the daily report.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard value={data.summary.created}   label="Created"     icon={<BarChart3 className="size-5" />} />
+            <StatCard value={data.summary.completed} label="Completed"   icon={<CheckCircle2 className="size-5" />} color="#22c55e" />
+            <StatCard value={`${data.summary.completion_pct}%`} label="Completion" icon={<TrendingUp className="size-5" />} color="#6366f1" />
+            <StatCard value={data.summary.active}    label="Active now"  icon={<PlayCircle className="size-5" />} color="#3b82f6" />
+          </div>
+
+          {/* Activity chart */}
+          <div className="rounded-2xl border bg-card p-5">
+            <p className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+              <TrendingUp className="size-4 text-muted-foreground" /> Activity over time
+            </p>
+            {!hasChartData ? (
+              <p className="text-sm text-muted-foreground py-10 text-center">No task activity in this period.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={30} />
+                  <Tooltip contentStyle={{ borderRadius: 12, fontSize: 12, border: "1px solid var(--border)", background: "var(--card)" }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="created" name="Created" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="completed" name="Completed" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Tasks worked in period */}
+          <div className="rounded-2xl border bg-card overflow-hidden">
+            <div className="px-5 py-4 border-b">
+              <h3 className="text-sm font-semibold">Tasks in this period</h3>
+            </div>
+            {data.recent.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 gap-2">
+                <CheckCircle2 className="size-7 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">No activity in this period.</p>
+              </div>
+            ) : (
+              <div className="divide-y">
+                {data.recent.map((task) => {
+                  const meta = STATUS_META[task.status] || { label: task.status, color: "#6366f1", icon: null };
+                  const pColor = PRIORITY_COLOR[task.priority] || "#6366f1";
+                  return (
+                    <div key={task.id} className="flex items-center gap-3 px-5 py-3 hover:bg-muted/30 transition-colors">
+                      <span style={{ color: meta.color }}>{meta.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{task.title}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs" style={{ color: meta.color }}>{meta.label}</span>
+                          <span className="text-[10px] text-muted-foreground">·</span>
+                          <span className="text-xs font-medium capitalize" style={{ color: pColor }}>{task.priority}</span>
+                        </div>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground shrink-0">{timeAgo(task.updated_at)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

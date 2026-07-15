@@ -7,16 +7,20 @@ import {
   Users, Crown, User, ArrowLeft, Plus, Trash2,
   X, Loader2, Search, Shield, ChevronRight,
   CheckCircle2, Clock, AlertCircle, BarChart3,
-  MessageCircle, Settings,
+  MessageCircle, Settings, TrendingUp,
 } from "lucide-react";
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
+  CartesianGrid, Tooltip, Legend,
+} from "recharts";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore } from "@/stores/authStore";
 import {
   useTeam, useAddTeamMember, useRemoveTeamMember,
-  useUpdateMemberRole, useUpdateTeam, useAssignableUsers,
-  type TeamMember,
+  useUpdateMemberRole, useUpdateTeam, useAssignableUsers, useTeamReport,
+  type TeamMember, type ReportPeriod,
 } from "@/hooks/useTeams";
 import { UserPicker } from "@/components/teams/UserPicker";
 
@@ -241,7 +245,7 @@ function MemberRow({ member, teamId, canManage, isTeamLeaderCaller = false }: {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-type Tab = "members" | "tasks" | "settings";
+type Tab = "members" | "tasks" | "report" | "settings";
 
 export default function TeamDetailPage() {
   const params    = useParams<{ id: string }>();
@@ -365,6 +369,7 @@ export default function TeamDetailPage() {
         {([
           { id: "members" as Tab, icon: <Users className="size-3.5" />, label: "Members" },
           { id: "tasks"   as Tab, icon: <CheckCircle2 className="size-3.5" />, label: "Tasks" },
+          { id: "report"  as Tab, icon: <BarChart3 className="size-3.5" />, label: "Report" },
           { id: "settings" as Tab, icon: <Settings className="size-3.5" />, label: "Settings", hidden: !canManage },
         ] as const).filter((t) => !("hidden" in t && t.hidden)).map(({ id, icon, label }) => (
           <button
@@ -461,6 +466,11 @@ export default function TeamDetailPage() {
         </div>
       )}
 
+      {/* Report tab */}
+      {tab === "report" && (
+        <TeamReportPanel teamId={teamId} teamColor={team.color} />
+      )}
+
       {/* Settings tab */}
       {tab === "settings" && canManage && (
         <TeamSettingsPanel team={team} />
@@ -528,5 +538,197 @@ function TeamSettingsPanel({ team }: { team: import("@/hooks/useTeams").Team }) 
         Save Changes
       </Button>
     </form>
+  );
+}
+
+// ── Team report panel ─────────────────────────────────────────────────────────
+
+const PERIODS: { id: ReportPeriod; label: string }[] = [
+  { id: "daily",   label: "Daily" },
+  { id: "weekly",  label: "Weekly" },
+  { id: "monthly", label: "Monthly" },
+  { id: "custom",  label: "Custom" },
+];
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Pending",
+  started: "Started",
+  break: "Break",
+  reedit: "Reedit",
+  pending_review: "Pending Review",
+  approved: "Approved",
+};
+
+function shortDate(iso: string) {
+  return iso.length === 10
+    ? new Date(iso + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : iso;
+}
+
+function StatCard({ label, value, accent }: { label: string; value: number | string; accent?: string }) {
+  return (
+    <div className="rounded-xl border bg-card px-4 py-3">
+      <p className="text-2xl font-bold" style={accent ? { color: accent } : undefined}>{value}</p>
+      <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+function TeamReportPanel({ teamId, teamColor }: { teamId: string; teamColor: string }) {
+  const [period, setPeriod] = useState<ReportPeriod>("monthly");
+  const [from, setFrom] = useState("");
+  const [to, setTo]     = useState("");
+
+  const { data: report, isLoading, isError } = useTeamReport(teamId, period, from, to);
+
+  const chartData = (report?.timeseries ?? []).map((d) => ({ ...d, label: shortDate(d.date) }));
+  const statusEntries = Object.entries(report?.by_status ?? {}).sort((a, b) => b[1] - a[1]);
+
+  return (
+    <div className="space-y-5">
+      {/* Period selector */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1 rounded-xl bg-muted/50 p-1 border w-fit">
+          {PERIODS.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPeriod(p.id)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                period === p.id ? "bg-card text-foreground shadow-sm border" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {period === "custom" && (
+          <div className="flex items-center gap-2">
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-auto text-xs" />
+            <span className="text-muted-foreground text-xs">to</span>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-auto text-xs" />
+          </div>
+        )}
+
+        {report && (
+          <span className="text-xs text-muted-foreground ml-auto">
+            {shortDate(report.date_from)} – {shortDate(report.date_to)}
+          </span>
+        )}
+      </div>
+
+      {period === "custom" && !(from && to) ? (
+        <div className="flex flex-col items-center justify-center py-16 gap-2 rounded-2xl border bg-card">
+          <CalendarPrompt />
+        </div>
+      ) : isLoading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="size-7 animate-spin text-muted-foreground" />
+        </div>
+      ) : isError || !report ? (
+        <div className="flex flex-col items-center justify-center py-16 gap-2 rounded-2xl border bg-card">
+          <AlertCircle className="size-7 text-destructive/60" />
+          <p className="text-sm text-muted-foreground">Couldn’t load the report.</p>
+        </div>
+      ) : (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard label="Created" value={report.summary.created} />
+            <StatCard label="Completed" value={report.summary.completed} accent="#22c55e" />
+            <StatCard label="Completion" value={`${report.summary.completion_pct}%`} accent={teamColor} />
+            <StatCard label="Active now" value={report.summary.active} />
+          </div>
+
+          {/* Timeseries chart */}
+          <div className="rounded-2xl border bg-card p-5">
+            <p className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+              <TrendingUp className="size-4 text-muted-foreground" /> Activity over time
+            </p>
+            {chartData.every((d) => d.created === 0 && d.completed === 0) ? (
+              <p className="text-sm text-muted-foreground py-12 text-center">No task activity in this period.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={32} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 12, fontSize: 12, border: "1px solid var(--border)", background: "var(--card)" }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="created" name="Created" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="completed" name="Completed" fill="#22c55e" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Status breakdown */}
+          {statusEntries.length > 0 && (
+            <div className="rounded-2xl border bg-card p-5">
+              <p className="text-sm font-semibold mb-3">Tasks created — by status</p>
+              <div className="flex flex-wrap gap-2">
+                {statusEntries.map(([status, count]) => (
+                  <span
+                    key={status}
+                    className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-3 py-1 text-xs"
+                  >
+                    <span className="font-medium">{STATUS_LABELS[status] ?? status}</span>
+                    <span className="text-muted-foreground">{count}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Per-member table */}
+          <div className="rounded-2xl border bg-card overflow-hidden">
+            <div className="border-b px-5 py-3">
+              <p className="text-sm font-semibold">Per member</p>
+            </div>
+            {report.members.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-8 text-center">No members.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-muted-foreground">
+                    <th className="px-5 py-2 font-medium">Member</th>
+                    <th className="px-5 py-2 font-medium text-right">Assigned</th>
+                    <th className="px-5 py-2 font-medium text-right">Completed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.members.map((m) => (
+                    <tr key={m.user_id} className="border-t hover:bg-muted/30 transition-colors">
+                      <td className="px-5 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <Avatar name={m.name || "?"} size="sm" />
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{m.name || "Unknown"}</p>
+                          </div>
+                          {m.role === "leader" && <Crown className="size-3 text-amber-500 shrink-0" />}
+                        </div>
+                      </td>
+                      <td className="px-5 py-2.5 text-right tabular-nums">{m.assigned}</td>
+                      <td className="px-5 py-2.5 text-right tabular-nums font-medium text-green-600 dark:text-green-500">{m.completed}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CalendarPrompt() {
+  return (
+    <>
+      <Clock className="size-7 text-muted-foreground/40" />
+      <p className="text-sm text-muted-foreground">Pick a start and end date to view the report.</p>
+    </>
   );
 }

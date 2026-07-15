@@ -1,10 +1,11 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Figtree, Plus_Jakarta_Sans } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 
 import ThemeProvider from "@/providers/ThemeProvider";
 import QueryProvider from "@/providers/QueryProvider";
+import PWARegister from "@/components/PWARegister";
 import { cn } from "@/lib/utils";
 
 const figtreeHeading = Figtree({subsets:['latin'],variable:'--font-heading'});
@@ -15,6 +16,25 @@ const plusJakarta = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-sa
 export const metadata: Metadata = {
   title: "mediaERP",
   description: "Marketing data platform — connect, sync, and analyse all your ad channels",
+  applicationName: "mediaERP",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "mediaERP",
+  },
+  icons: {
+    icon: "/icons/icon-192.png",
+    apple: "/icons/apple-touch-icon.png",
+  },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#2563eb",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -27,6 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </QueryProvider>
           <Toaster richColors position="top-right" />
         </ThemeProvider>
+        <PWARegister />
       </body>
     </html>
   );

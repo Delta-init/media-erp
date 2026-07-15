@@ -70,12 +70,77 @@ export interface MemberReport {
   };
 }
 
+export type ReportPeriod = "daily" | "weekly" | "monthly" | "custom";
+
+export interface TeamReport {
+  team_id: string;
+  team_name: string;
+  period: ReportPeriod;
+  date_from: string;
+  date_to: string;
+  summary: {
+    created: number;
+    completed: number;
+    completion_pct: number;
+    active: number;
+    members: number;
+  };
+  by_status: Record<string, number>;
+  by_priority: Record<string, number>;
+  timeseries: Array<{ date: string; created: number; completed: number }>;
+  members: Array<{
+    user_id: string;
+    name: string;
+    role: "leader" | "member";
+    avatar?: string;
+    assigned: number;
+    completed: number;
+  }>;
+}
+
+export interface MemberActivity {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    designation: string;
+    avatar?: string;
+    status: string;
+  };
+  team_id: string;
+  team_name: string;
+  period: ReportPeriod;
+  date_from: string;
+  date_to: string;
+  summary: {
+    created: number;
+    completed: number;
+    completion_pct: number;
+    active: number;
+  };
+  by_status: Record<string, number>;
+  by_priority: Record<string, number>;
+  timeseries: Array<{ date: string; created: number; completed: number }>;
+  recent: Array<{
+    id: string;
+    title: string;
+    status: string;
+    priority: string;
+    due_date: string | null;
+    updated_at: string | null;
+  }>;
+}
+
 // ── Query keys ────────────────────────────────────────────────────────────────
 
 const QK = {
   list: ["teams"] as const,
   detail: (id: string) => ["teams", id] as const,
   report: (teamId: string, userId: string) => ["teams", teamId, "members", userId, "report"] as const,
+  teamReport: (teamId: string, period: string, from: string, to: string) =>
+    ["teams", teamId, "report", period, from, to] as const,
+  memberActivity: (teamId: string, userId: string, period: string, from: string, to: string) =>
+    ["teams", teamId, "members", userId, "activity", period, from, to] as const,
 };
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
@@ -137,6 +202,57 @@ export function useMemberReport(teamId: string, userId: string) {
       return data.data;
     },
     enabled: !!(teamId && userId),
+  });
+}
+
+export function useTeamReport(
+  teamId: string,
+  period: ReportPeriod,
+  dateFrom?: string,
+  dateTo?: string,
+) {
+  return useQuery({
+    queryKey: QK.teamReport(teamId, period, dateFrom ?? "", dateTo ?? ""),
+    queryFn: async () => {
+      const params: Record<string, string> = { period };
+      if (period === "custom" && dateFrom && dateTo) {
+        params.date_from = dateFrom;
+        params.date_to = dateTo;
+      }
+      const { data } = await api.get<{ success: boolean; data: TeamReport }>(
+        `/teams/${teamId}/report`,
+        { params },
+      );
+      return data.data;
+    },
+    enabled: !!teamId && (period !== "custom" || !!(dateFrom && dateTo)),
+    staleTime: 30_000,
+  });
+}
+
+export function useMemberActivity(
+  teamId: string,
+  userId: string,
+  period: ReportPeriod,
+  dateFrom?: string,
+  dateTo?: string,
+) {
+  return useQuery({
+    queryKey: QK.memberActivity(teamId, userId, period, dateFrom ?? "", dateTo ?? ""),
+    queryFn: async () => {
+      const params: Record<string, string> = { period };
+      if (period === "custom" && dateFrom && dateTo) {
+        params.date_from = dateFrom;
+        params.date_to = dateTo;
+      }
+      const { data } = await api.get<{ success: boolean; data: MemberActivity }>(
+        `/teams/${teamId}/members/${userId}/activity`,
+        { params },
+      );
+      return data.data;
+    },
+    enabled: !!(teamId && userId) && (period !== "custom" || !!(dateFrom && dateTo)),
+    staleTime: 30_000,
   });
 }
 
