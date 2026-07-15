@@ -376,3 +376,22 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* Auth cards are always white — force their inputs/labels to stay readable
+   regardless of the active theme (shadcn <Input> uses theme tokens that go
+   invisible on the white card in dark/system mode). */
+.delta-card input:not([type="checkbox"]):not([type="radio"]) {
+  background: #ffffff !important;
+  color: hsl(222 47% 11%) !important;
+  border: 2px solid hsl(210 32% 88%) !important;
+  border-radius: 12px;
+  min-height: 46px;
+  padding: 0 14px;
+}
+.delta-card input::placeholder { color: rgba(15, 23, 42, 0.4) !important; }
+.delta-card input:focus {
+  border-color: #2563eb !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+}
+.delta-card label { color: hsl(222 47% 28%) !important; }
