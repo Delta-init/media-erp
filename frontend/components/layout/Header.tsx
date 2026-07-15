@@ -63,7 +63,7 @@ export function Header() {
       variants={headerVariants}
       initial="initial"
       animate="animate"
-      className="pwa-safe-top sticky top-0 z-30 flex min-h-14 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-md"
+      className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-md"
     >
       {/* Mobile menu toggle */}
       <motion.button

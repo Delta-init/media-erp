@@ -370,7 +370,9 @@
 }
 @media (display-mode: standalone) {
   body {
-    /* also pad the bottom home-indicator area on gesture-nav phones */
+    /* clear the status bar / notch at the top … */
+    padding-top: env(safe-area-inset-top);
+    /* … and the home-indicator at the bottom on gesture-nav phones */
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
