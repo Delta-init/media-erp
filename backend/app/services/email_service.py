@@ -52,7 +52,7 @@ async def send_rule_alert_email(recipients: List[str], subject: str, body_text: 
 </html>"""
     for recipient in recipients:
         try:
-            await send_email(recipient, subject, html)
+            await send_email(recipient, subject, html, category="rule_alert")
         except Exception as exc:
             logger.warning("Failed to send alert email to %s: %s", recipient, exc)
 
@@ -178,7 +178,7 @@ async def send_report_email(
     subject = f"[mediaERP] {schedule_name} — {date_from} to {date_to}"
     for recipient in recipients:
         try:
-            await send_email(recipient, subject, html)
+            await send_email(recipient, subject, html, category="report")
             logger.info("Report email sent to %s", recipient)
         except Exception as exc:
             logger.warning("Failed to send report to %s: %s", recipient, exc)

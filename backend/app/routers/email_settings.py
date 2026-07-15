@@ -87,7 +87,7 @@ async def test_smtp_config(
 
     from app.utils.email import send_email_db
     try:
-        await send_email_db(db=db, to=to_email, subject="mediaERP — SMTP Test", html_body=_test_html())
+        await send_email_db(db=db, to=to_email, subject="mediaERP — SMTP Test", html_body=_test_html(), category="smtp_test")
     except Exception as exc:
         return error_response(f"SMTP test failed: {exc}", status_code=500)
 

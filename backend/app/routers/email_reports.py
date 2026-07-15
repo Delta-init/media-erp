@@ -254,6 +254,7 @@ async def test_email(
             body.recipient,
             "[mediaERP] Test Email",
             "<h2>Test email from mediaERP</h2><p>Your email configuration is working correctly.</p>",
+            category="smtp_test",
         )
         return success_response(data={"sent_to": body.recipient}, message="Test email sent")
     except Exception as exc:

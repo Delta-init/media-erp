@@ -276,7 +276,7 @@ async def invite_client(
     </td></tr>
   </table>
 </body>"""
-        await send_email(doc["email"], f"Invitation from {agency_name} — mediaERP", html)
+        await send_email(doc["email"], f"Invitation from {agency_name} — mediaERP", html, category="client_invite")
     except Exception as exc:
         logger.warning("Invite email failed: %s", exc)
 

@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ClipboardCheck,
   Calculator,
+  MailCheck,
   Kanban,
   Key,
   LayoutDashboard,
@@ -68,6 +69,7 @@ const NAV_ITEMS = [
 const BOTTOM_ITEMS = [
   { label: "API Keys",       href: "/settings/api-keys",       icon: Key,        hidden: true },
   { label: "Custom Metrics", href: "/settings/custom-metrics", icon: Calculator, hidden: true },
+  { label: "Email Logs",     href: "/email-logs",              icon: MailCheck,  superAdmin: true },
   { label: "Settings",       href: "/settings",                icon: Settings,   module: "settings" },
 ];
 
@@ -183,7 +185,9 @@ function SidebarContent({
     (item.href !== "/leader" || showLeaderDesk)
   );
   const visibleBottom = BOTTOM_ITEMS.filter((item) =>
-    !item.hidden && (!item.module || hasPermission(item.module, "view"))
+    !item.hidden &&
+    (!item.module || hasPermission(item.module, "view")) &&
+    (!item.superAdmin || isSuperAdmin)
   );
 
   const initials = user?.name

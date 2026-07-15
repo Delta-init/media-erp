@@ -27,6 +27,32 @@ logger = logging.getLogger(__name__)
 _SMTP_TIMEOUT = 20  # seconds
 
 
+def _log_email(to: str, subject: str, status: str, error: Optional[str], from_email: str, category: str) -> None:
+    """
+    Record an email send attempt in the `email_logs` collection.
+
+    Uses the SYNCHRONOUS PyMongo client because this runs inside `_send_sync`
+    (a thread-pool executor) which is also reached from the scheduler daemon
+    threads — the async Motor client is bound to the main event loop and can't
+    be used here. Logging failures are swallowed so they can never break a send.
+    """
+    try:
+        from datetime import datetime, timezone
+        from app.database import get_sync_db
+
+        get_sync_db()["email_logs"].insert_one({
+            "to": to,
+            "subject": subject,
+            "status": status,          # "sent" | "failed"
+            "error": error,
+            "from_email": from_email,
+            "category": category,      # password_reset | report | rule_alert | client_invite | smtp_test | general
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception:
+        pass  # never let logging break email delivery
+
+
 async def get_smtp_config(db) -> Optional[dict]:
     """Fetch SMTP config from the `email_settings` collection; None if not configured."""
     try:
@@ -38,7 +64,7 @@ async def get_smtp_config(db) -> Optional[dict]:
     return None
 
 
-def _send_sync(to: str, subject: str, html_body: str, cfg: Optional[dict] = None) -> None:
+def _send_sync(to: str, subject: str, html_body: str, cfg: Optional[dict] = None, category: str = "general") -> None:
     """Blocking SMTP send — runs in a thread-pool executor."""
     host       = (cfg or {}).get("host")       or settings.mail_server
     port       = int((cfg or {}).get("port")   or settings.mail_port or 587)
@@ -49,6 +75,7 @@ def _send_sync(to: str, subject: str, html_body: str, cfg: Optional[dict] = None
     use_tls    = (cfg or {}).get("use_tls", True) if cfg else True
 
     if not username or not password or not from_email:
+        _log_email(to, subject, "failed", "Email not configured (no SMTP credentials)", from_email or "", category)
         raise RuntimeError(
             "Email is not configured — set credentials via Super Admin › Settings › Email SMTP"
         )
@@ -84,6 +111,7 @@ def _send_sync(to: str, subject: str, html_body: str, cfg: Optional[dict] = None
                 server.sendmail(from_email, [to], msg.as_string())
     except smtplib.SMTPAuthenticationError as exc:
         logger.error("SMTP auth failed for %s: %s", username, exc)
+        _log_email(to, subject, "failed", f"Authentication failed ({exc.smtp_code})", from_email, category)
         # Surface a friendly message for the most common Gmail mistake
         raise RuntimeError(
             f"Authentication failed ({exc.smtp_code}). "
@@ -93,22 +121,24 @@ def _send_sync(to: str, subject: str, html_body: str, cfg: Optional[dict] = None
         ) from exc
     except Exception as exc:
         logger.error("SMTP send failed → %s | %s", to, exc, exc_info=True)
+        _log_email(to, subject, "failed", str(exc), from_email, category)
         raise
 
+    _log_email(to, subject, "sent", None, from_email, category)
     logger.info("Email sent → %s | Subject: %s", to, subject)
 
 
-async def send_email(to: str, subject: str, html_body: str) -> None:
+async def send_email(to: str, subject: str, html_body: str, category: str = "general") -> None:
     """Non-blocking wrapper using .env SMTP config."""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _send_sync, to, subject, html_body, None)
+    await loop.run_in_executor(None, _send_sync, to, subject, html_body, None, category)
 
 
-async def send_email_db(db, to: str, subject: str, html_body: str) -> None:
+async def send_email_db(db, to: str, subject: str, html_body: str, category: str = "general") -> None:
     """Like send_email but reads SMTP config from DB first; falls back to .env."""
     cfg = await get_smtp_config(db)
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, _send_sync, to, subject, html_body, cfg)
+    await loop.run_in_executor(None, _send_sync, to, subject, html_body, cfg, category)
 
 
 async def send_otp_email(to: str, otp: str) -> None:
@@ -177,4 +207,4 @@ async def send_otp_email(to: str, otp: str) -> None:
   </table>
 </body>
 </html>"""
-    await send_email(to, "Your mediaERP password reset code", html)
+    await send_email(to, "Your mediaERP password reset code", html, category="password_reset")

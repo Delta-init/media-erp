@@ -125,3 +125,7 @@ async def create_indexes() -> None:
     await db["custom_metrics"].create_index(
         [("user_id", ASCENDING), ("name", ASCENDING)], unique=True
     )
+    # email_logs — outbound email audit trail (Super Admin monitor)
+    await db["email_logs"].create_index([("created_at", DESCENDING)])
+    await db["email_logs"].create_index([("status", ASCENDING), ("created_at", DESCENDING)])
+    await db["email_logs"].create_index([("category", ASCENDING), ("created_at", DESCENDING)])
