@@ -284,31 +284,41 @@ function SidebarContent({
           </AnimatePresence>
         </div>
 
-        {/* User + logout */}
+        {/* User (→ profile) + logout.
+            The sign-out button is a sibling of the link, never nested inside it —
+            a <button> inside an <a> is invalid HTML and swallows the click. */}
         <div
           className={cn(
             "flex items-center rounded-xl px-3 py-2 gap-3",
             collapsed ? "justify-center" : ""
           )}
         >
-          <motion.div
-            whileHover={{ scale: 1.08 }}
-            className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground text-xs font-bold"
+          <Link
+            href="/profile"
+            title="View your profile"
+            aria-label="View your profile"
+            className={cn(
+              "flex min-w-0 items-center gap-3 rounded-lg outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+              collapsed ? "" : "flex-1 -mx-1 px-1 py-0.5"
+            )}
           >
-            {initials}
-          </motion.div>
+            <motion.div
+              whileHover={{ scale: 1.08 }}
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground text-xs font-bold"
+            >
+              {initials}
+            </motion.div>
 
-          <AnimatePresence initial={false}>
-            {!collapsed && (
-              <motion.div
-                key="user-info"
-                initial={{ opacity: 0, width: 0 }}
-                animate={{ opacity: 1, width: "auto" }}
-                exit={{ opacity: 0, width: 0 }}
-                transition={{ duration: 0.18 }}
-                className="flex flex-1 items-center justify-between overflow-hidden"
-              >
-                <div className="min-w-0">
+            <AnimatePresence initial={false}>
+              {!collapsed && (
+                <motion.div
+                  key="user-info"
+                  initial={{ opacity: 0, width: 0 }}
+                  animate={{ opacity: 1, width: "auto" }}
+                  exit={{ opacity: 0, width: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="min-w-0 overflow-hidden"
+                >
                   <p className="truncate text-xs font-medium text-sidebar-foreground">
                     {user?.name ?? user?.email}
                   </p>
@@ -317,17 +327,27 @@ function SidebarContent({
                       {user.email}
                     </p>
                   )}
-                </div>
-                <motion.button
-                  whileHover={{ scale: 1.15 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => logout.mutate()}
-                  className="ml-2 shrink-0 rounded-md p-1 text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-destructive transition-colors"
-                  title="Sign out"
-                >
-                  <LogOut className="size-3.5" />
-                </motion.button>
-              </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </Link>
+
+          <AnimatePresence initial={false}>
+            {!collapsed && (
+              <motion.button
+                key="logout"
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: "auto" }}
+                exit={{ opacity: 0, width: 0 }}
+                transition={{ duration: 0.18 }}
+                whileHover={{ scale: 1.15 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => logout.mutate()}
+                className="shrink-0 rounded-md p-1 text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-destructive transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="size-3.5" />
+              </motion.button>
             )}
           </AnimatePresence>
         </div>
