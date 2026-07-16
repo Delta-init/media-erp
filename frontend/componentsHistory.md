@@ -135,3 +135,13 @@
 ### AssignCard (Leader Desk › Assign Work) — self-assign feedback (2026-07-15)
 - **File:** `app/(dashboard)/leader/page.tsx`
 - **Change:** `assign()` was fire-and-forget with **no toast** (unlike `ReeditCard`), so assigning gave zero feedback. Now awaits the mutation, shows `Assigned to you — "<task>"` when the leader assigns to themselves (via `useAuthStore().user.id`) or `Assigned to <name>` otherwise, and resets the dropdown. Combined with the backend `incoming` fix, a self-assigned task now visibly leaves the queue and lands on the leader's own board.
+
+### PWA install — works on all devices/browsers (2026-07-15)
+- **New `lib/pwa.ts`** — single source of truth for install support: `isStandalone()`, `isIOS()`, `detectPlatform()`, `getInstallGuide()`, `getInstallBlockers()`.
+- **BUG FIXED — iPadOS never got a prompt.** Detection was `/iphone|ipad|ipod/i`, but **iPadOS 13+ reports a "Macintosh" UA**, so iPads fell into the Chromium branch where Safari never fires `beforeinstallprompt` → no prompt at all. Now `isIOS()` also matches `/macintosh/ && navigator.maxTouchPoints > 1` (a real Mac has 0, so it stays non-iOS).
+- **New `components/InstallAppRow.tsx`** — an always-available "Install app" row in the sidebar footer (auto-hides once installed). Opens a dialog that fires the **native** prompt when Chromium offers one, otherwise shows exact per-browser steps (Android Chrome / Samsung / Firefox Android / desktop Chromium / macOS Safari / iOS) and honest blockers (e.g. "not served over HTTPS"). This is what makes install reachable on Firefox, Safari, and any session where `beforeinstallprompt` already fired or was dismissed.
+- **GOTCHA (cost me a bug):** never wrap a `createPortal(...)` in `<AnimatePresence>` — it filters children through `isValidElement()`, which is **false** for a portal, so the dialog silently never renders. Render the portal directly; animate with the `motion.div` inside.
+- `app/layout.tsx` — added legacy `apple-mobile-web-app-capable` (Next 16 only emits the modern `mobile-web-app-capable`; iOS < 16.4 needs the legacy tag or a home-screen launch opens in a browser tab).
+- `PWARegister.tsx` — SW still prod-only by default, but now opt-in via `NEXT_PUBLIC_ENABLE_SW=1` so installability can be tested from a phone over an HTTPS tunnel without a prod build.
+
+**Why a phone shows no prompt on the dev server (not a bug):** browsers only expose `navigator.serviceWorker` in a **secure context** — `https://` or `localhost`. A LAN URL like `http://192.168.x.x:3000` can never install. Use the HTTPS deploy or a tunnel.

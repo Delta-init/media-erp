@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Download, X, Share, Plus } from "lucide-react";
+import { detectPlatform, getInstallGuide, isIOS, isStandalone } from "@/lib/pwa";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -15,29 +16,25 @@ const DISMISS_DAYS = 7;
 export default function PWAInstallPrompt() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [show, setShow] = useState(false);
-  const [isIOS, setIsIOS] = useState(false);
+  const [ios, setIos] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // Already installed → never show.
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      // iOS Safari
-      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-    if (standalone) return;
+    // Already installed → never nag.
+    if (isStandalone()) return;
 
     const recentlyDismissed = () => {
       const at = Number(localStorage.getItem(DISMISS_KEY) || 0);
       return at && Date.now() - at < DISMISS_DAYS * 86_400_000;
     };
 
-    // iOS has no beforeinstallprompt — show manual instructions instead.
-    const ua = window.navigator.userAgent;
-    const ios = /iphone|ipad|ipod/i.test(ua) && !(window as unknown as { MSStream?: unknown }).MSStream;
-    if (ios) {
+    // Safari (iPhone *and* iPadOS) never fires beforeinstallprompt — show the
+    // manual Add-to-Home-Screen steps instead. isIOS() also catches iPadOS 13+,
+    // which reports a "Macintosh" user-agent.
+    if (isIOS()) {
       if (!recentlyDismissed()) {
-        setIsIOS(true);
+        setIos(true);
         setShow(true);
       }
       return;
@@ -52,7 +49,7 @@ export default function PWAInstallPrompt() {
       if (!recentlyDismissed()) setShow(true);
     };
 
-    // The event may have already fired (captured early in the root layout).
+    // The event may have already fired (captured early in the root layout)…
     reveal();
 
     // …or it may fire after mount.
@@ -109,7 +106,7 @@ export default function PWAInstallPrompt() {
               <img src="/icons/icon-192.png" alt="mediaERP" className="size-12 shrink-0 rounded-xl border" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold">Install mediaERP</p>
-                {isIOS ? (
+                {ios ? (
                   <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
                     Tap <Share className="inline size-3.5 align-text-bottom" /> Share, then
                     <span className="mx-1 inline-flex items-center gap-0.5 rounded bg-muted px-1 py-0.5 font-medium text-foreground">
@@ -132,7 +129,7 @@ export default function PWAInstallPrompt() {
               </button>
             </div>
 
-            {!isIOS && (
+            {!ios && (
               <div className="flex gap-2 border-t bg-muted/20 px-4 py-3">
                 <button
                   onClick={dismiss}
@@ -154,3 +151,6 @@ export default function PWAInstallPrompt() {
     </AnimatePresence>
   );
 }
+
+// Re-exported so callers can reuse the same detection without duplicating it.
+export { detectPlatform, getInstallGuide };

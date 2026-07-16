@@ -39,6 +39,7 @@ import { useUnreadCounts } from "@/hooks/useChat";
 import { useTeams } from "@/hooks/useTeams";
 import { useLeaderQueue } from "@/hooks/useProjects";
 import ThemeToggle from "@/components/shared/ThemeToggle";
+import InstallAppRow from "@/components/InstallAppRow";
 import {
   listVariants,
   navItemVariants,
@@ -256,6 +257,9 @@ function SidebarContent({
 
       {/* Footer */}
       <div className="shrink-0 border-t border-sidebar-border px-2 py-3 space-y-1">
+        {/* Install app (hidden once installed) */}
+        <InstallAppRow collapsed={collapsed} />
+
         {/* Theme toggle row */}
         <div
           className={cn(

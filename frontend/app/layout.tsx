@@ -28,6 +28,12 @@ export const metadata: Metadata = {
     apple: "/icons/apple-touch-icon.png",
   },
   formatDetection: { telephone: false },
+  other: {
+    // Next 16 emits only the modern `mobile-web-app-capable`. iOS 16.4+ honours
+    // the manifest's `display: standalone`, but older iOS still needs this
+    // legacy tag — without it, a home-screen launch opens in a browser tab.
+    "apple-mobile-web-app-capable": "yes",
+  },
 };
 
 export const viewport: Viewport = {

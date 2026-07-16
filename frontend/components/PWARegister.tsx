@@ -33,9 +33,18 @@ export default function PWARegister() {
     };
   }, []);
 
-  // Register the service worker (production only — a SW in dev fights HMR).
+  // Register the service worker.
+  //
+  // Production always registers. In dev it is off by default (a SW fights
+  // Next's HMR and serves stale bundles), but can be opted into with
+  // NEXT_PUBLIC_ENABLE_SW=1 — needed to test installability on a phone via an
+  // HTTPS tunnel (ngrok/Cloudflare), since `next dev` is otherwise never
+  // installable. Note: a plain-http LAN IP can never install — browsers only
+  // expose `serviceWorker` on https:// or localhost.
   useEffect(() => {
-    if (process.env.NODE_ENV !== "production") return;
+    const swEnabled =
+      process.env.NODE_ENV === "production" || process.env.NEXT_PUBLIC_ENABLE_SW === "1";
+    if (!swEnabled) return;
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
 
     const onLoad = () => {
