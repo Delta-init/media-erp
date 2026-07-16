@@ -16,6 +16,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useMe, useUpdateProfile, useUpdatePassword, useLogout } from "@/hooks/useAuth";
 import { useNotificationPrefs, useUpdateNotificationPrefs } from "@/hooks/useNotificationPrefs";
 import { NOTIF_DEFS, ROLE_LABEL, getNotifCategory } from "@/lib/notifications";
+import { fmtDate } from "@/lib/datetime";
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -202,7 +203,7 @@ export default function ProfilePage() {
 
   const roleName = user?.role?.role_name ?? "User";
   const memberSince = user?.created_at
-    ? new Date(user.created_at).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })
+    ? fmtDate(user.created_at, { day: "numeric", month: "long", year: "numeric" })
     : undefined;
 
   return (

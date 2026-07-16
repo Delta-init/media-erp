@@ -12,6 +12,7 @@ import { useDeleteConnector, useStartOAuth } from "@/hooks/useConnectors";
 import { useTriggerSync, useSyncStatus } from "@/hooks/useSync";
 import { PLATFORM_META } from "@/lib/platformMeta";
 import type { Connector } from "@/types/connector";
+import { fmtDateTime } from "@/lib/datetime";
 
 interface Props {
   connector: Connector;
@@ -88,7 +89,7 @@ export function ConnectorCard({ connector }: Props) {
           {liveLastSync && (
             <span className="ml-3">
               Last:{" "}
-              {new Date(liveLastSync).toLocaleDateString(undefined, {
+              {fmtDateTime(liveLastSync, {
                 month: "short",
                 day: "numeric",
                 hour: "2-digit",

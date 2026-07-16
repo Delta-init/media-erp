@@ -5,15 +5,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, TrendingUp, TrendingDown, X, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAnomalies, type Anomaly } from "@/hooks/useAnomalies";
+import { fmtDateOnly } from "@/lib/datetime";
 
 function platformLabel(p: string) {
   return p.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso + "T00:00:00").toLocaleDateString(undefined, {
-    month: "short", day: "numeric",
-  });
+  return fmtDateOnly(iso, { month: "short", day: "numeric" });
 }
 
 function AnomalyCard({ anomaly }: { anomaly: Anomaly }) {

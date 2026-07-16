@@ -21,6 +21,7 @@ import {
   type IGPost,
 } from "@/hooks/useSocial";
 import type { Connector } from "@/types/connector";
+import { fmtDateOnly } from "@/lib/datetime";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -30,10 +31,10 @@ function daysAgo(n: number) {
   return d.toISOString().slice(0, 10);
 }
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
+  return fmtDateOnly(iso, { day: "2-digit", month: "short", year: "2-digit" });
 }
 function fmtShort(iso: string) {
-  return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  return fmtDateOnly(iso, { day: "2-digit", month: "short" });
 }
 function formatCount(n: number | undefined) {
   if (n == null) return "—";

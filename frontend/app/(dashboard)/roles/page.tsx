@@ -9,6 +9,7 @@ import { PermissionMatrix } from "@/components/roles/PermissionMatrix";
 import { useRoles } from "@/hooks/useRoles";
 import type { Role } from "@/types/role";
 import { cn } from "@/lib/utils";
+import { fmtDate } from "@/lib/datetime";
 
 export default function RolesPage() {
   const [search, setSearch]         = useState("");
@@ -111,7 +112,7 @@ export default function RolesPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {role.created_at ? new Date(role.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                        {role.created_at ? fmtDate(role.created_at, { day: "numeric", month: "short", year: "numeric" }) : "—"}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

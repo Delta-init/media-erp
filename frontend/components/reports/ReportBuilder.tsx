@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { useCustomReport, useSaveReport } from "@/hooks/useReports";
 import { fadeVariants } from "@/lib/animations";
 import { cn } from "@/lib/utils";
+import { fmtDate } from "@/lib/datetime";
 import type {
   ChartType,
   CustomReportData,
@@ -281,7 +282,7 @@ export function ReportBuilder({ onSaved }: ReportBuilderProps) {
   }
 
   function handleSave() {
-    const name = saveName.trim() || `Report ${new Date().toLocaleDateString()}`;
+    const name = saveName.trim() || `Report ${fmtDate(new Date())}`;
     saveReport.mutate(
       {
         name,

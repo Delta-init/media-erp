@@ -15,6 +15,7 @@ import { BOARD_COLUMNS, isTaskOverdue, assigneeLabel } from "@/types/project";
 import type { Task } from "@/types/project";
 import { useTaskTimer, formatSeconds } from "@/hooks/useTaskTimer";
 import { cn } from "@/lib/utils";
+import { fmtDateOnly } from "@/lib/datetime";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -128,7 +129,7 @@ function TaskRow({ task }: { task: Task }) {
         <span className={cn("size-2 rounded-full", PRIORITY_DOT[task.priority])} title={task.priority} />
         {task.due_date && (
           <span className={cn("text-[10px] tabular-nums", overdue ? "text-red-500 font-semibold" : "text-muted-foreground")}>
-            {new Date(task.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+            {fmtDateOnly(task.due_date, { day: "numeric", month: "short" })}
           </span>
         )}
       </div>

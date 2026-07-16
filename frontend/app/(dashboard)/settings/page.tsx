@@ -18,6 +18,7 @@ import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { fadeVariants } from "@/lib/animations";
 import { cn } from "@/lib/utils";
+import { fmtDateTime } from "@/lib/datetime";
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
 const profileSchema = z.object({
@@ -531,9 +532,7 @@ function AuditTab() {
   };
 
   function fmt(iso: string) {
-    return new Date(iso).toLocaleString(undefined, {
-      dateStyle: "short", timeStyle: "short",
-    });
+    return fmtDateTime(iso, { dateStyle: "short", timeStyle: "short" });
   }
 
   if (isLoading) return (

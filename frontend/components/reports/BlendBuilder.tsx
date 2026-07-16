@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { useBlendReport } from "@/hooks/useReports";
 import type { BlendSource, BlendData, BlendSeries } from "@/hooks/useReports";
 import { DateRangePicker } from "@/components/shared/DateRangePicker";
+import { fmtDateOnly } from "@/lib/datetime";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -61,10 +62,7 @@ function platformLabel(p: string) {
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso + "T00:00:00").toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
+  return fmtDateOnly(iso, { month: "short", day: "numeric" });
 }
 
 function fmtValue(metric: string, v: number) {

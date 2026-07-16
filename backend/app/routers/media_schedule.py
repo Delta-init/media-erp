@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 router = APIRouter(prefix="/api/v1/media-schedule", tags=["media-schedule"])
 
@@ -59,7 +60,7 @@ def _serialize(doc: dict) -> dict:
     del out["_id"]
     for field in ("start_date", "due_date", "created_at", "updated_at"):
         if field in out and hasattr(out[field], "isoformat"):
-            out[field] = out[field].isoformat()
+            out[field] = utc_iso(out[field])
     return out
 
 

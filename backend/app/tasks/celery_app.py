@@ -21,9 +21,11 @@ celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
-    # Timezone
-    timezone="UTC",
-    enable_utc=True,
+    # Timezone — mediaERP runs on IST; beat crontabs below are IST wall-clock.
+    # (Messages are still transported as UTC instants; enable_utc=False only
+    #  changes how the beat schedule interprets clock times.)
+    timezone="Asia/Kolkata",
+    enable_utc=False,
     # Task behaviour
     task_acks_late=True,           # re-queue if worker dies mid-task
     task_reject_on_worker_lost=True,
@@ -38,7 +40,7 @@ celery_app.conf.update(
         },
         "scan-anomalies-daily": {
             "task": "app.tasks.sync_tasks.scan_anomalies_all_users",
-            "schedule": crontab(hour=2, minute=0),  # 02:00 UTC daily
+            "schedule": crontab(hour=2, minute=0),  # 02:00 IST daily
         },
     },
 )

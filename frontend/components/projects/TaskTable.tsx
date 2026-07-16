@@ -8,6 +8,7 @@ import { useDeleteTask, useUpdateTask } from "@/hooks/useProjects";
 import type { Task, TaskPriority, TaskStatus } from "@/types/project";
 import { BOARD_COLUMNS, PRIORITY_META, isTaskOverdue, assigneeLabel, statusStyles, allowedColumns } from "@/types/project";
 import { listItemVariants, listVariants } from "@/lib/animations";
+import { fmtDate, fmtDateOnly } from "@/lib/datetime";
 
 type SortKey = "title" | "status" | "priority" | "due_date" | "created_at";
 
@@ -167,7 +168,7 @@ export function TaskTable({ tasks }: Props) {
                     {task.due_date ? (
                       <span className={cn("flex items-center gap-1 text-xs", isOverdue ? "text-red-500 font-semibold" : "text-muted-foreground")}>
                         {isOverdue ? <AlertTriangle className="size-3" /> : <Calendar className="size-3" />}
-                        {new Date(task.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                        {fmtDateOnly(task.due_date, { day: "numeric", month: "short", year: "numeric" })}
                         {isOverdue && <span className="ml-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-600 dark:bg-red-900/50 dark:text-red-400">OVERDUE</span>}
                       </span>
                     ) : (
@@ -177,7 +178,7 @@ export function TaskTable({ tasks }: Props) {
 
                   {/* Created at */}
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {new Date(task.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                    {fmtDate(task.created_at, { day: "numeric", month: "short" })}
                   </td>
 
                   {/* Delete */}

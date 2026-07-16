@@ -12,6 +12,7 @@ import { useImpersonate } from "@/hooks/useAuth";
 import { useAuthStore } from "@/stores/authStore";
 import type { User } from "@/types/user";
 import { cn } from "@/lib/utils";
+import { fmtDate } from "@/lib/datetime";
 
 export default function UsersPage() {
   const [search, setSearch]         = useState("");
@@ -175,7 +176,7 @@ export default function UsersPage() {
 
                     {/* Joined */}
                     <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {user.created_at ? new Date(user.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                      {user.created_at ? fmtDate(user.created_at, { day: "numeric", month: "short", year: "numeric" }) : "—"}
                     </td>
 
                     {/* Actions */}

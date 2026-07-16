@@ -13,6 +13,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 
 from app.models.notification import notification_doc
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +180,7 @@ async def list_notifications(
             "message": doc["message"],
             "read": doc["read"],
             "metadata": doc.get("metadata", {}),
-            "created_at": doc["created_at"].isoformat(),
+            "created_at": utc_iso(doc["created_at"]),
         })
 
     total_unread = await db["notifications"].count_documents(

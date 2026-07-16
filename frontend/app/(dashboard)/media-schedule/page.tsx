@@ -35,6 +35,7 @@ import { useAuthStore } from "@/stores/authStore";
 import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { fmtDate as fmtDateIST } from "@/lib/datetime";
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -100,7 +101,7 @@ function parseDate(iso: string) {
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
+  return fmtDateIST(iso, { dateStyle: "medium" });
 }
 
 function genId() {

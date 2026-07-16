@@ -14,6 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import success_response
+from app.utils.timezone import utc_iso
 
 router = APIRouter(prefix="/api/v1/email-logs", tags=["email-logs"])
 
@@ -34,7 +35,7 @@ def _serialize(doc: dict) -> dict:
         "error": doc.get("error"),
         "from_email": doc.get("from_email", ""),
         "category": doc.get("category", "general"),
-        "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
+        "created_at": utc_iso(doc.get("created_at")),
     }
 
 

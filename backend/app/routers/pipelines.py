@@ -21,6 +21,7 @@ from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.pipeline import CreatePipelineRequest, UpdatePipelineRequest
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 router = APIRouter(prefix="/api/v1/pipelines", tags=["pipelines"])
 
@@ -48,9 +49,9 @@ def _serialize(doc: dict) -> dict:
     out["id"] = str(doc["_id"])
     del out["_id"]
     if "created_at" in out and hasattr(out["created_at"], "isoformat"):
-        out["created_at"] = out["created_at"].isoformat()
+        out["created_at"] = utc_iso(out["created_at"])
     if "updated_at" in out and hasattr(out["updated_at"], "isoformat"):
-        out["updated_at"] = out["updated_at"].isoformat()
+        out["updated_at"] = utc_iso(out["updated_at"])
     return out
 
 

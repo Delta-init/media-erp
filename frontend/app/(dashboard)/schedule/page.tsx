@@ -16,6 +16,7 @@ import {
 } from "@/hooks/useSchedule";
 import { useConnectors } from "@/hooks/useConnectors";
 import type { Connector } from "@/types/connector";
+import { fmtDateTimeIST } from "@/lib/datetime";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -98,7 +99,7 @@ function PostDetailPanel({ post, onClose }: { post: ScheduledPost; onClose: () =
 
       <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
         <Clock className="size-3" />
-        Scheduled: {new Date(post.scheduled_at).toLocaleString()}
+        Scheduled: {fmtDateTimeIST(post.scheduled_at)}
       </div>
 
       {post.error && (
@@ -353,7 +354,7 @@ function UpcomingList({ posts, onSelect }: { posts: ScheduledPost[]; onSelect: (
               <PlatformBadge platform={p.platform} />
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Clock className="size-3" />
-                {new Date(p.scheduled_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                {fmtDateTimeIST(p.scheduled_at, { dateStyle: "medium", timeStyle: "short" })}
               </span>
             </div>
           </div>

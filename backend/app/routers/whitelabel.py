@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import success_response
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/whitelabel", tags=["whitelabel"])
@@ -49,7 +50,7 @@ DEFAULT_BRANDING = {
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _ser(doc: dict) -> dict:
-    def _dt(v): return v.isoformat() if isinstance(v, datetime) else v
+    def _dt(v): return utc_iso(v)
     return {
         "user_id": doc.get("user_id", ""),
         "company_name": doc.get("company_name", DEFAULT_BRANDING["company_name"]),

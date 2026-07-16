@@ -5,6 +5,7 @@ from bson.errors import InvalidId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.models.report import report_doc, VALID_METRICS, VALID_DIMENSIONS
+from app.utils.timezone import utc_iso
 
 BASE_METRICS = {"spend", "clicks", "impressions", "conversions", "revenue"}
 DERIVED_METRICS = {"ctr", "cpc", "roas"}
@@ -27,8 +28,11 @@ def _serialize(doc: dict) -> dict:
         if isinstance(v, ObjectId):
             result[k] = str(v)
         elif isinstance(v, datetime):
-            result[k] = v.isoformat()
+            # datetimes carry an explicit UTC offset so the IST frontend
+            # converts them correctly (Motor returns naive UTC).
+            result[k] = utc_iso(v)
         elif isinstance(v, date):
+            # calendar dates have no time component — never shift them
             result[k] = v.isoformat()
         elif isinstance(v, dict):
             result[k] = _serialize(v)

@@ -124,3 +124,14 @@
 - **What:** Reusable controlled uploader (`value: Attachment[]`, `onChange`). Uploads files **directly to Cloudflare R2** via backend-issued pre-signed PUT URLs — bytes never pass through the backend, so up to **1 GB** per file. Drag-and-drop + click, live per-file progress, image/video thumbnails, file-type icons, remove, and click-to-view (opens the public R2 URL in a new tab). `readOnly` mode = view-only gallery. `compact` variant for tight spaces.
 - **Migration:** `useUploadAttachments` (useUpload.ts) and `useUploadMedia` (useSocial.ts) now call `uploadFilesDirect` — so **every existing caller** (chat, social, task modals) uploads direct-to-R2 with no code change. `TaskDetailModal` + `AddTaskModal` swapped their bespoke upload UIs for `<FileUploader>` (removed the old `AttachmentList` + upload buttons). No frontend path hits the backend multipart endpoints anymore.
 - **Security:** R2 secret keys stay server-side; frontend `.env` holds only `NEXT_PUBLIC_R2_PUBLIC_URL` (public, for viewing).
+
+### lib/datetime.ts — IST-locked date rendering (2026-07-15)
+- **File:** `lib/datetime.ts`. mediaERP renders **every** date/time in IST regardless of the viewer's browser timezone.
+- **Helpers:** `fmtDateTime`, `fmtDate`, `fmtTime`, `fmtDateTimeIST` (adds an "IST" suffix), `fmtDateOnly`, `istDateKey`, `istTodayKey`, `isSameIstDay`, `isBeforeIstToday`. All force `timeZone: "Asia/Kolkata"` — passed **last** so a caller can't override it.
+- **Never** call `toLocaleString()/toLocaleDateString()/toLocaleTimeString()` directly — a bare call uses the browser's timezone. All 36 call sites across 25 files were migrated.
+- **`fmtDateOnly` vs `fmtDateTime`:** `task.due_date` and `marketing_data.date` are **date-only** "YYYY-MM-DD" strings, not instants. `new Date("2026-06-17")` parses as UTC midnight and rendered as the *previous day* west of UTC — a real pre-existing bug. Use `fmtDateOnly` for those; never timezone-shift them.
+- **`isTaskOverdue`** (types/project.ts) now compares IST date keys instead of `Date#setHours()` (which used the browser's timezone). Chat "Today/Yesterday" grouping likewise uses `istDateKey`.
+
+### AssignCard (Leader Desk › Assign Work) — self-assign feedback (2026-07-15)
+- **File:** `app/(dashboard)/leader/page.tsx`
+- **Change:** `assign()` was fire-and-forget with **no toast** (unlike `ReeditCard`), so assigning gave zero feedback. Now awaits the mutation, shows `Assigned to you — "<task>"` when the leader assigns to themselves (via `useAuthStore().user.id`) or `Assigned to <name>` otherwise, and resets the dropdown. Combined with the backend `incoming` fix, a self-assigned task now visibly leaves the queue and lands on the leader's own board.

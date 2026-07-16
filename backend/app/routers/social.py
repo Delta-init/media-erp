@@ -8,6 +8,7 @@ from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.services.connector_service import get_connector, get_decrypted_tokens
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 router = APIRouter(prefix="/api/v1/social", tags=["social"])
 
@@ -750,7 +751,7 @@ async def get_webhook_messages(
             "recipient_id": d.get("recipient_id"),
             "text":         d.get("text"),
             "direction":    d.get("direction", "inbound"),
-            "created_at":   d["created_at"].isoformat() if d.get("created_at") else None,
+            "created_at":   utc_iso(d.get("created_at")),
         })
     return success_response(messages, "Webhook messages retrieved")
 

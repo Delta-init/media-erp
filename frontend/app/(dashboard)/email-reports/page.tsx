@@ -16,6 +16,7 @@ import PageHeader from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { fmtDateTimeIST } from "@/lib/datetime";
 import {
   useEmailSchedules,
   useCreateEmailSchedule,
@@ -329,13 +330,13 @@ function ScheduleCard({ schedule }: { schedule: EmailSchedule }) {
               {schedule.last_sent_at && (
                 <span className="flex items-center gap-1">
                   <Send className="size-3" />
-                  Last sent: {new Date(schedule.last_sent_at).toLocaleString()}
+                  Last sent: {fmtDateTimeIST(schedule.last_sent_at)}
                 </span>
               )}
               {schedule.next_send_at && (
                 <span className="flex items-center gap-1">
                   <Clock className="size-3" />
-                  Next: {new Date(schedule.next_send_at).toLocaleString()}
+                  Next: {fmtDateTimeIST(schedule.next_send_at)}
                 </span>
               )}
             </div>

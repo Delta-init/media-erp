@@ -22,6 +22,9 @@ python-dotenv==1.0.1
 # Task queue
 celery==5.4.0
 redis==5.2.1
+# IANA timezone database — required for Celery beat to resolve "Asia/Kolkata"
+# (mediaERP runs on IST). Windows and slim containers do not ship the tzdb.
+tzdata>=2024.1
 
 # AI — Gemini (primary, cloud API) + Ollama (optional local fallback)
 google-generativeai>=0.8.0

@@ -41,25 +41,26 @@ import { useUploadAttachments } from "@/hooks/useUpload";
 import { useTaskDetail } from "@/hooks/useProjects";
 import { TaskDetailModal } from "@/components/projects/TaskDetailModal";
 import type { ChatAttachment, ChatGroup, ChatMessage, ChatUser, ConversationPair, GroupMessage, TaskRef } from "@/types/chat";
+import { fmtDate as fmtDateIST, fmtTime as fmtTimeIST, istDateKey, istTodayKey } from "@/lib/datetime";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("en-US", {
+  return fmtTimeIST(iso, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-  });
+  }, "en-US");
 }
 
+// Day grouping uses the IST calendar day, not the browser's.
 function fmtDate(iso: string) {
-  const d = new Date(iso);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) return "Today";
-  const yest = new Date(now);
-  yest.setDate(now.getDate() - 1);
-  if (d.toDateString() === yest.toDateString()) return "Yesterday";
-  return d.toLocaleDateString("en-GB", {
+  const key = istDateKey(iso);
+  if (key === istTodayKey()) return "Today";
+  const yest = new Date();
+  yest.setDate(yest.getDate() - 1);
+  if (key === istDateKey(yest)) return "Yesterday";
+  return fmtDateIST(iso, {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -76,7 +77,7 @@ function fmtRelative(iso: string | null) {
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return fmtDateIST(iso, { day: "numeric", month: "short" });
 }
 
 function initials(name: string) {

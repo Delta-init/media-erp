@@ -30,6 +30,7 @@ from app.services.chat_service import (
 )
 from app.services import group_chat_service as groups
 from app.utils.jwt import decode_access_token
+from app.utils.timezone import utc_iso
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
@@ -389,7 +390,7 @@ async def admin_list_conversations(
             "user_b_name": users_map.get(id_b, "Unknown"),
             "last_message":  last.get("content", ""),
             "last_sender_id": last.get("from_user_id", ""),
-            "last_at":       created.isoformat() if created else None,
+            "last_at":       utc_iso(created),
             "msg_count":     p["msg_count"],
         })
     return result

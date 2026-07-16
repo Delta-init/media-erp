@@ -16,6 +16,7 @@ from pydantic import BaseModel, field_validator
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class RuleUpdate(BaseModel):
 
 def _ser(doc: dict) -> dict:
     def _dt(v):
-        return v.isoformat() if isinstance(v, datetime) else v
+        return utc_iso(v)
 
     return {
         "id": str(doc["_id"]),
@@ -102,7 +103,7 @@ def _ser(doc: dict) -> dict:
 
 def _ser_trigger(doc: dict) -> dict:
     def _dt(v):
-        return v.isoformat() if isinstance(v, datetime) else v
+        return utc_iso(v)
 
     return {
         "id": str(doc["_id"]),

@@ -12,6 +12,7 @@ import {
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { TrendPoint, ReportMetric } from "@/types/report";
+import { fmtDateOnly } from "@/lib/datetime";
 
 // ── Label & formatter per metric ─────────────────────────────────────────────
 const META: Record<ReportMetric, { label: string; format: (v: number) => string; color: string }> = {
@@ -92,7 +93,7 @@ export function SpendTrendChart({ data, metric, loading, className }: SpendTrend
   const formatted = data.map((d) => ({
     ...d,
     label: d.date.length === 10
-      ? new Date(d.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      ? fmtDateOnly(d.date, { month: "short", day: "numeric" })
       : d.date,
   }));
 

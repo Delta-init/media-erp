@@ -18,6 +18,7 @@ import ollama
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.config import settings
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ def _to_json_safe(doc: dict) -> dict:
         if k == "_id":
             out[k] = str(v)
         elif hasattr(v, "isoformat"):
-            out[k] = v.isoformat()
+            out[k] = utc_iso(v)
         elif isinstance(v, dict):
             out[k] = _to_json_safe(v)
         elif isinstance(v, list):

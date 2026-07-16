@@ -13,6 +13,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def _serialize_log(doc: dict) -> dict:
         "resource_id": doc.get("resource_id"),
         "details": doc.get("details", {}),
         "ip_address": doc.get("ip_address"),
-        "created_at": created_at.isoformat() if isinstance(created_at, datetime) else created_at,
+        "created_at": utc_iso(created_at),
     }
 
 

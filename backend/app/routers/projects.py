@@ -324,8 +324,8 @@ async def leader_queue(
     """
     Leader Desk feed (team leaders + admins):
       - review:   pending_review tasks from teams the user leads
-      - incoming: new (pending) work in those teams that is unassigned or
-                  assigned to the leader — to distribute to members
+      - incoming: new (pending) **unassigned** work in those teams — the
+                  "Assign Work" queue, i.e. work still waiting to be distributed
       - teams:    the led teams with their members (for the assign dropdown)
     """
     from bson import ObjectId
@@ -372,10 +372,15 @@ async def leader_queue(
         {"status": "pending_review", "team_id": {"$in": team_ids}}
     ).sort("updated_at", -1).to_list(500)
 
+    # Only work that is still UNASSIGNED belongs in the "Assign Work" queue.
+    # Once a leader assigns a task — including to themselves — it is distributed
+    # and leaves this queue, showing up on the assignee's board instead.
+    # (Previously this also matched `assigned_to == uid`, which trapped a
+    #  leader's self-assigned work here forever and made self-assign look broken.)
     incoming = await db["project_tasks"].find({
         "status": "pending",
         "team_id": {"$in": team_ids},
-        "$or": [{"assigned_to": {"$in": ["", None]}}, {"assigned_to": uid}],
+        "assigned_to": {"$in": ["", None]},
     }).sort("created_at", -1).to_list(500)
 
     # Reedit desk — tasks returned for revision that now live in one of this

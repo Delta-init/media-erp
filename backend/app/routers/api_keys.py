@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 router = APIRouter(prefix="/api/v1/api-keys", tags=["api-keys"])
 
@@ -46,9 +47,9 @@ def _serialize(doc: dict) -> dict:
         "name":        doc.get("name", ""),
         "key_prefix":  doc.get("key_prefix", ""),   # e.g. "merp_AbCd…" (first 12 chars)
         "scopes":      doc.get("scopes", ["read"]),
-        "last_used_at": doc["last_used_at"].isoformat() if doc.get("last_used_at") else None,
-        "created_at":   doc["created_at"].isoformat(),
-        "expires_at":   doc["expires_at"].isoformat() if doc.get("expires_at") else None,
+        "last_used_at": utc_iso(doc.get("last_used_at")),
+        "created_at":   utc_iso(doc["created_at"]),
+        "expires_at":   utc_iso(doc.get("expires_at")),
         "is_active":    doc.get("is_active", True),
     }
 

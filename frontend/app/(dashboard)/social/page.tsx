@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { useConnectors } from "@/hooks/useConnectors";
 import type { Connector } from "@/types/connector";
+import { fmtDate } from "@/lib/datetime";
 import {
   useFacebookPages,
   useInstagramLoginAccount,
@@ -49,7 +50,7 @@ function timeAgo(iso: string) {
     const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
     const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
     const d = Math.floor(h / 24); if (d < 30)  return `${d}d ago`;
-    return new Date(iso).toLocaleDateString();
+    return fmtDate(iso);
   } catch { return ""; }
 }
 

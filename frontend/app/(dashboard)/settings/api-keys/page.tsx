@@ -28,12 +28,13 @@ import {
 } from "@/hooks/useApiKeys";
 import type { ApiKey, CreateApiKeyResult } from "@/hooks/useApiKeys";
 import { listVariants, listItemVariants, fadeVariants } from "@/lib/animations";
+import { fmtDate as fmtDateIST } from "@/lib/datetime";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "Never";
-  return new Date(iso).toLocaleDateString("en-GB", {
+  return fmtDateIST(iso, {
     day: "numeric",
     month: "short",
     year: "numeric",

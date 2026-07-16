@@ -23,6 +23,7 @@ from app.middleware.auth import get_current_user
 from app.schemas.ai import AiQueryRequest
 from app.services.ai_service import run_ai_query
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/ai", tags=["ai"])
@@ -31,6 +32,8 @@ router = APIRouter(prefix="/api/v1/ai", tags=["ai"])
 # ── Serialisers ───────────────────────────────────────────────────────────────
 
 def _iso(v) -> str:
+    if isinstance(v, datetime):
+        return utc_iso(v)
     return v.isoformat() if hasattr(v, "isoformat") else str(v)
 
 

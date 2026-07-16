@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +106,8 @@ def _serialize_goal(doc: dict) -> dict:
         "period": doc.get("period", "monthly"),
         "period_start": doc.get("period_start"),
         "period_end": doc.get("period_end"),
-        "created_at": doc.get("created_at", "").isoformat() if isinstance(doc.get("created_at"), datetime) else doc.get("created_at"),
-        "updated_at": doc.get("updated_at", "").isoformat() if isinstance(doc.get("updated_at"), datetime) else doc.get("updated_at"),
+        "created_at": utc_iso(doc.get("created_at")),
+        "updated_at": utc_iso(doc.get("updated_at")),
     }
 
 

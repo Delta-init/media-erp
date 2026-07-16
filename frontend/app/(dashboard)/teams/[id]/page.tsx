@@ -26,6 +26,7 @@ import { UserPicker } from "@/components/teams/UserPicker";
 import { useTeamEmailPrefs, useUpdateTeamEmailPrefs } from "@/hooks/useTeamEmailPrefs";
 import { TEAM_EMAIL_TYPES } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
+import { fmtDateOnly } from "@/lib/datetime";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -637,7 +638,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 function shortDate(iso: string) {
   return iso.length === 10
-    ? new Date(iso + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    ? fmtDateOnly(iso, { month: "short", day: "numeric" })
     : iso;
 }
 

@@ -34,6 +34,7 @@ import {
   RuleCreate,
 } from "@/hooks/useRules";
 import { useConnectors } from "@/hooks/useConnectors";
+import { fmtDateTime } from "@/lib/datetime";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -338,7 +339,7 @@ function RuleCard({ rule }: { rule: Rule }) {
                 {rule.cooldown_minutes}m cooldown
               </span>
               {rule.last_triggered_at && (
-                <span>Last: {new Date(rule.last_triggered_at).toLocaleString()}</span>
+                <span>Last: {fmtDateTime(rule.last_triggered_at)}</span>
               )}
             </div>
           </div>
@@ -403,7 +404,7 @@ function HistoryPanel() {
             </p>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-[11px] text-muted-foreground">{new Date(h.triggered_at).toLocaleString()}</p>
+            <p className="text-[11px] text-muted-foreground">{fmtDateTime(h.triggered_at)}</p>
             <p className="text-[11px] text-amber-600 capitalize">{h.action_taken.replace("_", " ")}</p>
           </div>
         </div>

@@ -12,6 +12,7 @@ import {
 import { listVariants, listItemVariants } from "@/lib/animations";
 import { useSyncHistory } from "@/hooks/useSync";
 import type { SyncRun } from "@/types/sync";
+import { fmtDateTime } from "@/lib/datetime";
 
 // ── Run row ───────────────────────────────────────────────────────────────────
 
@@ -31,8 +32,7 @@ function RunIcon({ status }: { status: SyncRun["status"] }) {
 }
 
 function fmt(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString(undefined, {
+  return fmtDateTime(iso, {
     month: "short",
     day: "numeric",
     hour: "2-digit",

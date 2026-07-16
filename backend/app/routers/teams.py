@@ -32,6 +32,7 @@ from app.schemas.team import (
     UpdateTeamRequest,
 )
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 router = APIRouter(prefix="/api/v1/teams", tags=["teams"])
 
@@ -90,10 +91,10 @@ def _serialize_team(doc: dict) -> dict:
     del out["_id"]
     for f in ("created_at", "updated_at"):
         if f in out and hasattr(out[f], "isoformat"):
-            out[f] = out[f].isoformat()
+            out[f] = utc_iso(out[f])
     for m in out.get("members", []):
         if "joined_at" in m and hasattr(m["joined_at"], "isoformat"):
-            m["joined_at"] = m["joined_at"].isoformat()
+            m["joined_at"] = utc_iso(m["joined_at"])
     return out
 
 
@@ -436,7 +437,7 @@ async def add_member(
     # Return a JSON-safe payload (datetime → isoformat) — a raw datetime here
     # causes a 500 during JSON serialization.
     return success_response(
-        data={"user_id": body.user_id, "role": body.role, "joined_at": now.isoformat()},
+        data={"user_id": body.user_id, "role": body.role, "joined_at": utc_iso(now)},
         message="Member added",
         status_code=201,
     )
@@ -557,7 +558,7 @@ async def member_report(
             "status":      t.get("status", "pending"),
             "priority":    t.get("priority", "medium"),
             "due_date":    t.get("due_date"),
-            "updated_at":  t["updated_at"].isoformat() if hasattr(t.get("updated_at"), "isoformat") else None,
+            "updated_at":  utc_iso(t.get("updated_at")),
         }
 
     # Member since
@@ -566,7 +567,7 @@ async def member_report(
         if m["user_id"] == user_id:
             member_since = m.get("joined_at")
             if hasattr(member_since, "isoformat"):
-                member_since = member_since.isoformat()
+                member_since = utc_iso(member_since)
             break
 
     report = {
@@ -845,7 +846,7 @@ async def member_activity(
             "status":     t.get("status", "pending"),
             "priority":   t.get("priority", "medium"),
             "due_date":   t.get("due_date"),
-            "updated_at": t["updated_at"].isoformat() if hasattr(t.get("updated_at"), "isoformat") else None,
+            "updated_at": utc_iso(t.get("updated_at")),
         }
 
     report = {

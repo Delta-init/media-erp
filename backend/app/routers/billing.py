@@ -17,6 +17,7 @@ from app.config import settings
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
@@ -141,7 +142,7 @@ class PortalCreate(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _serialize_sub(doc: dict) -> dict:
-    def _dt(v): return v.isoformat() if isinstance(v, datetime) else v
+    def _dt(v): return utc_iso(v)
     return {
         "id": str(doc["_id"]),
         "plan": doc.get("plan", "free"),

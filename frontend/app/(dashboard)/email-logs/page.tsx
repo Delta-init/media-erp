@@ -9,6 +9,7 @@ import {
 import { useAuthStore } from "@/stores/authStore";
 import { useEmailLogs, type EmailLog } from "@/hooks/useEmailLogs";
 import { cn } from "@/lib/utils";
+import { fmtDateTime } from "@/lib/datetime";
 
 const CATEGORY_META: Record<string, { label: string; color: string }> = {
   password_reset: { label: "Password Reset", color: "#6366f1" },
@@ -20,8 +21,7 @@ const CATEGORY_META: Record<string, { label: string; color: string }> = {
 };
 
 function fmtTime(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString(undefined, {
+  return fmtDateTime(iso, {
     day: "2-digit", month: "short", year: "numeric",
     hour: "2-digit", minute: "2-digit",
   });

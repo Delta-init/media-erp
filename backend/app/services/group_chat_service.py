@@ -19,7 +19,9 @@ from app.database import get_db
 
 logger = logging.getLogger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
+from app.utils.timezone import IST  # single source of truth for IST (UTC+05:30)
+from app.utils.timezone import utc_iso
+
 _POLL_INTERVAL_SEC = 60
 _REPORT_HOUR_IST = 21  # 9 PM IST
 
@@ -42,7 +44,7 @@ def group_message_to_dict(doc: dict) -> dict:
         "is_system": bool(doc.get("is_system", False)),
         "attachments": doc.get("attachments", []),
         "task_ids": doc.get("task_ids", []),
-        "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
+        "created_at": utc_iso(doc.get("created_at")),
     }
 
 
@@ -148,7 +150,7 @@ async def list_groups_for_user(
         if last:
             g["last_message"] = last.get("content", "")
             g["last_sender_name"] = last.get("from_user_name", "")
-            g["last_at"] = last["created_at"].isoformat() if last.get("created_at") else None
+            g["last_at"] = utc_iso(last.get("created_at"))
         else:
             g["last_message"] = ""
             g["last_sender_name"] = ""

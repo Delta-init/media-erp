@@ -172,27 +172,19 @@ async def list_tasks(
     # "team"  → team_id already applied above (leader sees all tasks in that specific team)
     # "all"   → no additional filter (Super Admin / Admin / Coordinator)
 
-    # Date filtering on created_at
-    now = datetime.now(timezone.utc)
-    if date_filter == "today":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        query["created_at"] = {"$gte": start}
-    elif date_filter == "this_week":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        start = start.replace(day=start.day - start.weekday())
-        query["created_at"] = {"$gte": start}
-    elif date_filter == "this_month":
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        query["created_at"] = {"$gte": start}
-    elif date_filter == "this_year":
-        start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        query["created_at"] = {"$gte": start}
+    # Date filtering on created_at.
+    # Boundaries are IST calendar days (the product runs on IST), converted to
+    # the UTC instants that are actually stored. See app/utils/timezone.py.
+    from app.utils.timezone import ist_period_start_utc, ist_day_start_utc, ist_day_end_utc
+
+    if date_filter in ("today", "this_week", "this_month", "this_year"):
+        start = ist_period_start_utc(date_filter)
+        if start:
+            query["created_at"] = {"$gte": start}
     elif date_filter == "custom" and date_from and date_to:
         try:
-            df = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            dt = datetime.strptime(date_to, "%Y-%m-%d").replace(
-                hour=23, minute=59, second=59, tzinfo=timezone.utc
-            )
+            df = ist_day_start_utc(datetime.strptime(date_from, "%Y-%m-%d").date())
+            dt = ist_day_end_utc(datetime.strptime(date_to, "%Y-%m-%d").date())
             query["created_at"] = {"$gte": df, "$lte": dt}
         except ValueError:
             pass

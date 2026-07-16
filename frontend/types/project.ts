@@ -1,3 +1,4 @@
+import { istTodayKey } from "@/lib/datetime";
 // Status is now a dynamic, user-defined Kanban column key (free-form string).
 // The defaults are pending | upcoming | currently_working | updation_needed.
 export type TaskStatus = string;
@@ -190,12 +191,13 @@ export function allowedColumns(from: string): BoardColumn[] {
  * A task is overdue when its due date is in the past AND it isn't done
  * (i.e. not in the Approved column).
  */
+/** Overdue once the IST calendar day *after* the due date has begun.
+ *  due_date is a date-only "YYYY-MM-DD" value, so compare IST date keys —
+ *  never Date#setHours(), which uses the browser's timezone. */
 export function isTaskOverdue(task: Pick<Task, "due_date" | "status">): boolean {
   if (!task.due_date) return false;
   if (task.status === DONE_STATUS) return false;
-  const due = new Date(task.due_date);
-  due.setHours(23, 59, 59, 999); // grace until end of due day
-  return due < new Date();
+  return String(task.due_date).slice(0, 10) < istTodayKey();
 }
 
 export const PRIORITY_META: Record<TaskPriority, { label: string; color: string }> = {

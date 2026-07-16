@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ def _serialize_post(doc: dict) -> dict:
     """Convert a scheduled_posts MongoDB document to a JSON-serialisable dict."""
     def _iso(val):
         if isinstance(val, datetime):
-            return val.isoformat()
+            return utc_iso(val)
         return val
 
     return {

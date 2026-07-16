@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from app.utils.timezone import utc_iso
 
 # Metrics that may appear as variable names in a formula
 ALLOWED_NAMES = {
@@ -108,7 +109,7 @@ def _serialize_doc(doc: dict) -> dict:
     if "_id" in doc:
         doc["_id"] = str(doc["_id"])
     if "created_at" in doc and isinstance(doc["created_at"], datetime):
-        doc["created_at"] = doc["created_at"].isoformat()
+        doc["created_at"] = utc_iso(doc["created_at"])
     return doc
 
 

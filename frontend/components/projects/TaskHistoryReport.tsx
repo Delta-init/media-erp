@@ -10,6 +10,7 @@ import {
 import type { Task, TaskHistoryEntry } from "@/types/project";
 import { BOARD_COLUMNS, PRIORITY_META, assigneeLabel } from "@/types/project";
 import { cn } from "@/lib/utils";
+import { fmtDate, fmtDateTime } from "@/lib/datetime";
 
 interface Props {
   task: Task;
@@ -20,7 +21,7 @@ interface Props {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTime(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
+  return fmtDateTime(iso, {
     day: "numeric", month: "short", year: "numeric",
     hour: "2-digit", minute: "2-digit",
   });
@@ -339,7 +340,7 @@ export function TaskHistoryReport({ task, historyEntries, onClose }: Props) {
                           {label}
                         </span>
                         <span className="text-[9px] text-slate-400">
-                          {new Date(e.timestamp).toLocaleDateString(undefined, {
+                          {fmtDate(e.timestamp, {
                             month: "short", day: "numeric",
                           })}
                         </span>

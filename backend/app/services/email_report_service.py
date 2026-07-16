@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ async def send_schedule_report(db: AsyncIOMotorDatabase, schedule: dict) -> dict
         "rows_sent": len(rows),
         "date_from": date_from,
         "date_to": date_to,
-        "next_send_at": next_send.isoformat(),
+        "next_send_at": utc_iso(next_send),
         "error": error,
     }
 

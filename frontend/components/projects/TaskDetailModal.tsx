@@ -19,6 +19,7 @@ import type { Task, Attachment, TaskHistoryEntry, TeamFlowStep } from "@/types/p
 import { PRIORITY_META, BOARD_COLUMNS, assigneeLabel } from "@/types/project";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { fmtDateOnly, fmtDateTime } from "@/lib/datetime";
 
 interface Props {
   task: Task;
@@ -42,8 +43,7 @@ const ACTION_META: Record<string, { label: string; icon: React.ReactNode; color:
 };
 
 function fmtHistoryTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
+  return fmtDateTime(iso, {
     day: "numeric", month: "short", year: "numeric",
     hour: "2-digit", minute: "2-digit",
   });
@@ -438,7 +438,7 @@ export function TaskDetailModal({
                     <Calendar className="size-3.5" />
                     Due{" "}
                     <span className="font-medium text-foreground">
-                      {new Date(task.due_date).toLocaleDateString("en-GB", {
+                      {fmtDateOnly(task.due_date, {
                         day: "numeric", month: "long", year: "numeric",
                       })}
                     </span>

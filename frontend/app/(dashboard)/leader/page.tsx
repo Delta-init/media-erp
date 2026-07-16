@@ -11,10 +11,12 @@ import { Button } from "@/components/ui/button";
 import { useLeaderQueue, useUpdateTask, type LeaderTeam } from "@/hooks/useProjects";
 import { useAllTeams } from "@/hooks/useTeams";
 import { TaskDetailModal } from "@/components/projects/TaskDetailModal";
+import { useAuthStore } from "@/stores/authStore";
 import type { Task } from "@/types/project";
 import { PRIORITY_META, isTaskOverdue, assigneeLabel } from "@/types/project";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { fmtDateOnly } from "@/lib/datetime";
 
 type Tab = "review" | "assign" | "reedit";
 
@@ -206,7 +208,7 @@ function ReviewCard({
             {task.due_date && (
               <span className={cn("flex items-center gap-0.5", overdue && "text-red-500 font-semibold")}>
                 <Calendar className="size-3" />
-                {new Date(task.due_date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                {fmtDateOnly(task.due_date, { day: "numeric", month: "short" })}
               </span>
             )}
             {attachmentCount > 0 && (
@@ -267,11 +269,19 @@ function AssignCard({
   const [memberId, setMemberId] = useState("");
   const [detailOpen, setDetailOpen] = useState(false);
   const pri = PRIORITY_META[task.priority];
+  const myId = useAuthStore((s) => s.user)?.id ?? "";
 
-  function assign() {
+  async function assign() {
     if (!memberId) return;
     const m = team?.members.find((x) => x.id === memberId);
-    update.mutate({ id: task.id, payload: { assigned_to: memberId, assigned_to_name: m?.name ?? "" } });
+    const name = m?.name ?? "";
+    await update.mutateAsync({
+      id: task.id,
+      payload: { assigned_to: memberId, assigned_to_name: name },
+    });
+    // A leader may assign work to themselves — say so explicitly.
+    toast.success(memberId === myId ? `Assigned to you — "${task.title}"` : `Assigned to ${name}`);
+    setMemberId("");
   }
 
   return (

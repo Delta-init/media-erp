@@ -8,6 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from passlib.context import CryptContext
 
 from app.schemas.user_admin import CreateUserRequest, UpdateUserRequest
+from app.utils.timezone import utc_iso
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -73,8 +74,8 @@ def _serialize_user(doc: dict, role_doc: Optional[dict] = None) -> dict:
         "status": doc.get("status", "active"),
         "plan": doc.get("plan", "free"),
         "whatsapp_phone": doc.get("whatsapp_phone", ""),
-        "created_at": doc.get("created_at", "").isoformat() if isinstance(doc.get("created_at"), datetime) else doc.get("created_at", ""),
-        "updated_at": doc.get("updated_at", "").isoformat() if isinstance(doc.get("updated_at"), datetime) else doc.get("updated_at", ""),
+        "created_at": utc_iso(doc.get("created_at", "")),
+        "updated_at": utc_iso(doc.get("updated_at", "")),
     }
 
 

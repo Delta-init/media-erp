@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
@@ -47,7 +48,7 @@ class ClientUpdate(BaseModel):
 # ── Serializers ───────────────────────────────────────────────────────────────
 
 def _ser(doc: dict) -> dict:
-    def _dt(v): return v.isoformat() if isinstance(v, datetime) else v
+    def _dt(v): return utc_iso(v)
     return {
         "id": str(doc["_id"]),
         "agency_user_id": doc.get("agency_user_id", ""),
@@ -281,7 +282,7 @@ async def invite_client(
         logger.warning("Invite email failed: %s", exc)
 
     return success_response(
-        data={"invite_token": token, "invited_at": now.isoformat()},
+        data={"invite_token": token, "invited_at": utc_iso(now)},
         message="Invitation sent",
     )
 

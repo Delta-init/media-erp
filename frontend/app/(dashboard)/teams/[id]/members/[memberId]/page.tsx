@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useMemberReport, useMemberActivity, type ReportPeriod } from "@/hooks/useTeams";
+import { fmtDate, fmtDateOnly } from "@/lib/datetime";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -146,7 +147,7 @@ export default function MemberReportPage() {
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Calendar className="size-3.5 shrink-0" />
-              <span>Joined team: {member_since ? new Date(member_since).toLocaleDateString() : "—"}</span>
+              <span>Joined team: {fmtDate(member_since)}</span>
             </div>
           </div>
         </div>
@@ -302,7 +303,7 @@ const PERIODS: { id: ReportPeriod; label: string }[] = [
 
 function shortDate(iso: string) {
   return iso.length === 10
-    ? new Date(iso + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    ? fmtDateOnly(iso, { month: "short", day: "numeric" })
     : iso;
 }
 

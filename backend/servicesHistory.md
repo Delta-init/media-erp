@@ -201,3 +201,15 @@
 - `storage.presign_put()` generates the signed URL (R2) or a local-disk PUT fallback (`PUT /media/local-blob/{key}`) when R2 is disabled — identical frontend flow either way.
 - `storage.ensure_bucket_cors()` + `scripts/set_r2_cors.py` configure the R2 bucket CORS (GET/PUT/HEAD for the app origins) so browser PUTs from localhost/prod succeed. Run once per bucket.
 - Legacy multipart endpoints (`/media/upload`, `/media/upload-attachments`) remain but are no longer used by the frontend.
+
+## Timezone: mediaERP now runs entirely on IST (2026-07-15)
+- **Policy** (`app/utils/timezone.py`): storage stays **UTC instants**; every wall-clock decision is **IST** (Asia/Kolkata, UTC+05:30). Fixed +05:30 offset used (IST has no DST) so no `tzdata` dependency for the helpers. Helpers: `IST`, `now_ist`, `to_ist`, `to_utc`, `today_ist`, `ist_day_start_utc/…_end_utc`, `ist_period_start_utc`, `utc_iso`.
+- **BUG FIXED — email schedules:** `_compute_next_send` treated `send_time` ("09:00") as **UTC**, so schedules fired at 14:30 IST. Now computed in IST wall-clock and stored as the UTC instant. `scripts/migrate_schedules_to_ist.py` recomputes legacy rows (dry-run by default; `--apply` to write).
+- **BUG FIXED — naive serialization (widespread):** ~38 sites across routers/services emitted `dt.isoformat()` on Motor's timezone-**naive** datetimes, dropping the offset — JS then parsed them as *local* time (e.g. email logs showed 14:39 instead of 20:09 IST). All now go through `utc_iso()`. Calendar `date(...).isoformat()` deliberately untouched.
+- **Task date filters:** `list_tasks` today/this_week/this_month/this_year now use **IST day boundaries** (also fixes a latent `this_week` crash at month boundaries).
+- **Celery:** `timezone="Asia/Kolkata"`, `enable_utc=False` — beat crontabs are IST wall-clock (anomaly scan 02:00 IST). Added `tzdata` to requirements.txt (beat needs the IANA db; Windows/slim containers lack it).
+- `group_chat_service` now imports the shared `IST` constant.
+
+## Leader Desk — leader self-assign fixed (2026-07-15)
+- **BUG:** a leader could not meaningfully assign work to themselves. `GET /projects/leader/queue`'s `incoming` matched `{"$or": [assigned_to in ["",None], assigned_to == uid]}`, so a task the leader assigned **to themselves** stayed in the "Assign Work" (to-distribute) queue forever — the card never moved, so it looked like the action failed. (The write itself always succeeded: `can_assign_to_others` already allows a team leader, and the API returned 200.)
+- **FIX:** `incoming` now matches **unassigned pending work only**. Once assigned to anyone — including the leader themselves — the task leaves the distribute queue and appears on the assignee's board. The old `assigned_to == uid` clause existed so leaders could see routed tasks auto-assigned to them, but routed copies now arrive unassigned (see the reedit/routing change), so it was vestigial and actively harmful.

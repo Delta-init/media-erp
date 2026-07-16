@@ -15,6 +15,7 @@ from pydantic import BaseModel, EmailStr
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.utils.response import error_response, success_response
+from app.utils.timezone import utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class ScheduleCreate(BaseModel):
     frequency: str = "weekly"   # "daily" | "weekly" | "monthly"
     day_of_week: Optional[int] = None    # 0=Mon, 6=Sun — for weekly
     day_of_month: Optional[int] = None  # 1-31 — for monthly
-    send_time: str = "09:00"             # "HH:MM" in UTC
+    send_time: str = "09:00"             # "HH:MM" IST wall-clock
     recipients: List[str]
     platforms: List[str] = []
     date_range_days: int = 7
@@ -58,7 +59,7 @@ class TestEmailBody(BaseModel):
 
 def _ser(doc: dict) -> dict:
     def _dt(v):
-        return v.isoformat() if isinstance(v, datetime) else v
+        return utc_iso(v)
     return {
         "id": str(doc["_id"]),
         "name": doc.get("name", ""),
@@ -78,41 +79,50 @@ def _ser(doc: dict) -> dict:
 
 
 def _compute_next_send(frequency: str, send_time: str, day_of_week: Optional[int], day_of_month: Optional[int]) -> datetime:
-    """Compute the next UTC datetime this schedule should fire."""
-    now = datetime.now(timezone.utc)
+    """
+    Compute the next moment this schedule should fire.
+
+    `send_time` ("HH:MM"), `day_of_week` and `day_of_month` are the user's
+    **IST wall-clock** choices, so the whole calculation runs in IST. The value
+    returned is the equivalent **UTC instant** (that is what we persist and what
+    the scheduler compares `now` against).
+    """
+    from app.utils.timezone import IST
+
+    now = datetime.now(IST)
     hour, minute = (int(x) for x in (send_time or "09:00").split(":"))
 
     if frequency == "daily":
         candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if candidate <= now:
             candidate += timedelta(days=1)
-        return candidate
+        return candidate.astimezone(timezone.utc)
 
     if frequency == "weekly":
         dow = day_of_week if day_of_week is not None else 0  # default Monday
-        days_ahead = (dow - now.weekday()) % 7 or 7
-        candidate = (now + timedelta(days=days_ahead)).replace(
-            hour=hour, minute=minute, second=0, microsecond=0
-        )
-        return candidate
+        candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        days_ahead = (dow - now.weekday()) % 7
+        if days_ahead == 0 and candidate <= now:
+            days_ahead = 7
+        candidate += timedelta(days=days_ahead)
+        return candidate.astimezone(timezone.utc)
 
     # monthly
+    from calendar import monthrange
     dom = day_of_month if day_of_month is not None else 1
-    # Try current month
-    try:
-        candidate = now.replace(day=dom, hour=hour, minute=minute, second=0, microsecond=0)
-    except ValueError:
-        # day > days in month — use last day
-        from calendar import monthrange
-        _, last = monthrange(now.year, now.month)
-        candidate = now.replace(day=last, hour=hour, minute=minute, second=0, microsecond=0)
+
+    def _month_candidate(year: int, month: int) -> datetime:
+        _, last = monthrange(year, month)
+        return now.replace(
+            year=year, month=month, day=min(dom, last),
+            hour=hour, minute=minute, second=0, microsecond=0,
+        )
+
+    candidate = _month_candidate(now.year, now.month)
     if candidate <= now:
-        # advance to next month
-        if now.month == 12:
-            candidate = candidate.replace(year=now.year + 1, month=1)
-        else:
-            candidate = candidate.replace(month=now.month + 1)
-    return candidate
+        year, month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
+        candidate = _month_candidate(year, month)
+    return candidate.astimezone(timezone.utc)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────

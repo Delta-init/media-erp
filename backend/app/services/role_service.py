@@ -8,6 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.models.role import MODULES, ACTIONS, default_permissions, all_permissions
 from app.schemas.role import CreateRoleRequest, UpdateRoleRequest
+from app.utils.timezone import utc_iso
 
 
 def _serialize_role(doc: dict) -> dict:
@@ -17,8 +18,8 @@ def _serialize_role(doc: dict) -> dict:
         "description": doc.get("description", ""),
         "is_system_role": doc.get("is_system_role", False),
         "permissions": doc.get("permissions", default_permissions()),
-        "created_at": doc.get("created_at", "").isoformat() if isinstance(doc.get("created_at"), datetime) else doc.get("created_at", ""),
-        "updated_at": doc.get("updated_at", "").isoformat() if isinstance(doc.get("updated_at"), datetime) else doc.get("updated_at", ""),
+        "created_at": utc_iso(doc.get("created_at", "")),
+        "updated_at": utc_iso(doc.get("updated_at", "")),
     }
 
 
