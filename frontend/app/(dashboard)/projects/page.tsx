@@ -8,7 +8,7 @@ import { KanbanBoard } from "@/components/projects/KanbanBoard";
 import { TaskTable } from "@/components/projects/TaskTable";
 import { AddTaskModal } from "@/components/projects/AddTaskModal";
 import { ProjectFiltersBar } from "@/components/projects/ProjectFilters";
-import { useTasks } from "@/hooks/useProjects";
+import { useTasksPaged, useBoardColumns } from "@/hooks/useProjects";
 import { useTeams, useTeam } from "@/hooks/useTeams";
 import { useAuthStore } from "@/stores/authStore";
 import { cn } from "@/lib/utils";
@@ -54,7 +54,13 @@ export default function ProjectsPage() {
   // Enriched detail (members + my_role) for the selected team
   const { data: teamDetail } = useTeam(filters.team_id || "");
 
-  const { data: tasks = [], isLoading } = useTasks(filters);
+  // Board pages EACH COLUMN independently (a flat page-1 slice would fill the
+  // six columns unevenly). Table uses a normal flat pager.
+  const board = useBoardColumns(filters);
+  const [tablePage, setTablePage] = useState(1);
+  const table = useTasksPaged(filters, tablePage, 25);
+  const tasks = view === "kanban" ? board.tasks : (table.data?.items ?? []);
+  const isLoading = view === "kanban" ? board.isLoading : table.isLoading;
 
   function patchFilter(patch: Partial<ProjectFilters>) {
     setFilters(prev => ({ ...prev, ...patch }));
@@ -69,20 +75,23 @@ export default function ProjectsPage() {
     [teamDetail]
   );
 
+  // True totals from the server (not just the loaded page), so the header
+  // never under-reports when a column is partially loaded.
   const totalByStatus = {
-    pending:  tasks.filter(t => t.status === "pending").length,
-    started:  tasks.filter(t => t.status === "started").length,
-    approved: tasks.filter(t => t.status === "approved").length,
+    pending:  board.meta.pending?.total  ?? 0,
+    started:  board.meta.started?.total  ?? 0,
+    approved: board.meta.approved?.total ?? 0,
   };
+  const grandTotal = view === "kanban" ? board.total : (table.data?.meta.total ?? 0);
 
   return (
-    <div className="flex flex-col gap-5 h-full min-h-0">
+    <div className="flex flex-col gap-5 md:h-full md:min-h-0">
       {/* Page header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Projects</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {tasks.length} task{tasks.length !== 1 ? "s" : ""} total
+            {grandTotal} task{grandTotal !== 1 ? "s" : ""} total
             {" · "}
             <span className="text-blue-600 dark:text-blue-400">{totalByStatus.started} started</span>
             {" · "}
@@ -171,7 +180,7 @@ export default function ProjectsPage() {
       />
 
       {/* Content — fills remaining height; scrolls internally (no page scroll) */}
-      <div className="flex-1 min-h-0">
+      <div className="md:flex-1 md:min-h-0">
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <motion.div
@@ -181,10 +190,43 @@ export default function ProjectsPage() {
             />
           </div>
         ) : view === "kanban" ? (
-          <KanbanBoard tasks={tasks} />
+          <KanbanBoard tasks={tasks} columnMeta={board.meta} onLoadMore={board.loadMore} />
         ) : (
-          <div className="h-full overflow-auto no-scrollbar">
+          <div className="overflow-x-auto overflow-y-auto no-scrollbar md:h-full [overscroll-behavior:contain]">
             <TaskTable tasks={tasks} />
+            {(() => {
+              const m = table.data?.meta;
+              if (!m || m.total === 0) return null;
+              const from = (m.page - 1) * (m.limit || m.total) + 1;
+              const to = from + tasks.length - 1;
+              return (
+                <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-xs">
+                  <span className="text-muted-foreground">
+                    Showing <span className="font-medium text-foreground">{from}–{to}</span> of{" "}
+                    <span className="font-medium text-foreground">{m.total}</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTablePage((n) => Math.max(1, n - 1))}
+                      disabled={m.page <= 1}
+                      className="rounded-lg border px-2.5 py-1.5 font-medium transition-colors hover:bg-muted disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-muted-foreground">Page {m.page} of {m.pages}</span>
+                    <button
+                      type="button"
+                      onClick={() => setTablePage((n) => n + 1)}
+                      disabled={!m.has_more}
+                      className="rounded-lg border px-2.5 py-1.5 font-medium transition-colors hover:bg-muted disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>

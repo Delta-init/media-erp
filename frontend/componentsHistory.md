@@ -145,3 +145,55 @@
 - `PWARegister.tsx` — SW still prod-only by default, but now opt-in via `NEXT_PUBLIC_ENABLE_SW=1` so installability can be tested from a phone over an HTTPS tunnel without a prod build.
 
 **Why a phone shows no prompt on the dev server (not a bug):** browsers only expose `navigator.serviceWorker` in a **secure context** — `https://` or `localhost`. A LAN URL like `http://192.168.x.x:3000` can never install. Use the HTTPS deploy or a tunnel.
+
+### KanbanBoard + AddTaskModal — tasks disappearing / creation validation (2026-07-18)
+- **BUG: board silently dropped tasks.** `useEffect(... if (!draggingRef.current) setLocalTasks(tasks))`
+  skipped server updates that arrived MID-DRAG and never retried, so anything
+  created during a drag stayed invisible. Now a missed sync is recorded
+  (`pendingSyncRef`) and applied on drag end; the optimistic cross-column update
+  re-bases onto the fresh server list instead of discarding it.
+- **AddTaskModal validation:** Title, Team, Assigned To and Due Date are all
+  required (marked `*`); Create is disabled with a tooltip naming what's missing.
+  Mirrors the new server rules.
+- **BUG found while adding that validation:** `canAssignOthers` only counted
+  Super Admin, so a Coordinator/Admin was forced to self-assign — and the team
+  dropdown only listed teams they *belong to*. A Coordinator would have been
+  unable to create any task once a team+assignee became mandatory. Both now
+  mirror the backend: elevated roles (Super Admin/Admin/Coordinator) can assign
+  to anyone and pick any team. "No team (personal)" → "Select a team…".
+
+### Projects — real pagination (2026-07-18)
+- **`useTasksPaged(filters, page, limit)`** — flat paged list returning
+  `{items, meta}`; `placeholderData` keeps the current page visible while the
+  next one loads.
+- **`useBoardColumns(filters, pageSize)`** — the Kanban board pages **each
+  column independently** via `useQueries`. A flat page-1 slice is just the newest
+  N tasks overall, which would fill the six columns unevenly; per-column paging
+  is what Jira/Trello do. Each column reports `{total, loaded, hasMore}` and gets
+  a "Load more · showing X of Y" button, so a column can never quietly hide work.
+- Column badges and the page header now show **server totals**, not just what is
+  loaded — the header previously under-reported whenever a list was capped.
+- Table view gained a real pager ("Showing 1–25 of 86", Page N of M,
+  Previous/Next). Verified paging 1→2 shows 26–50.
+- `useTasks()` is left unchanged for any other callers.
+
+### Projects — mobile scrolling & responsive board (2026-07-18)
+- **BUG (why "tasks were missing" on phone): every card had `touch-action: none`.**
+  `KanbanCard` set it unconditionally for dnd-kit. On a phone the cards cover the
+  screen, so nearly every touch began on a card and the browser was told never to
+  scroll from it — BOTH axes were dead, so off-screen tasks were unreachable and
+  looked missing. The board's TouchSensor uses a *delay* activation constraint,
+  so dnd-kit only needs `touch-action: none` **while dragging**; before that the
+  user must be free to pan. Now `isDragging ? "none" : "manipulation"`.
+  Measured: elements blocking touch **86 → 0**.
+- **Responsive board.** A 6-column horizontal strip is unusable at 375px (it was
+  1260px wide × 4000px tall). Columns now **stack vertically on phones** and
+  become the classic side-by-side board from `md` up. No horizontal trap
+  (`horizontalOverflow: false`).
+- **Columns now have a definite max-height** (`max-h-[60vh]`,
+  `md:max-h-[calc(100vh-23rem)]`). They previously relied on an `h-full` chain;
+  when no ancestor had a definite height the columns grew to fit every card and
+  the *whole page* scrolled instead of each column scrolling internally. This was
+  a pre-existing desktop issue too — page overflow **3114px → 8px**.
+- Added `overscroll-behavior: contain` so column scrolling doesn't chain to the
+  page, and made the Table view horizontally scrollable on small screens.

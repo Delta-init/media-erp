@@ -1,0 +1,149 @@
+1
+00:00:03,100 --> 00:00:05,564
+Welcome to media E R P.
+
+2
+00:00:05,604 --> 00:00:10,326
+This short guide shows the coordinator
+workflow, step by step.
+
+3
+00:00:10,951 --> 00:00:14,755
+Sign in with your work email and password.
+
+4
+00:00:18,012 --> 00:00:20,893
+As a coordinator you see every team.
+
+5
+00:00:20,933 --> 00:00:24,451
+The Overview shows all work in one place.
+
+6
+00:00:25,113 --> 00:00:27,473
+Teams is your main area.
+
+7
+00:00:27,513 --> 00:00:30,684
+Every team in the company is listed here.
+
+8
+00:00:31,308 --> 00:00:32,974
+Press New Team.
+
+9
+00:00:33,014 --> 00:00:36,926
+Give it a name, a short description, and a
+colour.
+
+10
+00:00:37,553 --> 00:00:39,705
+Now the important part.
+
+11
+00:00:39,745 --> 00:00:43,518
+Under Team Leaders, choose who will lead this
+team.
+
+12
+00:00:44,126 --> 00:00:48,081
+Under Team Members, add the people who will
+work in it.
+
+13
+00:00:48,632 --> 00:00:50,101
+Press Create.
+
+14
+00:00:50,141 --> 00:00:55,361
+The team is ready, and the leader can start
+assigning work immediately.
+
+15
+00:00:55,976 --> 00:00:58,695
+Open a team to see its members.
+
+16
+00:00:58,735 --> 00:01:01,258
+The crown marks the team leader.
+
+17
+00:01:01,873 --> 00:01:06,545
+Open a member to see their tasks, and the time
+they have tracked.
+
+18
+00:01:07,113 --> 00:01:11,924
+Projects shows every task, from every team, on
+one board.
+
+19
+00:01:12,490 --> 00:01:18,574
+Filter by team, by status, by member, or by
+date, to find anything quickly.
+
+20
+00:01:19,140 --> 00:01:21,766
+Press Add Task to create work.
+
+21
+00:01:21,806 --> 00:01:26,146
+Choose the team, the person, a due date, and a
+priority.
+
+22
+00:01:26,778 --> 00:01:29,184
+Media Schedule is the plan.
+
+23
+00:01:29,224 --> 00:01:33,333
+Shoots, filming days, and reviews, on a
+timeline.
+
+24
+00:01:33,972 --> 00:01:40,022
+You can add, edit, or remove entries, so every
+team knows what is coming.
+
+25
+00:01:40,593 --> 00:01:43,381
+Chat has a group for every team.
+
+26
+00:01:43,421 --> 00:01:46,616
+Use it to share updates and files.
+
+27
+00:01:47,255 --> 00:01:52,483
+Every evening, a daily report is posted
+automatically for each team.
+
+28
+00:01:53,047 --> 00:01:57,525
+Users lists everyone, with their role and
+designation.
+
+29
+00:01:57,565 --> 00:02:00,250
+Coordinators can view this list.
+
+30
+00:02:00,832 --> 00:02:03,273
+The bell shows notifications.
+
+31
+00:02:03,313 --> 00:02:06,866
+Important updates also go to your email.
+
+32
+00:02:07,481 --> 00:02:10,003
+That is the coordinator workflow.
+
+33
+00:02:10,043 --> 00:02:14,216
+Build teams, assign leaders, and track
+everything.
+
+34
+00:02:14,256 --> 00:02:15,575
+Thank you.

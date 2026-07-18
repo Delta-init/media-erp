@@ -150,18 +150,25 @@ async def bump_other_started(db: AsyncIOMotorDatabase, task: dict) -> None:
     """
     Enforce "one started task per person": move the assignee's OTHER started
     task(s) to break and pause their timers.
+
+    Scoped strictly to the **assignee**. It previously fell back to the whole
+    TEAM when a task had no assignee — so starting one unassigned task silently
+    knocked every other in-progress task in that team into Break, and people
+    watched tasks vanish from the Started column. An unassigned task belongs to
+    nobody, so there is no per-person rule to enforce: do nothing.
     """
-    q: dict = {"status": "started", "_id": {"$ne": task["_id"]}}
     assignee = (task.get("assigned_to") or "").strip()
-    if assignee:
-        q["assigned_to"] = assignee
-    elif task.get("team_id"):
-        q["team_id"] = task["team_id"]
-    else:
-        return  # no scope to enforce against
+    if not assignee:
+        return  # unassigned work has no owner — never bump anyone else's tasks
+
+    q: dict = {
+        "status": "started",
+        "_id": {"$ne": task["_id"]},
+        "assigned_to": assignee,
+    }
 
     now = datetime.now(timezone.utc)
-    bumped = await db["project_tasks"].find(q).to_list(50)
+    bumped = await db["project_tasks"].find(q).to_list(200)
     for t in bumped:
         timing = apply_timing("started", "break", t.get("timing"), now)
         await db["project_tasks"].update_one(

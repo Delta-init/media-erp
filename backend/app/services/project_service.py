@@ -13,6 +13,11 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 VALID_STATUSES = {"pending", "upcoming", "currently_working", "updation_needed"}
 VALID_PRIORITIES = {"low", "medium", "high"}
 
+# Ceiling for a single task-list response. Results are newest-first, so anything
+# beyond this is the OLDEST work — list_tasks also returns the true total so the
+# UI can say "showing X of Y" rather than silently hiding tasks.
+TASK_LIST_LIMIT = 2000
+
 
 def _dt_to_utc_iso(dt) -> str | None:
     """Serialize a datetime to an ISO string with explicit UTC offset.
@@ -143,6 +148,8 @@ async def list_tasks(
     visibility: str = "all",
     user_id: str = "",
     leader_team_ids: list = None,  # set when visibility == "leader_teams"
+    page: int = 1,
+    limit: int = 0,   # 0 = no paging (return all, up to TASK_LIST_LIMIT)
 ) -> list[dict]:
     query: dict[str, Any] = {}
 
@@ -189,9 +196,20 @@ async def list_tasks(
         except ValueError:
             pass
 
+    # Results are newest-first, so any cap drops the OLDEST tasks. `total` is
+    # always the true match count so callers can page through everything rather
+    # than having work silently disappear off the end.
+    total = await db["project_tasks"].count_documents(query)
+
     cursor = db["project_tasks"].find(query).sort("created_at", -1)
-    docs = await cursor.to_list(length=500)
-    return [_serialize(doc) for doc in docs]
+    if limit and limit > 0:
+        cursor = cursor.skip(max(0, (max(page, 1) - 1) * limit)).limit(limit)
+        docs = await cursor.to_list(length=limit)
+    else:
+        # No explicit page size — return everything up to the safety ceiling.
+        docs = await cursor.to_list(length=TASK_LIST_LIMIT)
+
+    return [_serialize(doc) for doc in docs], total
 
 
 async def create_task(db: AsyncIOMotorDatabase, data: dict) -> dict:

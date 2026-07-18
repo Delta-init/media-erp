@@ -213,3 +213,38 @@
 ## Leader Desk — leader self-assign fixed (2026-07-15)
 - **BUG:** a leader could not meaningfully assign work to themselves. `GET /projects/leader/queue`'s `incoming` matched `{"$or": [assigned_to in ["",None], assigned_to == uid]}`, so a task the leader assigned **to themselves** stayed in the "Assign Work" (to-distribute) queue forever — the card never moved, so it looked like the action failed. (The write itself always succeeded: `can_assign_to_others` already allows a team leader, and the API returned 200.)
 - **FIX:** `incoming` now matches **unassigned pending work only**. Once assigned to anyone — including the leader themselves — the task leaves the distribute queue and appears on the assignee's board. The old `assigned_to == uid` clause existed so leaders could see routed tasks auto-assigned to them, but routed copies now arrive unassigned (see the reedit/routing change), so it was vestigial and actively harmful.
+
+## Tasks disappearing — root causes fixed (2026-07-18)
+- **BUG (main cause): `workflow.bump_other_started` bumped the whole TEAM.** The
+  "one started task per person" rule fell back to `team_id` when a task had no
+  assignee — so starting ONE unassigned task moved *every other started task in
+  that team* to Break. Coordinators create unassigned tasks, so work kept
+  vanishing from the Started column with no message. Now scoped strictly to the
+  assignee; unassigned tasks bump nobody. Reproduced before (`A=break`) and
+  verified after (two people both stay Started; same person still bumps).
+- **`list_tasks` truncation is no longer silent.** Cap raised 500 → `TASK_LIST_LIMIT`
+  (2000) and the function now returns `(tasks, total)`. `GET /projects` reports
+  `meta: {total, returned, truncated}` and a "Showing X of Y tasks" message.
+  Results are newest-first, so a cap always drops the OLDEST work.
+- `success_response()` gained an optional `meta` dict (omitted unless supplied,
+  so existing clients are unaffected).
+- **Task creation now validated server-side** (POST /projects): title, team_id,
+  due_date and assigned_to are all required, and the assignee must be a leader or
+  member of the selected team. Routed copies still bypass this — they're created
+  via `insert_one`, intentionally unassigned.
+
+**Environment note:** ports 8000 and 3000 were both occupied by *other* projects
+(a `bun --watch src/index.ts` server, and `Delta/lms/client`). mediaERP was being
+tested against a foreign API. `bun --watch` respawns itself — kill the parent.
+
+## Real pagination for tasks (2026-07-18)
+- `GET /projects` accepts `page` (>=1) and `limit` (0-500), mirroring the
+  existing `/users` convention. **`limit=0` (default) preserves the legacy
+  behaviour** — everything up to `TASK_LIST_LIMIT` — so existing callers are
+  untouched.
+- `list_tasks()` applies `.skip()/.limit()` and always returns the true `total`.
+- Pagination rides in `meta`, NOT in `data`: `{total, returned, page, limit,
+  pages, has_more, truncated}`. `data` stays a plain array so nothing breaks.
+- Verified lossless: walking 9 pages of 10 returned exactly 86 unique tasks with
+  zero duplicates; per-column paging (`status=pending`, 6 pages of 5) returned
+  all 28 with no gaps.

@@ -30,7 +30,13 @@ export function KanbanCard({ task, overlay = false }: Props) {
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition: isDragging ? "none" : transition ?? "transform 200ms ease",
-    touchAction: "none",
+    // `touch-action: none` was applied unconditionally, which killed BOTH scroll
+    // axes on phones: cards cover the screen, so nearly every touch started on a
+    // card and the browser was told never to scroll from it. The board uses a
+    // TouchSensor with a delay activation constraint, so dnd-kit only needs to
+    // suppress touch scrolling *while actually dragging* — before that the user
+    // must be free to pan. ("manipulation" = allow pan/pinch, no double-tap zoom.)
+    touchAction: isDragging ? "none" : "manipulation",
     willChange: "transform",
   };
 

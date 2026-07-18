@@ -1,0 +1,190 @@
+1
+00:00:03,100 --> 00:00:05,564
+Welcome to media E R P.
+
+2
+00:00:05,604 --> 00:00:10,384
+This short guide shows the team leader
+workflow, step by step.
+
+3
+00:00:11,005 --> 00:00:14,809
+Sign in with your work email and password.
+
+4
+00:00:15,426 --> 00:00:19,172
+The Overview shows your team's work at a
+glance.
+
+5
+00:00:19,753 --> 00:00:22,865
+Leader Desk is where you run your team.
+
+6
+00:00:22,905 --> 00:00:24,914
+It has three tabs.
+
+7
+00:00:24,954 --> 00:00:28,530
+Pending Reviews, Assign Work, and Reedit.
+
+8
+00:00:29,141 --> 00:00:33,075
+Pending Reviews holds work your team has
+submitted.
+
+9
+00:00:33,115 --> 00:00:35,187
+Open one to check it.
+
+10
+00:00:35,807 --> 00:00:41,139
+You see the brief, the time taken, the files,
+and the note your member wrote.
+
+11
+00:00:41,711 --> 00:00:44,395
+If the work is good, press Approve.
+
+12
+00:00:44,435 --> 00:00:49,690
+You can also route it to the next team, and it
+lands in their Leader Desk.
+
+13
+00:00:50,299 --> 00:00:54,407
+If it needs changes, press Reedit and write
+the reason.
+
+14
+00:00:54,447 --> 00:00:57,884
+Be clear, the member sees exactly this.
+
+15
+00:00:58,510 --> 00:01:02,016
+Assign Work holds new, unassigned tasks.
+
+16
+00:01:02,056 --> 00:01:04,440
+Pick a member and assign it.
+
+17
+00:01:05,062 --> 00:01:07,897
+You can also take a task yourself.
+
+18
+00:01:07,937 --> 00:01:11,258
+Just choose your own name and assign.
+
+19
+00:01:11,885 --> 00:01:12,902
+Done.
+
+20
+00:01:12,942 --> 00:01:16,878
+The task leaves the queue, because it is now
+assigned.
+
+21
+00:01:17,533 --> 00:01:23,941
+Your own task now appears in Projects, in the
+Pending column, just like any member.
+
+22
+00:01:24,511 --> 00:01:26,906
+Open it and press Start.
+
+23
+00:01:26,946 --> 00:01:31,136
+Your timer runs, exactly the same as your
+team's.
+
+24
+00:01:31,757 --> 00:01:35,147
+When you finish, you submit it for review too.
+
+25
+00:01:35,187 --> 00:01:38,243
+Leaders track their work the same way.
+
+26
+00:01:38,862 --> 00:01:44,368
+The Reedit tab shows work sent back for
+changes, so nothing gets forgotten.
+
+27
+00:01:44,957 --> 00:01:49,884
+Projects shows every task in your team, with
+each member's timer.
+
+28
+00:01:50,462 --> 00:01:53,354
+Open any task and check History.
+
+29
+00:01:53,394 --> 00:01:56,231
+It shows who did what, and when.
+
+30
+00:01:56,844 --> 00:02:03,021
+Team Flow shows the journey across teams,
+including every approval and every reedit.
+
+31
+00:02:03,589 --> 00:02:06,528
+Media Schedule is your team's plan.
+
+32
+00:02:06,568 --> 00:02:09,670
+Shoots, filming days, and reviews.
+
+33
+00:02:10,297 --> 00:02:16,208
+Each entry has a date and an owner, so the
+whole team knows what is coming.
+
+34
+00:02:16,772 --> 00:02:19,560
+Chat has a group for every team.
+
+35
+00:02:19,600 --> 00:02:22,795
+Use it to share updates and files.
+
+36
+00:02:23,436 --> 00:02:27,636
+Every evening, a daily report is posted
+automatically.
+
+37
+00:02:27,676 --> 00:02:30,859
+Approved, submitted, and time tracked.
+
+38
+00:02:31,473 --> 00:02:33,798
+Teams lists your members.
+
+39
+00:02:33,838 --> 00:02:37,739
+Open a member to see their tasks and their
+time.
+
+40
+00:02:38,377 --> 00:02:40,818
+The bell shows notifications.
+
+41
+00:02:40,858 --> 00:02:44,411
+Important updates also go to your email.
+
+42
+00:02:45,038 --> 00:02:47,618
+That is the team leader workflow.
+
+43
+00:02:47,658 --> 00:02:50,870
+Review, approve, assign, and track.
+
+44
+00:02:50,910 --> 00:02:52,230
+Thank you.

@@ -14,6 +14,8 @@ Endpoints
   DELETE /api/v1/projects/{id}     — delete task
 """
 
+import math
+
 from fastapi import APIRouter, Depends, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -251,6 +253,10 @@ async def get_tasks(
     date_to: str = Query(default=""),
     team_id: str = Query(default=""),
     member_id: str = Query(default=""),
+    # Pagination (mirrors /users). limit=0 keeps the legacy "return everything
+    # up to the safety ceiling" behaviour so existing callers are unaffected.
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=0, ge=0, le=500),
     current_user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
@@ -263,7 +269,7 @@ async def get_tasks(
         uid              = member_id
         leader_team_ids  = None    # clear team scope
 
-    tasks = await list_tasks(
+    tasks, total = await list_tasks(
         db,
         search=search,
         status=status,
@@ -275,8 +281,36 @@ async def get_tasks(
         visibility=visibility,
         user_id=uid,
         leader_team_ids=leader_team_ids or [],
+        page=page,
+        limit=limit,
     )
-    return success_response(data=tasks, message="Tasks retrieved")
+
+    # `data` stays a plain array so existing callers keep working; pagination
+    # lives in `meta`. With limit=0 this degrades to "everything up to the
+    # ceiling", which is the pre-pagination behaviour.
+    if limit and limit > 0:
+        pages = max(1, math.ceil(total / limit))
+        has_more = page < pages
+    else:
+        pages, has_more = 1, total > len(tasks)
+
+    return success_response(
+        data=tasks,
+        message=(
+            f"Showing {len(tasks)} of {total} tasks" if has_more or total > len(tasks)
+            else "Tasks retrieved"
+        ),
+        meta={
+            "total": total,
+            "returned": len(tasks),
+            "page": page,
+            "limit": limit,
+            "pages": pages,
+            "has_more": has_more,
+            # true when the caller is NOT paging and we still had to cut the list
+            "truncated": (not limit) and total > len(tasks),
+        },
+    )
 
 
 @router.post("", status_code=201)
@@ -286,17 +320,44 @@ async def add_task(
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
     from app.services import workflow
+    from bson import ObjectId
 
     data = body.model_dump()
     data["created_by"] = str(current_user["_id"])
     data["actor_name"] = current_user.get("name", "")
     data["status"] = "pending"  # new work always enters the workflow at Pending
 
+    # ── Required fields ───────────────────────────────────────────────────────
+    # A task is only actionable when someone owns it, in a team, by a date.
+    # Enforced here (not just in the UI) so the API can't create orphan work.
+    if not (data.get("title") or "").strip():
+        return error_response("Task name is required.", status_code=422)
+    if not (data.get("team_id") or "").strip():
+        return error_response("Please select a team.", status_code=422)
+    if not (data.get("due_date") or "").strip():
+        return error_response("Please set a due date.", status_code=422)
+
     # Members can only create tasks for themselves; only admins / team leaders
     # may assign work to someone else.
     if not await workflow.can_assign_to_others(current_user, data.get("team_id"), db):
         data["assigned_to"] = str(current_user["_id"])
         data["assigned_to_name"] = current_user.get("name", "")
+
+    assignee = (data.get("assigned_to") or "").strip()
+    if not assignee:
+        return error_response("Please assign this task to a team member.", status_code=422)
+
+    # The assignee must actually belong to the chosen team (leader or member),
+    # otherwise the task lands on a board its owner can't see.
+    if ObjectId.is_valid(data["team_id"]):
+        team = await db["teams"].find_one({"_id": ObjectId(data["team_id"])}, {"members": 1})
+        if not team:
+            return error_response("That team no longer exists.", status_code=422)
+        if not any(m.get("user_id") == assignee for m in team.get("members", [])):
+            return error_response(
+                "The assignee must be a leader or member of the selected team.",
+                status_code=422,
+            )
 
     task = await create_task(db, data)
 

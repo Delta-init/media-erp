@@ -11,6 +11,7 @@ import { useUsersList } from "@/hooks/useUsers";
 import { useAuthStore } from "@/stores/authStore";
 import type { TaskPriority, TaskStatus, Attachment } from "@/types/project";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface Props {
   open: boolean;
@@ -35,16 +36,25 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
   const [linkUrl, setLinkUrl]           = useState("");
   const [linkLabel, setLinkLabel]       = useState("");
 
-  // Only teams the current user actually belongs to (my_role is set).
+  const me = useAuthStore((s) => s.user);
+  // Mirrors the server rule in workflow.can_assign_to_others: elevated roles may
+  // assign to anyone, as may the leader of the selected team. Previously only
+  // Super Admin counted here, so a Coordinator/Admin was silently forced to
+  // self-assign — and since they often aren't a member of the target team, the
+  // task ended up unassigned or unassignable.
+  const ELEVATED_ROLES = ["Super Admin", "Admin", "Coordinator"];
+  const isElevated = !!me?.role?.role_name && ELEVATED_ROLES.includes(me.role.role_name);
+
   const { data: allTeams = [] } = useTeams();
-  const teams = allTeams.filter((t) => !!t.my_role);
+  // Elevated roles coordinate across the whole company, so they must be able to
+  // create work for any team — not just teams they personally belong to.
+  // (`my_role` is only set for teams the user is a member of.)
+  const teams = isElevated ? allTeams : allTeams.filter((t) => !!t.my_role);
   const { data: teamDetail } = useTeam(teamId);
   const { data: usersData } = useUsersList({ limit: 100 });
 
-  const me = useAuthStore((s) => s.user);
-  const isSuperAdmin = !!(me?.role?.is_system_role && me?.role?.role_name === "Super Admin");
   const isLeaderOfTeam = !!teamId && (teamDetail?.my_role === "leader" || teamDetail?.my_role === "admin");
-  const canAssignOthers = isSuperAdmin || isLeaderOfTeam;
+  const canAssignOthers = isElevated || isLeaderOfTeam;
 
   const assigneeOptions = useMemo(() => {
     if (teamId && teamDetail?.members) {
@@ -78,9 +88,22 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
     setLinkUrl(""); setLinkLabel(""); setShowLinkForm(false);
   }
 
+  // A task is only actionable with a name, a team, an owner and a due date.
+  // Mirrors the server-side rules in POST /projects.
+  const finalAssigneeId = canAssignOthers ? assignedTo : (me?.id ?? "");
+  const missing: string[] = [];
+  if (!title.trim())     missing.push("a task name");
+  if (!teamId)           missing.push("a team");
+  if (!finalAssigneeId)  missing.push("an assignee");
+  if (!dueDate)          missing.push("a due date");
+  const canSubmit = missing.length === 0;
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!canSubmit) {
+      toast.error(`Please add ${missing.join(", ")}.`);
+      return;
+    }
     const finalAssignee = canAssignOthers ? assignedTo : (me?.id ?? "");
     const finalAssigneeName = canAssignOthers
       ? (assigneeOptions.find(o => o.id === assignedTo)?.name ?? "")
@@ -164,13 +187,13 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
               {/* Team */}
               {teams.length > 0 && (
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Team</label>
+                  <label className="text-xs font-medium text-muted-foreground">Team *</label>
                   <select
                     value={teamId}
                     onChange={e => { setTeamId(e.target.value); setAssignedTo(""); }}
                     className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 transition"
                   >
-                    <option value="">No team (personal)</option>
+                    <option value="">Select a team…</option>
                     {teams.map(t => (
                       <option key={t.id} value={t.id}>{t.name}</option>
                     ))}
@@ -204,7 +227,7 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
               {/* Assigned To + Due Date */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Assigned To</label>
+                  <label className="text-xs font-medium text-muted-foreground">Assigned To *</label>
                   {canAssignOthers ? (
                     <select
                       value={assignedTo}
@@ -226,7 +249,7 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
                   )}
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Due Date</label>
+                  <label className="text-xs font-medium text-muted-foreground">Due Date *</label>
                   <input
                     type="date"
                     value={dueDate}
@@ -314,7 +337,12 @@ export function AddTaskModal({ open, onClose, defaultStatus = "pending", default
                 <Button type="button" variant="outline" size="sm" onClick={close}>
                   Cancel
                 </Button>
-                <Button type="submit" size="sm" disabled={!title.trim() || create.isPending}>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!canSubmit || create.isPending}
+                  title={canSubmit ? undefined : `Please add ${missing.join(", ")}`}
+                >
                   {create.isPending ? "Creating…" : "Create Task"}
                 </Button>
               </div>

@@ -1,8 +1,10 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import api from "@/lib/axios";
+import { BOARD_COLUMNS } from "@/types/project";
 import type {
   CreateTaskPayload,
   ProjectFilters,
@@ -55,6 +57,132 @@ export function useLeaderQueue(opts?: { enabled?: boolean }) {
     refetchInterval: 15_000,
     enabled: opts?.enabled ?? true,
   });
+}
+
+/** Pagination info returned alongside a task list (see GET /projects `meta`). */
+export interface TasksMeta {
+  total: number;
+  returned: number;
+  page: number;
+  limit: number;
+  pages: number;
+  has_more: boolean;
+  truncated: boolean;
+}
+
+/**
+ * Paged task list. `data` from the API stays a plain array; pagination lives in
+ * `meta`, so nothing ever silently falls off the end of the list.
+ *
+ * Pass `limit: 0` (the default) for "everything up to the server ceiling" —
+ * identical to the legacy behaviour.
+ */
+export function useTasksPaged(
+  filters: Partial<ProjectFilters> = {},
+  page = 1,
+  limit = 0
+) {
+  return useQuery({
+    queryKey: [...QK.tasks(filters), "paged", page, limit],
+    queryFn: async () => {
+      const params: Record<string, string | number> = {};
+      if (filters.search)      params.search      = filters.search;
+      if (filters.status)      params.status      = filters.status;
+      if (filters.priority)    params.priority    = filters.priority;
+      if (filters.date_filter) params.date_filter = filters.date_filter;
+      if (filters.date_from)   params.date_from   = filters.date_from;
+      if (filters.date_to)     params.date_to     = filters.date_to;
+      if (filters.team_id)     params.team_id     = filters.team_id;
+      if (filters.member_id)   params.member_id   = filters.member_id;
+      params.page = page;
+      if (limit > 0) params.limit = limit;
+
+      const { data } = await api.get<{
+        success: boolean; data: Task[]; meta?: TasksMeta;
+      }>("/projects", { params });
+
+      const meta: TasksMeta = data.meta ?? {
+        total: data.data.length, returned: data.data.length,
+        page: 1, limit: 0, pages: 1, has_more: false, truncated: false,
+      };
+      return { items: data.data, meta };
+    },
+    staleTime: 10_000,
+    placeholderData: (prev) => prev,   // keep the old page visible while fetching
+  });
+}
+
+/** Per-column state for the Kanban board. */
+export interface ColumnMeta {
+  total: number;
+  loaded: number;
+  hasMore: boolean;
+}
+
+/**
+ * Kanban data loader — one paged query PER COLUMN.
+ *
+ * A flat page-1 slice would fill the six columns unevenly (it's just the newest
+ * N tasks overall), so the board pages each column independently. Every column
+ * reports "loaded of total" and can load more, which means no column can ever
+ * quietly hide work.
+ */
+export function useBoardColumns(
+  filters: Partial<ProjectFilters> = {},
+  pageSize = 50
+) {
+  const [limits, setLimits] = useState<Record<string, number>>({});
+
+  const results = useQueries({
+    queries: BOARD_COLUMNS.map((col) => {
+      const limit = limits[col.key] ?? pageSize;
+      return {
+        queryKey: [...QK.tasks(filters), "col", col.key, limit],
+        queryFn: async () => {
+          const params: Record<string, string | number> = { status: col.key, page: 1, limit };
+          if (filters.search)      params.search      = filters.search;
+          if (filters.priority)    params.priority    = filters.priority;
+          if (filters.date_filter) params.date_filter = filters.date_filter;
+          if (filters.date_from)   params.date_from   = filters.date_from;
+          if (filters.date_to)     params.date_to     = filters.date_to;
+          if (filters.team_id)     params.team_id     = filters.team_id;
+          if (filters.member_id)   params.member_id   = filters.member_id;
+          const { data } = await api.get<{
+            success: boolean; data: Task[]; meta?: TasksMeta;
+          }>("/projects", { params });
+          return { items: data.data, meta: data.meta };
+        },
+        staleTime: 10_000,
+        placeholderData: (prev: unknown) => prev,
+      };
+    }),
+  });
+
+  const tasks: Task[] = results.flatMap((r) => r.data?.items ?? []);
+
+  const meta: Record<string, ColumnMeta> = {};
+  BOARD_COLUMNS.forEach((col, i) => {
+    const m = results[i].data?.meta;
+    const loaded = results[i].data?.items?.length ?? 0;
+    meta[col.key] = {
+      total: m?.total ?? loaded,
+      loaded,
+      hasMore: m?.has_more ?? false,
+    };
+  });
+
+  function loadMore(status: string) {
+    setLimits((prev) => ({ ...prev, [status]: (prev[status] ?? pageSize) + pageSize }));
+  }
+
+  return {
+    tasks,
+    meta,
+    loadMore,
+    isLoading: results.some((r) => r.isLoading),
+    /** True match count across every column — independent of what's loaded. */
+    total: Object.values(meta).reduce((n, m) => n + m.total, 0),
+  };
 }
 
 export function useTasks(filters: Partial<ProjectFilters> = {}) {
