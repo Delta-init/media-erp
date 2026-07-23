@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   Mail, Briefcase, ShieldCheck, Calendar, Loader2,
   User as UserIcon, KeyRound, LogOut, BadgeCheck, Bell,
+  Users, ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,9 @@ import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { useMe, useUpdateProfile, useUpdatePassword, useLogout } from "@/hooks/useAuth";
 import { useNotificationPrefs, useUpdateNotificationPrefs } from "@/hooks/useNotificationPrefs";
-import { NOTIF_DEFS, ROLE_LABEL, getNotifCategory } from "@/lib/notifications";
+import { useTeams, type Team } from "@/hooks/useTeams";
+import { useTeamEmailPrefs, useUpdateTeamEmailPrefs } from "@/hooks/useTeamEmailPrefs";
+import { NOTIF_DEFS, ROLE_LABEL, getNotifCategory, TEAM_EMAIL_TYPES } from "@/lib/notifications";
 import { fmtDate } from "@/lib/datetime";
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
@@ -75,15 +78,15 @@ function Toggle({
         disabled={disabled}
         onClick={onChange}
         className={cn(
-          "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+          "flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors",
           checked ? "bg-primary" : "bg-muted-foreground/30",
-          disabled && "cursor-not-allowed"
+          disabled ? "cursor-not-allowed" : "cursor-pointer"
         )}
       >
         <span
           className={cn(
-            "absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform",
-            checked ? "translate-x-[22px]" : "translate-x-0.5"
+            "size-5 rounded-full bg-white shadow transition-transform",
+            checked ? "translate-x-5" : "translate-x-0"
           )}
         />
       </button>
@@ -165,6 +168,114 @@ function EmailNotificationsCard() {
           Save preferences
         </Button>
       </div>
+    </motion.div>
+  );
+}
+
+// ── Per-team email settings row (lazy-loads prefs when expanded) ───────────────
+
+function TeamEmailRow({ team }: { team: Team }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = useTeamEmailPrefs(team.id, open);
+  const update = useUpdateTeamEmailPrefs(team.id);
+
+  const [types, setTypes] = useState<Record<string, boolean>>({});
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    if (data) { setTypes(data); setDirty(false); }
+  }, [data]);
+
+  return (
+    <div className="rounded-xl border bg-muted/10">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-3 px-3.5 py-3 text-left"
+      >
+        <span className="size-2.5 shrink-0 rounded-full" style={{ background: team.color || "#6b7280" }} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{team.name}</span>
+          <span className="block text-xs text-muted-foreground">{team.member_count} member{team.member_count === 1 ? "" : "s"}</span>
+        </span>
+        <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <div className="border-t px-3.5 pb-3.5 pt-1">
+          {isLoading ? (
+            <div className="flex justify-center py-5"><Loader2 className="size-4 animate-spin text-muted-foreground/50" /></div>
+          ) : (
+            <>
+              <div className="divide-y">
+                {TEAM_EMAIL_TYPES.map((d) => (
+                  <Toggle
+                    key={d.key}
+                    checked={types[d.key] ?? true}
+                    onChange={() => { setTypes((p) => ({ ...p, [d.key]: !(p[d.key] ?? true) })); setDirty(true); }}
+                    label={d.label}
+                    desc={d.desc}
+                  />
+                ))}
+              </div>
+              <div className="mt-3 flex justify-end">
+                <Button
+                  size="sm"
+                  onClick={() => update.mutate(types, { onSuccess: () => setDirty(false) })}
+                  disabled={!dirty || update.isPending}
+                >
+                  {update.isPending && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+                  Save
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Team email settings card (Coordinator / Admin / Super Admin) ───────────────
+
+function TeamEmailSettingsCard() {
+  const user = useAuthStore((s) => s.user);
+  const { data: teams, isLoading } = useTeams();
+
+  const category = getNotifCategory(user);
+  if (category !== "elevated") return null;
+
+  // Coordinators manage only the teams they belong to; Admin / Super Admin manage all.
+  const isCoordinator = (user?.role?.role_name ?? "") === "Coordinator";
+  const visible = (teams ?? []).filter(
+    (t) => !isCoordinator || t.members.some((m) => m.user_id === user?.id)
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.16 }}
+      className="rounded-2xl border bg-card p-6 shadow-sm"
+    >
+      <div className="mb-1 flex items-center gap-2">
+        <Users className="size-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Team Email Settings</h2>
+      </div>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Control which task emails each team sends to its members. Turning a type off here
+        suppresses that email for everyone on the team.
+      </p>
+
+      {isLoading ? (
+        <div className="flex justify-center py-6"><Loader2 className="size-5 animate-spin text-muted-foreground/50" /></div>
+      ) : visible.length === 0 ? (
+        <p className="py-4 text-center text-xs text-muted-foreground">No teams to manage yet.</p>
+      ) : (
+        <div className="space-y-2.5">
+          {visible.map((t) => <TeamEmailRow key={t.id} team={t} />)}
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -329,6 +440,9 @@ export default function ProfilePage() {
 
       {/* Email notifications */}
       <EmailNotificationsCard />
+
+      {/* Team email settings (Coordinator / Admin / Super Admin) */}
+      <TeamEmailSettingsCard />
 
       {/* Sign out */}
       <div className="flex justify-end">
