@@ -31,6 +31,14 @@ SYSTEM_SENDER_NAME = "📊 Daily Report"
 
 _COMPLETED_STATUS = "approved"
 
+# ── Daily individual-employee report email ────────────────────────────────────
+# Fixed recipients who receive the nightly digest of every employee's report.
+# Edit this list to change who gets the email (one combined digest, all teams).
+DAILY_REPORT_EMAIL_RECIPIENTS = [
+    "safavan@deltainstitutions.com",
+    "vishnusuresh@deltainstitutions.com",
+]
+
 
 # ── Serialization ─────────────────────────────────────────────────────────────
 
@@ -348,6 +356,137 @@ async def post_daily_report(db: AsyncIOMotorDatabase, group: dict, team: dict) -
     await post_member_reports(db, group, team)
 
 
+# ── Daily individual-employee report email digest ─────────────────────────────
+
+async def _member_report_rows(db: AsyncIOMotorDatabase, team: dict) -> list[dict]:
+    """
+    For every member of a team (no one skipped), return their tasks completed
+    today (IST) and everything still pending.
+    """
+    team_id = str(team["_id"])
+    ist_now = datetime.now(IST)
+    start_utc = ist_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    end_utc = ist_now.astimezone(timezone.utc)
+
+    name_map: dict[str, str] = {}
+    ids = [ObjectId(m["user_id"]) for m in team.get("members", []) if ObjectId.is_valid(m["user_id"])]
+    if ids:
+        for u in await db["users"].find({"_id": {"$in": ids}}, {"name": 1, "email": 1}).to_list(500):
+            name_map[str(u["_id"])] = u.get("name") or u.get("email") or "Member"
+
+    tasks = await db["project_tasks"].find({"team_id": team_id}).to_list(5000)
+
+    rows: list[dict] = []
+    for m in team.get("members", []):
+        uid = m["user_id"]
+        done_today: list[str] = []
+        pending: list[tuple[str, str]] = []
+        for t in tasks:
+            if t.get("assigned_to") != uid:
+                continue
+            status = t.get("status", "pending")
+            u_at = _as_utc(t.get("updated_at"))
+            if status == _COMPLETED_STATUS:
+                if u_at and start_utc <= u_at <= end_utc:
+                    done_today.append(t.get("title", "Task"))
+            else:
+                pending.append((t.get("title", "Task"), _OPEN_STATUS_LABELS.get(status, status)))
+        rows.append({"name": name_map.get(uid, "Member"), "done": done_today, "pending": pending})
+    return rows
+
+
+def _esc(s: str) -> str:
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _digest_html(sections: list[dict], date_label: str) -> str:
+    """Build the combined all-teams individual-employee digest email."""
+    blocks: list[str] = []
+    total_done = 0
+    for sec in sections:
+        member_html: list[str] = []
+        for r in sec["rows"]:
+            total_done += len(r["done"])
+            done_items = "".join(
+                f'<li style="color:#166534;font-size:13px;line-height:1.6;">{_esc(t)}</li>' for t in r["done"]
+            ) or '<li style="color:#9ca3af;font-size:13px;list-style:none;margin-left:-18px;">— nothing completed today</li>'
+            pend_items = "".join(
+                f'<li style="color:#374151;font-size:13px;line-height:1.6;">{_esc(t)} '
+                f'<span style="color:#9ca3af;">({_esc(lbl)})</span></li>' for t, lbl in r["pending"]
+            ) or '<li style="color:#9ca3af;font-size:13px;list-style:none;margin-left:-18px;">— none pending</li>'
+            member_html.append(
+                f'''
+                <tr><td style="padding:12px 16px;border-top:1px solid #eef0f3;">
+                  <div style="font-size:14px;font-weight:600;color:#111827;">{_esc(r["name"])}</div>
+                  <div style="margin-top:6px;font-size:12px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.4px;">✅ Done today ({len(r["done"])})</div>
+                  <ul style="margin:2px 0 0 18px;padding:0;">{done_items}</ul>
+                  <div style="margin-top:8px;font-size:12px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:.4px;">⏳ Pending ({len(r["pending"])})</div>
+                  <ul style="margin:2px 0 0 18px;padding:0;">{pend_items}</ul>
+                </td></tr>'''
+            )
+        if not sec["rows"]:
+            member_html.append(
+                '<tr><td style="padding:14px 16px;border-top:1px solid #eef0f3;color:#9ca3af;font-size:13px;">No members in this team.</td></tr>'
+            )
+        blocks.append(
+            f'''
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                   style="margin:0 0 18px 0;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#ffffff;">
+              <tr><td style="padding:12px 16px;background:{sec["color"]}14;border-bottom:1px solid #e5e7eb;">
+                <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:{sec["color"]};margin-right:8px;"></span>
+                <span style="font-size:15px;font-weight:700;color:#111827;">{_esc(sec["name"])}</span>
+              </td></tr>
+              {"".join(member_html)}
+            </table>'''
+        )
+
+    return f'''\
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:28px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;">
+        <tr><td style="padding:0 4px 18px 4px;">
+          <div style="font-size:20px;font-weight:800;color:#111827;">📊 Daily Employee Reports</div>
+          <div style="font-size:13px;color:#6b7280;margin-top:2px;">{date_label} · {len(sections)} team(s) · {total_done} task(s) completed today</div>
+        </td></tr>
+        <tr><td>{"".join(blocks)}</td></tr>
+        <tr><td style="padding:10px 4px 0 4px;">
+          <div style="font-size:11px;color:#9ca3af;">Automated nightly report from mediaERP · Delta Institutions</div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>'''
+
+
+async def email_daily_report_digest(db: AsyncIOMotorDatabase) -> None:
+    """Email one combined digest of every employee's daily report (all teams) to the fixed recipients."""
+    if not DAILY_REPORT_EMAIL_RECIPIENTS:
+        return
+    from app.utils.email import send_email
+
+    ist_now = datetime.now(IST)
+    date_label = ist_now.strftime("%d %b %Y")
+    teams = await db["teams"].find({}).sort("name", 1).to_list(1000)
+
+    sections: list[dict] = []
+    for team in teams:
+        rows = await _member_report_rows(db, team)
+        sections.append({"name": team.get("name", "Team"), "color": team.get("color", "#6366f1"), "rows": rows})
+
+    html = _digest_html(sections, date_label)
+    subject = f"Daily Employee Reports — {date_label}"
+    for to in DAILY_REPORT_EMAIL_RECIPIENTS:
+        try:
+            await send_email(to, subject, html, category="daily_report")
+            logger.info("Daily employee report digest emailed to %s", to)
+        except Exception as exc:
+            logger.error("Failed to email daily report digest to %s: %s", to, exc)
+
+
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 
 async def _scheduler_loop(db: AsyncIOMotorDatabase):
@@ -375,6 +514,20 @@ async def _scheduler_loop(db: AsyncIOMotorDatabase):
                         logger.info("Posted daily report to group '%s'", group.get("name"))
                     except Exception as exc:
                         logger.error("Failed to post daily report for group %s: %s", group["_id"], exc)
+
+                # Individual-employee digest email → fixed recipients (once per day, all teams)
+                state = await db["system_state"].find_one({"_id": "daily_report_email"})
+                if not state or state.get("last_sent_date") != today_key:
+                    try:
+                        await email_daily_report_digest(db)
+                        await db["system_state"].update_one(
+                            {"_id": "daily_report_email"},
+                            {"$set": {"last_sent_date": today_key, "updated_at": datetime.now(timezone.utc)}},
+                            upsert=True,
+                        )
+                        logger.info("Sent daily employee report digest for %s", today_key)
+                    except Exception as exc:
+                        logger.error("Failed to send daily report email digest: %s", exc)
         except Exception as exc:
             logger.error("Group report scheduler loop error: %s", exc)
         await asyncio.sleep(_POLL_INTERVAL_SEC)
