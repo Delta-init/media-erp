@@ -120,12 +120,18 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # NEXT_PUBLIC_API_URL is only kept as a build arg because it's still read
+      # as an SSR fallback (see lib/axios.ts) — client code no longer uses it,
+      # so the browser never sees "backend" as an API host regardless.
       args:
         - NEXT_PUBLIC_API_URL=http://backend:8000/api/v1
     container_name: mediaerp_frontend
     ports:
       - "3000:3000"
     environment:
+      # Server-only — read by next.config.ts's rewrite so the container's
+      # internal Docker-network hostname is never sent to the browser.
+      - BACKEND_API_URL=http://backend:8000/api/v1
       - NEXT_PUBLIC_API_URL=http://backend:8000/api/v1
       - NODE_ENV=production
     depends_on:

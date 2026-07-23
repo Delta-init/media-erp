@@ -1,17 +1,20 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
-// In a browser preview context, use the Next.js proxy (/api/v1) to avoid
-// CORS — the proxy rewrites to the real backend server-side.
-// In production (same-origin or CORS-enabled deployment), use the full URL.
-const _configuredUrl =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
-
-const baseURL =
-  typeof window !== "undefined" &&
-  !_configuredUrl.includes("localhost") &&
-  window.location.hostname === "localhost"
-    ? "/api/v1"
-    : _configuredUrl;
+// The browser ALWAYS calls same-origin `/api/v1` — never the backend's real
+// domain. next.config.ts rewrites that path to the backend server-side (see
+// BACKEND_API_URL there), so the backend's host/IP never appears in the
+// browser's Network tab, page source, or DNS lookups — this is what stops the
+// deployed app from being blockable by domain/IP filtering.
+//
+// IMPORTANT: this module is used only by client ("use client") hooks — there is
+// no server-side caller. Do NOT add a `process.env.NEXT_PUBLIC_API_URL` fallback
+// "for SSR" here: Next.js inlines a NEXT_PUBLIC_ var's literal value into the
+// client JS bundle at build time for every reference, even one guarded by
+// `typeof window` and never actually reached in the browser. That would put the
+// backend's real URL back into view-source/Sources — the exact leak this file
+// exists to close. If a genuine server-side caller is ever added, it must read
+// a server-only env var directly in its own (server-only) file, not here.
+const baseURL = "/api/v1";
 
 const api = axios.create({
   baseURL,

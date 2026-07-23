@@ -197,3 +197,50 @@
   a pre-existing desktop issue too — page overflow **3114px → 8px**.
 - Added `overscroll-behavior: contain` so column scrolling doesn't chain to the
   page, and made the Table view horizontally scrollable on small screens.
+
+### Same-origin API proxy — backend domain/IP no longer exposed to the browser (2026-07-19)
+- **Problem:** the deployed app called the backend's real domain directly from
+  the browser (visible in Network tab / DNS / TLS SNI), which let network
+  filters block the app by that domain/IP. A rewrite existed in
+  `next.config.ts` but never fired in production (`lib/axios.ts` only used it
+  when `window.location.hostname === "localhost"`, which is never true on a
+  real deployment), and 6 hooks + the chat WebSocket bypassed it entirely.
+- **Fix:** every browser-originated call — REST and WebSocket — now goes to
+  same-origin `/api/v1/...`. `next.config.ts`'s rewrite (server-side only, reads
+  a new **server-only** `BACKEND_API_URL` env var) forwards it to the real
+  backend. Touched: `lib/axios.ts`, `useChat.ts` (WS via `window.location.origin`),
+  `useBilling/useClients/useEmailReports/useExport/useRules/useWhitelabel.ts`,
+  `useReports.ts` (shared-report fetch).
+- **BUG caught while verifying, not just theorized:** an initial version kept a
+  `typeof window !== "undefined" ? "/api/v1" : process.env.NEXT_PUBLIC_API_URL`
+  fallback "for SSR". Rebuilding and grepping `.next/static` showed the literal
+  backend URL **still shipped in the JS bundle** — Next.js inlines a
+  `NEXT_PUBLIC_*` var's value for every reference at build time, regardless of
+  whether the branch is reachable at runtime. Fixed by removing the reference
+  entirely (these are all `"use client"` hooks with no real SSR caller).
+  Verified: `grep -r "127.0.0.1:8000" .next/static/` → **zero matches** after
+  the fix (was present before).
+- `BACKEND_API_URL` documented in `frontend/.env` and `docker-compose.yml`;
+  `NEXT_PUBLIC_API_URL` kept only as a placeholder for a genuine future
+  server-side caller, not read by any client code.
+
+## Full functional test pass (post-proxy) — `useBoardColumns` dedup hardening
+
+- **Investigated:** a task briefly appeared as two cards in two columns right
+  after a status change (e.g. Pending + Started at once). Root-caused via live
+  React fiber inspection: `useBoardColumns` (`hooks/useProjects.ts`) runs one
+  independent React Query per status column; right after a mutation they
+  invalidate and refetch asynchronously, so there's a window where the moved
+  task is still cached under its old column while already present under the
+  new one.
+- **Fix:** when flattening the six column results into one `tasks` array,
+  de-dupe by `id`, keeping whichever copy has the newer `updated_at`. Column
+  badge counts are untouched (they already come from each query's own
+  server-side `meta.total`, not the flattened array).
+- Note: the specific *visible* duplicate-card symptom that triggered this
+  investigation turned out to be a test-harness artifact (the automated
+  browser tab reports `document.hidden = true`, which pauses
+  `requestAnimationFrame` and freezes every framer-motion transition
+  site-wide — confirmed harmless via React state inspection showing the
+  correct single de-duped task the whole time). The dedup change is kept
+  regardless as a real hardening against the underlying per-column cache race.

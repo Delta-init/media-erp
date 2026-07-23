@@ -1,4 +1,7 @@
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Same-origin (relative) — never reference NEXT_PUBLIC_API_URL here even
+// behind a typeof-window check: Next.js inlines its literal value into the
+// client bundle for every reference regardless of reachability. See lib/axios.ts.
+const API = "";
 
 export interface ExportParams {
   platform?: string;

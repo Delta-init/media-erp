@@ -276,10 +276,11 @@ export function useSharedReport(token: string) {
   return useQuery({
     queryKey: ["reports", "shared", token],
     queryFn: async () => {
-      // Public endpoint — no auth header needed
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1$/, "") ?? "http://localhost:8000"}/api/v1/reports/shared/${token}`
-      );
+      // Public endpoint — no auth header needed. Same-origin (relative) so the
+      // backend's real host never appears in the browser — see lib/axios.ts.
+      // (Never reference NEXT_PUBLIC_API_URL here, even conditionally: its
+      // literal value gets inlined into the client bundle for every reference.)
+      const res = await fetch(`/api/v1/reports/shared/${token}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.message ?? "Report not found");
       return json.data as { report: SavedReport; data: { data: Record<string, unknown>[]; metrics: string[]; dimensions: string[]; chart_type: string } };

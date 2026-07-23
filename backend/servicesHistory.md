@@ -248,3 +248,11 @@ tested against a foreign API. `bun --watch` respawns itself — kill the parent.
 - Verified lossless: walking 9 pages of 10 returned exactly 86 unique tasks with
   zero duplicates; per-column paging (`status=pending`, 6 pages of 5) returned
   all 28 with no gaps.
+
+## Frontend same-origin API proxy (2026-07-19) — no backend change
+Purely a frontend routing change (see frontend/componentsHistory.md). Noted here
+because it affects how the backend is reached: in production, ALL browser
+traffic (REST + WebSocket) now arrives via the frontend's Next.js server acting
+as a reverse proxy, rather than directly from browsers. CORS on the backend can
+eventually be tightened to just the frontend origin once this is confirmed live,
+since direct cross-origin browser calls are no longer the intended path.

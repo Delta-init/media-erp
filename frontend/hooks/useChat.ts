@@ -148,10 +148,11 @@ export function useChatSocket(currentUserId: string | null) {
       typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
     if (!token) return;
 
-    const base =
-      process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
-    const wsBase = base.replace(/^http/, "ws");
-    const ws = new WebSocket(`${wsBase}/chat/ws?token=${encodeURIComponent(token)}`);
+    // Same-origin, like every other API call — the browser never learns the
+    // backend's real host. next.config.ts rewrites /api/v1/* (including this
+    // WebSocket upgrade) to the backend server-side.
+    const wsBase = window.location.origin.replace(/^http/, "ws");
+    const ws = new WebSocket(`${wsBase}/api/v1/chat/ws?token=${encodeURIComponent(token)}`);
     wsRef.current = ws;
 
     ws.onmessage = (evt) => {

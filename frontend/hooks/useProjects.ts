@@ -158,7 +158,24 @@ export function useBoardColumns(
     }),
   });
 
-  const tasks: Task[] = results.flatMap((r) => r.data?.items ?? []);
+  // Each column is fetched (and invalidated) independently, so right after a
+  // status change there's a window where the moved task is still cached under
+  // its OLD column while already present under its NEW one — a duplicate card
+  // in two places at once. That window can outlast a normal re-render cycle
+  // (observed: stale copies surviving several seconds without a manual
+  // refresh), so we can't just trust "the stale query will catch up." Instead,
+  // de-dupe by id and keep whichever copy has the newer `updated_at` — that's
+  // always the column the task actually belongs to right now.
+  const byId = new Map<string, Task>();
+  for (const r of results) {
+    for (const t of r.data?.items ?? []) {
+      const existing = byId.get(t.id);
+      if (!existing || new Date(t.updated_at) >= new Date(existing.updated_at)) {
+        byId.set(t.id, t);
+      }
+    }
+  }
+  const tasks: Task[] = [...byId.values()];
 
   const meta: Record<string, ColumnMeta> = {};
   BOARD_COLUMNS.forEach((col, i) => {
