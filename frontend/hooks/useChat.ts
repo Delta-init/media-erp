@@ -25,6 +25,52 @@ function newClientId(): string {
   return `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+interface Mergeable {
+  id: string;
+  content: string;
+  from_user_id: string;
+  created_at: string;
+  client_id?: string;
+  status?: "sending" | "sent";
+}
+
+/**
+ * Merge a fresh REST snapshot with whatever's already cached, instead of
+ * overwriting it outright. A GET can resolve *after* the WebSocket has
+ * already pushed a newer message into the cache (e.g. the request was in
+ * flight when a message arrived, or fired again on refocus/remount while
+ * one was mid-send) — a plain replace would silently wipe that message
+ * until some later fetch happens to include it again. Real messages are
+ * never deleted server-side; this was purely a client-side render race.
+ */
+function mergeMessages<T extends Mergeable>(prev: T[], fresh: T[]): T[] {
+  const byId = new Map<string, T>();
+  for (const m of prev) byId.set(m.id, m);
+
+  for (const m of fresh) {
+    // A still-"sending" optimistic entry has no counterpart in `fresh`
+    // (REST never echoes a client_id) — reconcile it by sender + content
+    // so the confirmed message doesn't show up as a duplicate alongside
+    // its own optimistic placeholder while waiting for the WS echo.
+    for (const [k, v] of byId) {
+      if (
+        v.status === "sending" &&
+        v.from_user_id === m.from_user_id &&
+        v.content === m.content &&
+        k !== m.id
+      ) {
+        byId.delete(k);
+        break;
+      }
+    }
+    byId.set(m.id, m);
+  }
+
+  return Array.from(byId.values()).sort((a, b) =>
+    a.created_at.localeCompare(b.created_at)
+  );
+}
+
 // ── REST queries ──────────────────────────────────────────────────────────────
 
 export function useChatUsers() {
@@ -57,9 +103,15 @@ export function useMentionableTasks(search: string) {
 }
 
 export function useChatMessages(otherId: string | null) {
+  const qc = useQueryClient();
+  const queryKey = ["chat", "messages", otherId] as const;
   return useQuery<ChatMessage[]>({
-    queryKey: ["chat", "messages", otherId],
-    queryFn: () => api.get(`/chat/messages/${otherId}`).then((r) => r.data),
+    queryKey,
+    queryFn: async () => {
+      const { data } = await api.get<ChatMessage[]>(`/chat/messages/${otherId}`);
+      const prev = qc.getQueryData<ChatMessage[]>(queryKey) ?? [];
+      return mergeMessages(prev, data);
+    },
     enabled: !!otherId,
     staleTime: 0,
   });
@@ -86,9 +138,15 @@ export function useGroups() {
 }
 
 export function useGroupMessages(groupId: string | null) {
+  const qc = useQueryClient();
+  const queryKey = ["chat", "group-messages", groupId] as const;
   return useQuery<GroupMessage[]>({
-    queryKey: ["chat", "group-messages", groupId],
-    queryFn: () => api.get(`/chat/groups/${groupId}/messages`).then((r) => r.data),
+    queryKey,
+    queryFn: async () => {
+      const { data } = await api.get<GroupMessage[]>(`/chat/groups/${groupId}/messages`);
+      const prev = qc.getQueryData<GroupMessage[]>(queryKey) ?? [];
+      return mergeMessages(prev, data);
+    },
     enabled: !!groupId,
     // Poll so the automated 9 PM IST report (posted by the backend daemon) shows up
     refetchInterval: 12_000,
@@ -123,10 +181,15 @@ export function useAdminConversations(enabled: boolean) {
 }
 
 export function useAdminMessages(userAId: string | null, userBId: string | null) {
+  const qc = useQueryClient();
+  const queryKey = ["chat", "admin", "messages", userAId, userBId] as const;
   return useQuery<ChatMessage[]>({
-    queryKey: ["chat", "admin", "messages", userAId, userBId],
-    queryFn: () =>
-      api.get(`/chat/admin/messages/${userAId}/${userBId}`).then((r) => r.data),
+    queryKey,
+    queryFn: async () => {
+      const { data } = await api.get<ChatMessage[]>(`/chat/admin/messages/${userAId}/${userBId}`);
+      const prev = qc.getQueryData<ChatMessage[]>(queryKey) ?? [];
+      return mergeMessages(prev, data);
+    },
     enabled: !!(userAId && userBId),
     refetchInterval: 8_000,   // live refresh for the admin view
     staleTime: 0,

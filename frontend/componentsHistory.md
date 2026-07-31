@@ -244,3 +244,37 @@
   site-wide — confirmed harmless via React state inspection showing the
   correct single de-duped task the whole time). The dedup change is kept
   regardless as a real hardening against the underlying per-column cache race.
+
+## Chat — messages disappearing (`hooks/useChat.ts`)
+
+- **Reported:** chat messages (1:1 and group) would visibly vanish after
+  being delivered, and could also seem to arrive late.
+- **Root-caused:** `useChatMessages`/`useGroupMessages`/`useAdminMessages`
+  all use `staleTime: 0`, so every remount (e.g. switching conversations,
+  since the chat window is keyed by partner id) or window-focus event fires
+  a fresh `GET /chat/messages/...`. The WebSocket handler pushes new
+  messages straight into the same React Query cache entry. The REST
+  query's `queryFn` had no merge logic — it just replaced the cached array
+  outright. If a GET was issued (or refetched) around the same time a
+  message arrived over the socket, its response reflected an older DB
+  snapshot and silently wiped the WS-delivered message when it landed.
+  Verified server-side: messages are never deleted (`mark_read` only flips
+  a `read` flag) — this was purely a client-side cache-overwrite race, not
+  data loss.
+- **Fix:** added `mergeMessages()` — the REST `queryFn` now reads whatever
+  is already cached via `qc.getQueryData(queryKey)` and unions it with the
+  fresh response (keyed by `id`), instead of replacing wholesale. Any
+  message already in the cache but absent from a stale REST snapshot
+  survives. Still-`"sending"` optimistic placeholders are reconciled away
+  by sender + content match once the confirmed (real-id) message shows up
+  in a fresh response, so no duplicate appears while waiting for the WS
+  echo. Applied to all three REST message queries (`useChatMessages`,
+  `useGroupMessages`, `useAdminMessages`) — the group and admin-monitor
+  variants poll on an interval (12s / 8s) on top of `staleTime: 0`, making
+  them the most exposed to this race.
+- Verified directly against the real backend + live React Query cache
+  (not just code review): seeded a synthetic WS-pushed message into the
+  cache, confirmed a plain overwrite (the old behavior) would have dropped
+  it, and confirmed the new merge logic preserves it; also checked a
+  normal empty-cache fresh load and the "sending"-placeholder-to-confirmed
+  reconciliation path both behave correctly with no regression.
