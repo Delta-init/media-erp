@@ -257,10 +257,22 @@ export function useChatSocket(currentUserId: string | null) {
       typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
     if (!token) return;
 
-    // Same-origin, like every other API call — the browser never learns the
-    // backend's real host. next.config.ts rewrites /api/v1/* (including this
-    // WebSocket upgrade) to the backend server-side.
-    const wsBase = window.location.origin.replace(/^http/, "ws");
+    // Same-origin by default, like every other API call — the browser never
+    // learns the backend's real host, because next.config.ts rewrites
+    // /api/v1/* to the backend server-side.
+    //
+    // BUT: a rewrite can only proxy a WebSocket upgrade if the host running
+    // Next.js actually supports it. Vercel's rewrite layer proxies plain HTTP
+    // and NOT WebSocket upgrades, so on Vercel a same-origin wss:// URL never
+    // reaches the backend — REST history loads while live delivery silently
+    // never connects. Set NEXT_PUBLIC_WS_URL to the backend's own public
+    // origin (e.g. https://api-mediaerp.deltainstitutions.com) on such hosts.
+    // Leave it unset when Next.js sits behind a reverse proxy that does
+    // forward upgrades (nginx with Upgrade/Connection headers).
+    const wsOrigin =
+      process.env.NEXT_PUBLIC_WS_URL?.replace(/\/+$/, "") ||
+      window.location.origin;
+    const wsBase = wsOrigin.replace(/^http/, "ws");
     const ws = new WebSocket(`${wsBase}/api/v1/chat/ws?token=${encodeURIComponent(token)}`);
     wsRef.current = ws;
 
