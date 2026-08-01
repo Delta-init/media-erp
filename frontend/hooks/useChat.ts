@@ -154,17 +154,63 @@ export function useGroupMessages(groupId: string | null) {
   });
 }
 
+export type ReportPeriod = "daily" | "weekly" | "monthly";
+
+export const REPORT_PERIOD_OPTIONS: { value: ReportPeriod; label: string }[] = [
+  { value: "daily",   label: "Daily report" },
+  { value: "weekly",  label: "Weekly report" },
+  { value: "monthly", label: "Monthly report" },
+];
+
 export function useSendGroupReportNow() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (groupId: string) =>
-      api.post(`/chat/groups/${groupId}/report/send-now`).then((r) => r.data),
-    onSuccess: (_data, groupId) => {
+    mutationFn: ({ groupId, period }: { groupId: string; period: ReportPeriod }) =>
+      api
+        .post(`/chat/groups/${groupId}/report/send-now`, null, { params: { period } })
+        .then((r) => r.data),
+    onSuccess: (_data, { groupId, period }) => {
       qc.invalidateQueries({ queryKey: ["chat", "group-messages", groupId] });
       qc.invalidateQueries({ queryKey: ["chat", "groups"] });
-      toast.success("Daily report posted to the group");
+      const label = REPORT_PERIOD_OPTIONS.find((o) => o.value === period)?.label ?? "Report";
+      toast.success(`${label} posted to the group`);
     },
-    onError: () => toast.error("Failed to post daily report"),
+    onError: () => toast.error("Failed to post report"),
+  });
+}
+
+/** Download a team's report as a PDF (default: monthly) without posting it to chat. */
+export function useExportGroupReportPdf() {
+  return useMutation({
+    mutationFn: async ({
+      groupId,
+      groupName,
+      period = "monthly",
+    }: {
+      groupId: string;
+      groupName: string;
+      period?: ReportPeriod;
+    }) => {
+      const token = localStorage.getItem("access_token");
+      const res = await fetch(`/api/v1/chat/groups/${groupId}/report/export/pdf?period=${period}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error((json as { detail?: string }).detail ?? "Export failed");
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `${groupName.trim().toLowerCase().replace(/\s+/g, "_")}_${period}_report.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(objectUrl);
+    },
+    onSuccess: () => toast.success("Report PDF downloaded"),
+    onError: (e: Error) => toast.error(e.message || "Failed to export PDF"),
   });
 }
 

@@ -278,3 +278,73 @@
   it, and confirmed the new merge logic preserves it; also checked a
   normal empty-cache fresh load and the "sending"-placeholder-to-confirmed
   reconciliation path both behave correctly with no regression.
+
+## Group chat — "Send report now" → daily/weekly/monthly dropdown
+
+- **Feature:** the group-chat header's "Send report now" button (previously
+  a single action that always posted the daily activity report) is now a
+  small dropdown (`SendReportMenu` in `app/(dashboard)/chat/page.tsx`) with
+  Daily / Weekly / Monthly options — same conditional-render popover
+  pattern the file already uses for its @mention picker (no
+  `AnimatePresence`, plain outside-click-to-close), not the animated
+  `NotificationBell` style, to stay consistent with this file's own
+  existing popovers.
+- **Backend:** `POST /chat/groups/{id}/report/send-now` now takes an
+  optional `period: "daily" | "weekly" | "monthly"` query param (FastAPI
+  `Literal`, defaults to `"daily"` — the 21:00 IST scheduler's existing
+  call site is untouched and keeps behaving exactly as before).
+  `group_chat_service.py` gained `_period_range()`: "daily" is the IST
+  calendar day (unchanged), "weekly"/"monthly" are rolling windows (last
+  7 / 30 days from now, not calendar-aligned) so an on-demand report always
+  reflects "recent activity" regardless of which day it's triggered.
+  `build_daily_report_text` / `post_member_reports` / `post_daily_report`
+  all take the new `period` param and adjust their header, date range, and
+  "Done today/this week/this month" wording accordingly.
+- **Frontend:** `useSendGroupReportNow` now takes `{ groupId, period }`
+  instead of just `groupId`; added `REPORT_PERIOD_OPTIONS` (shared between
+  the dropdown's labels and the mutation) and an exported `ReportPeriod`
+  type in `hooks/useChat.ts`.
+- Verified backend end-to-end via direct API calls (not just code
+  review): posted daily/weekly/monthly reports against a real group and
+  confirmed each produced the correct header, date range, and per-member
+  wording; confirmed the no-`period` call still defaults to daily
+  (backward-compatible with the cron); confirmed an invalid period value
+  is rejected with 422. The dropdown itself couldn't be visually
+  screenshotted in this session's browser pane — it's blocked by the same
+  pre-existing `document.hidden`/frozen-`AnimatePresence` test-harness
+  artifact documented earlier in this file, unrelated to this change.
+- **Regression pass across every real group:** re-ran the daily/weekly/
+  monthly send-now call against all 9 chat groups in the database (27 calls
+  total, spanning 1-member up to 4-member teams) — every combination
+  returned 200 with a valid posted message, no edge cases broke.
+
+### Added — Export monthly report as PDF
+
+- **Feature:** the dropdown gained a 4th, visually separated item, "Export
+  monthly report (PDF)" (`FileText` icon), which downloads a PDF instead of
+  posting to chat. New `useExportGroupReportPdf()` hook in `hooks/useChat.ts`
+  — plain `fetch` + blob + synthetic `<a download>` click, same pattern as
+  the existing campaign export in `hooks/useExport.ts`.
+- **Backend:** new `GET /chat/groups/{id}/report/export/pdf` endpoint
+  (`period` query param, default `"monthly"`, same
+  `daily`/`weekly`/`monthly` `Literal`). Streams a `StreamingResponse` with
+  `Content-Disposition: attachment`. Reuses the exact same access check as
+  send-now via a new shared `_resolve_report_group()` helper (pure
+  extraction, not a behavior change) — Super Admin/Admin/Coordinator or the
+  team's leader only.
+- `group_chat_service.py` gained `build_group_report_pdf(db, team, period)`
+  — reportlab `SimpleDocTemplate`/`Table`, styled to match the existing
+  campaign PDF export in `routers/export.py` (dark header row, zebra-striped
+  body, `Helvetica`). One table row per team member with their completed
+  and pending task counts + titles for the period.
+- Verified against the live backend across all 9 groups × all 3 periods
+  (27 calls, not just the monthly path the UI exposes): every response was
+  a genuine PDF (`%PDF-` magic header), correct `application/pdf`
+  content-type and filename, and PDF size scaled up with member count
+  (single-member groups ~2.0–2.1 KB, the 4-member "design team" ~2.6 KB) —
+  confirming the per-member table actually grows rather than silently
+  truncating. The permission check itself wasn't independently re-tested
+  with a live low-privilege account (no working demo credentials on hand
+  for a non-leader employee at verification time) — confirmed instead by
+  direct diff against the already-verified `send-now` check, since both
+  endpoints now call the identical extracted `_resolve_report_group()`.

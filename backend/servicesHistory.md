@@ -256,3 +256,75 @@ traffic (REST + WebSocket) now arrives via the frontend's Next.js server acting
 as a reverse proxy, rather than directly from browsers. CORS on the backend can
 eventually be tightened to just the frontend origin once this is confirmed live,
 since direct cross-origin browser calls are no longer the intended path.
+
+## Group report periods (daily/weekly/monthly) + PDF export (2026-08-01)
+- `group_chat_service.py`: added `_period_range(period)` — "daily" is the IST
+  calendar day (unchanged, what the 21:00 IST scheduler posts once a day);
+  "weekly"/"monthly" are rolling windows (last 7/30 days from now, not
+  calendar-aligned) so an on-demand report always reflects recent activity
+  regardless of which day it's triggered. Extracted the team-level counting
+  logic that used to live inline in `build_daily_report_text` into a shared
+  `_team_report_stats(db, team, period)` so the chat-message report and the
+  new PDF export can never drift apart. `build_daily_report_text`,
+  `post_member_reports`, `post_daily_report`, and `_member_report_rows` all
+  gained a `period: str = "daily"` param — every existing call site
+  (including the 21:00 IST scheduler and the nightly employee email digest)
+  is unaffected since the default preserves prior behaviour exactly.
+- Added `build_group_report_pdf(db, team, period)` — reportlab-based PDF
+  (title + summary line + one table row per member listing their completed
+  and pending tasks for the period), following the same styling pattern as
+  the existing campaign PDF export in `routers/export.py`.
+- `routers/chat.py`: `POST /chat/groups/{id}/report/send-now` now takes an
+  optional `period` query param (`Literal["daily","weekly","monthly"]`,
+  default `"daily"`). Added `GET /chat/groups/{id}/report/export/pdf`
+  (default `period="monthly"`) which streams the PDF as a download instead
+  of posting to the group. Both endpoints share one `_resolve_report_group`
+  helper for the group/team lookup and the Super Admin/Admin/Coordinator-or-
+  team-leader access check (a pure extraction of the pre-existing send-now
+  check — not a behavior change).
+- Verified end-to-end against the live backend, not just code review: posted
+  daily/weekly/monthly reports and exported daily/weekly/monthly PDFs across
+  all 9 real chat groups (27 + 27 calls) — every combination returned 200
+  with correctly period-labeled content (or a valid `%PDF-` PDF, correct
+  `Content-Disposition` filename, non-trivial size scaling with member
+  count). Confirmed the no-`period` call still defaults to daily
+  (backward-compatible) and an invalid period value is rejected with 422.
+
+## BUG FOUND & FIXED: `reportlab`/`openpyxl` missing from the real venv (2026-08-01)
+User hit "Export failed" on the new monthly-report PDF button. Root cause was
+**not** the new feature's code — `backend/.venv` (the actual environment
+powering the live app the user runs) had neither `reportlab` nor `openpyxl`
+installed, and **neither was ever listed in `requirements.txt`**. Both imports
+are lazy (inside the function body), so every request re-attempted the import
+and 500'd with a bare "Internal Server Error" the moment any export path
+(the new group-report PDF, and the pre-existing campaign Excel/PDF export)
+was actually exercised through that venv.
+
+This also retroactively explains an earlier mystery from this same session:
+`/export/campaigns/{excel,pdf}` 500'd "on the live server" but worked fine
+from a standalone script — that was never a stale-process/state issue, it was
+this same missing-dependency gap. The standalone script happened to run under
+the system Python (which had both packages installed from earlier ad-hoc
+work), not the project's `.venv`.
+
+A separate, unrelated contributing factor found while debugging: **two
+independent backend processes were both listening on port 8000** (one
+`preview_start`-launched instance using system Python, one the user's own
+`.venv`-based `uvicorn --reload`), left over from `preview_start` being
+invoked multiple times across this long session without the prior instance
+being stopped. Requests could land on either nondeterministically depending
+on which loopback address Windows routed to. Stopped the redundant one —
+only the user's own `.venv`-based process should be running against real app
+data going forward.
+
+**Fix:**
+1. Added `openpyxl==3.1.5` and `reportlab==4.5.1` to `requirements.txt`.
+2. `pip install`ed both into `backend/.venv` directly (no process restart
+   needed — the imports are lazy, so the very next request picked them up).
+
+**Verified:** re-ran the exact failing request (Content Studio, monthly PDF)
+against the live server → 200, genuine `%PDF-1.4` file. Also re-verified the
+pre-existing `/export/campaigns/excel` and `/export/campaigns/pdf` endpoints,
+which were silently broken by the same gap and are now fixed too. Full
+regression: 54/54 (9 groups × 3 periods × {send-now, export-pdf}) against the
+real, single remaining backend process.

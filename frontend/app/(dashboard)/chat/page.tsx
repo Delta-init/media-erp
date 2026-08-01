@@ -8,6 +8,7 @@ import {
   AtSign,
   Check,
   CheckCheck,
+  ChevronDown,
   Clock,
   Eye,
   FileText,
@@ -32,9 +33,12 @@ import {
   useChatUsers,
   useGroups,
   useGroupMessages,
+  useExportGroupReportPdf,
   useMentionableTasks,
   useSendGroupReportNow,
   useUnreadCounts,
+  REPORT_PERIOD_OPTIONS,
+  type ReportPeriod,
   type SendExtras,
 } from "@/hooks/useChat";
 import { useUploadAttachments } from "@/hooks/useUpload";
@@ -657,6 +661,77 @@ function GroupBubble({ msg, isOwn }: { msg: GroupMessage; isOwn: boolean }) {
   );
 }
 
+// ── "Send report now" dropdown (daily / weekly / monthly) ────────────────────
+
+function SendReportMenu({ groupId, groupName }: { groupId: string; groupName: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const sendReport = useSendGroupReportNow();
+  const exportPdf = useExportGroupReportPdf();
+  const busy = sendReport.isPending || exportPdf.isPending;
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
+  function choose(period: ReportPeriod) {
+    setOpen(false);
+    sendReport.mutate({ groupId, period });
+  }
+
+  function exportMonthlyPdf() {
+    setOpen(false);
+    exportPdf.mutate({ groupId, groupName, period: "monthly" });
+  }
+
+  return (
+    <div ref={ref} className="relative ml-auto shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={busy}
+        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
+        title="Post a report now"
+      >
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Megaphone className="size-3.5" />}
+        <span className="hidden sm:inline">Send report now</span>
+        <ChevronDown className={cn("size-3 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1.5 z-50 w-48 overflow-hidden rounded-xl border bg-card shadow-lg">
+          <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+            Post to chat
+          </p>
+          {REPORT_PERIOD_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => choose(opt.value)}
+              className="flex w-full items-center px-3 py-2 text-left text-xs font-medium hover:bg-muted transition-colors"
+            >
+              {opt.label}
+            </button>
+          ))}
+          <div className="my-1 border-t" />
+          <button
+            type="button"
+            onClick={exportMonthlyPdf}
+            className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-medium hover:bg-muted transition-colors"
+          >
+            <FileText className="size-3.5 text-muted-foreground" />
+            Export monthly report (PDF)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GroupChatWindow({
   group,
   myId,
@@ -671,7 +746,6 @@ function GroupChatWindow({
   onBack?: () => void;
 }) {
   const { data: messages = [], isLoading } = useGroupMessages(group.id);
-  const sendReport = useSendGroupReportNow();
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -698,18 +772,7 @@ function GroupChatWindow({
             {group.member_count} member{group.member_count !== 1 ? "s" : ""} · Daily report at 9 PM IST
           </p>
         </div>
-        {isPrivileged && (
-          <button
-            type="button"
-            onClick={() => sendReport.mutate(group.id)}
-            disabled={sendReport.isPending}
-            className="ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-muted transition-colors disabled:opacity-50"
-            title="Post today's report now"
-          >
-            {sendReport.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Megaphone className="size-3.5" />}
-            <span className="hidden sm:inline">Send report now</span>
-          </button>
-        )}
+        {isPrivileged && <SendReportMenu groupId={group.id} groupName={group.name} />}
       </div>
 
       {/* Messages */}

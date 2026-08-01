@@ -25,9 +25,8 @@ from app.utils.timezone import utc_iso
 _POLL_INTERVAL_SEC = 60
 _REPORT_HOUR_IST = 21  # 9 PM IST
 
-# Sentinel sender for automated report posts
+# Sentinel sender id for automated report posts (display name is period-aware — see post_daily_report)
 SYSTEM_SENDER_ID = "system"
-SYSTEM_SENDER_NAME = "📊 Daily Report"
 
 _COMPLETED_STATUS = "approved"
 
@@ -216,12 +215,41 @@ def _as_utc(value) -> datetime | None:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-async def build_daily_report_text(db: AsyncIOMotorDatabase, team: dict) -> str:
-    """Format today's (IST) task activity for a team as a chat message."""
-    team_id = str(team["_id"])
+_PERIOD_LABELS = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}
+_PERIOD_WINDOW_DAYS = {"weekly": 7, "monthly": 30}
+
+
+def _period_range(period: str) -> tuple[datetime, datetime, str]:
+    """
+    Return (start_utc, end_utc, date_label) for a report period.
+
+    "daily" is the IST calendar day so far (unchanged behaviour — this is
+    what the 21:00 IST scheduler posts once a day). "weekly"/"monthly" are
+    rolling windows (last 7 / 30 days up to now) rather than calendar-aligned
+    periods, so a report sent on demand always covers "recent activity" no
+    matter what day it's triggered.
+    """
     ist_now = datetime.now(IST)
-    start_utc = ist_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     end_utc = ist_now.astimezone(timezone.utc)
+    if period == "daily":
+        start_utc = ist_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+        date_label = ist_now.strftime("%d %b %Y")
+    else:
+        days = _PERIOD_WINDOW_DAYS.get(period, 1)
+        start_ist = ist_now - timedelta(days=days)
+        start_utc = start_ist.astimezone(timezone.utc)
+        date_label = f"{start_ist.strftime('%d %b')} – {ist_now.strftime('%d %b %Y')}"
+    return start_utc, end_utc, date_label
+
+
+async def _team_report_stats(db: AsyncIOMotorDatabase, team: dict, period: str = "daily") -> dict:
+    """
+    Shared team-level counters for a report period — used by both the chat
+    summary message and the PDF export so the two never drift apart.
+    """
+    team_id = str(team["_id"])
+    start_utc, end_utc, date_label = _period_range(period)
+    period_label = _PERIOD_LABELS.get(period, "Daily")
 
     tasks = await db["project_tasks"].find({"team_id": team_id}).to_list(5000)
 
@@ -250,9 +278,21 @@ async def build_daily_report_text(db: AsyncIOMotorDatabase, team: dict) -> str:
         for u in await db["users"].find({"_id": {"$in": ids}}, {"name": 1}).to_list(500):
             name_map[str(u["_id"])] = u.get("name", "Unknown")
 
-    date_label = ist_now.strftime("%d %b %Y")
+    return {
+        "created": created, "completed": completed, "active": active,
+        "per_member": per_member, "name_map": name_map,
+        "date_label": date_label, "period_label": period_label,
+    }
+
+
+async def build_daily_report_text(db: AsyncIOMotorDatabase, team: dict, period: str = "daily") -> str:
+    """Format a team's task activity over the report period as a chat message."""
+    s = await _team_report_stats(db, team, period)
+    created, completed, active = s["created"], s["completed"], s["active"]
+    per_member, name_map = s["per_member"], s["name_map"]
+
     lines = [
-        f"📊 Daily Report — {team.get('name', 'Team')} · {date_label}",
+        f"📊 {s['period_label']} Report — {team.get('name', 'Team')} · {s['date_label']}",
         f"Created: {created} · Completed: {completed} · In progress: {active}",
     ]
 
@@ -269,7 +309,8 @@ async def build_daily_report_text(db: AsyncIOMotorDatabase, team: dict) -> str:
         lines.append("——")
         lines.extend(member_lines)
     elif created == 0 and completed == 0:
-        lines.append("No task activity logged today.")
+        window = "today" if period == "daily" else f"in the last {_PERIOD_WINDOW_DAYS.get(period, 1)} days"
+        lines.append(f"No task activity logged {window}.")
 
     return "\n".join(lines)
 
@@ -283,16 +324,18 @@ _OPEN_STATUS_LABELS = {
 }
 
 
-async def post_member_reports(db: AsyncIOMotorDatabase, group: dict, team: dict) -> None:
+async def post_member_reports(db: AsyncIOMotorDatabase, group: dict, team: dict, period: str = "daily") -> None:
     """
-    Post one message per member into the group: their named tasks done today
-    (IST) and everything still pending. Members with no tasks are skipped.
+    Post one message per member into the group: their named tasks done over
+    the report period and everything still pending. Members with no tasks
+    are skipped.
     """
     team_id = str(team["_id"])
-    ist_now = datetime.now(IST)
-    start_utc = ist_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-    end_utc = ist_now.astimezone(timezone.utc)
-    date_label = ist_now.strftime("%d %b %Y")
+    start_utc, end_utc, date_label = _period_range(period)
+    period_label = _PERIOD_LABELS.get(period, "Daily")
+    done_label = {"daily": "Done today", "weekly": "Done this week", "monthly": "Done this month"}.get(
+        period, "Done today"
+    )
 
     # Resolve member names
     name_map: dict[str, str] = {}
@@ -321,8 +364,8 @@ async def post_member_reports(db: AsyncIOMotorDatabase, group: dict, team: dict)
         if not done_today and not pending:
             continue  # nothing to report for this member
 
-        lines = [f"🧑 {name_map.get(uid, 'Member')} — Daily Report · {date_label}"]
-        lines.append(f"✅ Done today: {len(done_today)}")
+        lines = [f"🧑 {name_map.get(uid, 'Member')} — {period_label} Report · {date_label}"]
+        lines.append(f"✅ {done_label}: {len(done_today)}")
         for t in done_today[:15]:
             lines.append(f"   • {t.get('title', 'Task')}")
         lines.append(f"⏳ Pending: {len(pending)}")
@@ -342,31 +385,30 @@ async def post_member_reports(db: AsyncIOMotorDatabase, group: dict, team: dict)
         )
 
 
-async def post_daily_report(db: AsyncIOMotorDatabase, group: dict, team: dict) -> None:
+async def post_daily_report(db: AsyncIOMotorDatabase, group: dict, team: dict, period: str = "daily") -> None:
     """Post the team summary followed by each member's named done/pending report."""
-    text = await build_daily_report_text(db, team)
+    text = await build_daily_report_text(db, team, period=period)
+    sender_name = f"📊 {_PERIOD_LABELS.get(period, 'Daily')} Report"
     await save_group_message(
         db,
         group_id=str(group["_id"]),
         from_user_id=SYSTEM_SENDER_ID,
-        from_user_name=SYSTEM_SENDER_NAME,
+        from_user_name=sender_name,
         content=text,
         is_system=True,
     )
-    await post_member_reports(db, group, team)
+    await post_member_reports(db, group, team, period=period)
 
 
 # ── Daily individual-employee report email digest ─────────────────────────────
 
-async def _member_report_rows(db: AsyncIOMotorDatabase, team: dict) -> list[dict]:
+async def _member_report_rows(db: AsyncIOMotorDatabase, team: dict, period: str = "daily") -> list[dict]:
     """
     For every member of a team (no one skipped), return their tasks completed
-    today (IST) and everything still pending.
+    over the report period and everything still pending.
     """
     team_id = str(team["_id"])
-    ist_now = datetime.now(IST)
-    start_utc = ist_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-    end_utc = ist_now.astimezone(timezone.utc)
+    start_utc, end_utc, _ = _period_range(period)
 
     name_map: dict[str, str] = {}
     ids = [ObjectId(m["user_id"]) for m in team.get("members", []) if ObjectId.is_valid(m["user_id"])]
@@ -397,6 +439,105 @@ async def _member_report_rows(db: AsyncIOMotorDatabase, team: dict) -> list[dict
 
 def _esc(s: str) -> str:
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+# ── Report PDF export ────────────────────────────────────────────────────────
+
+async def build_group_report_pdf(db: AsyncIOMotorDatabase, team: dict, period: str = "monthly") -> bytes:
+    """Render a team's report (summary + per-member breakdown) as a PDF."""
+    import io as _io
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+
+    stats = await _team_report_stats(db, team, period)
+    rows = await _member_report_rows(db, team, period)
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=15 * mm, rightMargin=15 * mm, topMargin=15 * mm, bottomMargin=15 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "Title", parent=styles["Normal"], fontSize=16, fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#18181B"), spaceAfter=4,
+    )
+    subtitle_style = ParagraphStyle(
+        "Subtitle", parent=styles["Normal"], fontSize=10, fontName="Helvetica",
+        textColor=colors.HexColor("#6B7280"), spaceAfter=10,
+    )
+    summary_style = ParagraphStyle(
+        "Summary", parent=styles["Normal"], fontSize=10.5, fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#18181B"), spaceAfter=14,
+    )
+    section_style = ParagraphStyle(
+        "Section", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold",
+        textColor=colors.HexColor("#18181B"), spaceBefore=4, spaceAfter=6,
+    )
+    cell_style = ParagraphStyle(
+        "Cell", parent=styles["Normal"], fontSize=8, fontName="Helvetica",
+        wordWrap="CJK", leading=11,
+    )
+    cell_bold = ParagraphStyle("CellBold", parent=cell_style, fontName="Helvetica-Bold", fontSize=9)
+
+    period_label = stats["period_label"]
+    team_name = team.get("name", "Team")
+
+    story = [
+        Paragraph(f"{_esc(team_name)} — {period_label} Report", title_style),
+        Paragraph(
+            f"Period: {_esc(stats['date_label'])}  |  "
+            f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+            subtitle_style,
+        ),
+        Paragraph(
+            f"Created: {stats['created']} &nbsp;&middot;&nbsp; "
+            f"Completed: {stats['completed']} &nbsp;&middot;&nbsp; "
+            f"In progress: {stats['active']}",
+            summary_style,
+        ),
+        Paragraph("Per-member breakdown", section_style),
+    ]
+
+    header = ["Member", "Completed", "Pending"]
+    data = [header]
+    for r in rows:
+        done_lines = "<br/>".join(_esc(t) for t in r["done"][:20])
+        done_text = f"<b>{len(r['done'])}</b>" + (f"<br/>{done_lines}" if done_lines else "")
+        pending_lines = "<br/>".join(f"{_esc(t)} ({_esc(lbl)})" for t, lbl in r["pending"][:20])
+        pend_text = f"<b>{len(r['pending'])}</b>" + (f"<br/>{pending_lines}" if pending_lines else "")
+        data.append([
+            Paragraph(_esc(r["name"]), cell_bold),
+            Paragraph(done_text, cell_style),
+            Paragraph(pend_text, cell_style),
+        ])
+
+    if len(data) == 1:
+        data.append([Paragraph("No members in this team.", cell_style), "", ""])
+
+    col_widths = [45 * mm, 65 * mm, 65 * mm]
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND",     (0, 0), (-1, 0), colors.HexColor("#18181B")),
+        ("TEXTCOLOR",      (0, 0), (-1, 0), colors.white),
+        ("FONTNAME",       (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE",       (0, 0), (-1, 0), 9),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
+        ("GRID",           (0, 0), (-1, -1), 0.4, colors.HexColor("#E5E7EB")),
+        ("VALIGN",         (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING",     (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING",  (0, 0), (-1, -1), 6),
+        ("LEFTPADDING",    (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING",   (0, 0), (-1, -1), 6),
+    ]))
+    story.append(table)
+
+    doc.build(story)
+    return buf.getvalue()
 
 
 def _digest_html(sections: list[dict], date_label: str) -> str:

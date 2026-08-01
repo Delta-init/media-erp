@@ -13,8 +13,11 @@ Server → client frames:
   {"type": "online_users", "user_ids": ["..."]}
 """
 
+import io
 import json
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from bson import ObjectId
 from bson.errors import InvalidId
 from jose import JWTError
@@ -276,16 +279,11 @@ async def get_group_messages_endpoint(
     return await attach_task_snapshots([groups.group_message_to_dict(d) for d in docs])
 
 
-@router.post("/groups/{group_id}/report/send-now")
-async def send_group_report_now(
-    group_id: str,
-    current_user: dict = Depends(get_current_user),
-):
+async def _resolve_report_group(db, group_id: str, current_user: dict) -> tuple[dict, dict]:
     """
-    Post the team's daily report into the group immediately.
-    Allowed for Super Admin/Admin/Coordinator and the team's leader.
+    Shared lookup + access check for the report endpoints below. Allowed for
+    Super Admin/Admin/Coordinator and the team's leader.
     """
-    db = get_db()
     group = await groups.get_group(db, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -305,7 +303,24 @@ async def send_group_report_now(
     if role_name not in ("Super Admin", "Admin", "Coordinator") and not is_leader:
         raise HTTPException(status_code=403, detail="Leader or admin access required")
 
-    await groups.post_daily_report(db, group, team)
+    return group, team
+
+
+@router.post("/groups/{group_id}/report/send-now")
+async def send_group_report_now(
+    group_id: str,
+    period: Literal["daily", "weekly", "monthly"] = Query("daily"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Post the team's report (daily/weekly/monthly activity window) into the
+    group immediately. Allowed for Super Admin/Admin/Coordinator and the
+    team's leader.
+    """
+    db = get_db()
+    group, team = await _resolve_report_group(db, group_id, current_user)
+
+    await groups.post_daily_report(db, group, team, period=period)
     docs = await groups.get_group_messages(db, group_id, 1)
     posted = groups.group_message_to_dict(docs[-1]) if docs else None
 
@@ -315,6 +330,29 @@ async def send_group_report_now(
             await manager.send(mid, {"type": "group_message", **posted})
 
     return {"ok": True, "message": posted}
+
+
+@router.get("/groups/{group_id}/report/export/pdf")
+async def export_group_report_pdf(
+    group_id: str,
+    period: Literal["daily", "weekly", "monthly"] = Query("monthly"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Download the team's report (default: monthly) as a PDF, without posting
+    it into the chat. Same access rule as send-now.
+    """
+    db = get_db()
+    group, team = await _resolve_report_group(db, group_id, current_user)
+
+    pdf_bytes = await groups.build_group_report_pdf(db, team, period)
+    safe_name = (team.get("name") or "team").strip().lower().replace(" ", "_")
+    filename = f"{safe_name}_{period}_report.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── Super Admin monitor endpoints ─────────────────────────────────────────────

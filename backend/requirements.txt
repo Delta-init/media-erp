@@ -37,6 +37,10 @@ aiohttp==3.11.10
 # Object storage — Cloudflare R2 (S3-compatible)
 boto3==1.35.99
 
+# Report exports (campaign Excel/PDF, group chat report PDF)
+openpyxl==3.1.5
+reportlab==4.5.1
+
 # Observability (Phase 8.7 — no-op when SENTRY_DSN is empty)
 sentry-sdk[fastapi]==2.19.2
 
