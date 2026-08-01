@@ -34,11 +34,15 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-// Token refresh state — prevents concurrent 401s from firing multiple refresh calls
+// Token refresh state — prevents concurrent 401s (and WebSocket reconnects,
+// see useChatSocket in hooks/useChat.ts) from firing multiple refresh calls.
+// The backend rotates the refresh token on every use, so two independent
+// refresh calls racing on the same stored refresh_token would have the
+// second one fail — everything MUST funnel through this single-flight guard.
 let _isRefreshing = false;
-let _refreshQueue: Array<(token: string) => void> = [];
+let _refreshQueue: Array<(token: string | null) => void> = [];
 
-function _flushQueue(token: string) {
+function _flushQueue(token: string | null) {
   _refreshQueue.forEach((cb) => cb(token));
   _refreshQueue = [];
 }
@@ -56,6 +60,66 @@ function _clearAuth() {
     // store not yet initialised — tokens already removed above
   }
   window.location.href = "/login";
+}
+
+/**
+ * Refresh the access token using the stored refresh token. Single-flight —
+ * concurrent callers (a REST 401, a WebSocket reconnect) share one in-flight
+ * refresh instead of racing to rotate the same refresh token.
+ *
+ * Returns the new access token, or null if refresh failed (auth is cleared
+ * and the browser redirected to /login in that case — same as before).
+ */
+export async function refreshAccessToken(): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+
+  if (_isRefreshing) {
+    return new Promise((resolve) => {
+      _refreshQueue.push(resolve);
+    });
+  }
+
+  const refreshToken = localStorage.getItem("refresh_token");
+  if (!refreshToken) {
+    _clearAuth();
+    return null;
+  }
+
+  _isRefreshing = true;
+  try {
+    const { data } = await axios.post(
+      `${baseURL}/auth/refresh`,
+      { refresh_token: refreshToken },
+      { headers: { "Content-Type": "application/json" } },
+    );
+
+    const newAccess: string = data.data.access_token;
+    const newRefresh: string = data.data.refresh_token;
+    const user = data.data.user;
+
+    // Persist new tokens
+    localStorage.setItem("access_token", newAccess);
+    localStorage.setItem("refresh_token", newRefresh);
+    document.cookie = `access_token=${newAccess}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+
+    // Update Zustand store so UI reflects any user changes
+    try {
+      const { useAuthStore } = require("@/stores/authStore");
+      useAuthStore.getState().setAuth(user, newAccess, newRefresh);
+    } catch {
+      // store not yet initialised — tokens already persisted above
+    }
+
+    _flushQueue(newAccess);
+    return newAccess;
+  } catch {
+    // Refresh failed — session truly expired
+    _flushQueue(null);
+    _clearAuth();
+    return null;
+  } finally {
+    _isRefreshing = false;
+  }
 }
 
 // 401 → attempt token refresh, then retry original request
@@ -76,65 +140,12 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    const refreshToken = localStorage.getItem("refresh_token");
-    if (!refreshToken) {
-      _clearAuth();
-      return Promise.reject(error);
-    }
-
-    // If a refresh is already in flight, queue this request until it resolves
-    if (_isRefreshing) {
-      return new Promise((resolve, reject) => {
-        _refreshQueue.push((newToken) => {
-          originalRequest.headers.Authorization = `Bearer ${newToken}`;
-          resolve(api(originalRequest));
-        });
-        // If refresh ultimately fails the queue will be cleared in the catch below
-        void reject; // TypeScript: suppress unused-variable warning
-      });
-    }
-
     originalRequest._retry = true;
-    _isRefreshing = true;
+    const newAccess = await refreshAccessToken();
+    if (!newAccess) return Promise.reject(error);
 
-    try {
-      const { data } = await axios.post(
-        `${baseURL}/auth/refresh`,
-        { refresh_token: refreshToken },
-        { headers: { "Content-Type": "application/json" } },
-      );
-
-      const newAccess: string = data.data.access_token;
-      const newRefresh: string = data.data.refresh_token;
-      const user = data.data.user;
-
-      // Persist new tokens
-      localStorage.setItem("access_token", newAccess);
-      localStorage.setItem("refresh_token", newRefresh);
-      document.cookie = `access_token=${newAccess}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
-
-      // Update Zustand store so UI reflects any user changes
-      try {
-        const { useAuthStore } = require("@/stores/authStore");
-        useAuthStore.getState().setAuth(user, newAccess, newRefresh);
-      } catch {
-        // store not yet initialised — tokens already persisted above
-      }
-
-      // Flush queued requests with the new token
-      _flushQueue(newAccess);
-
-      // Retry the original request
-      originalRequest.headers.Authorization = `Bearer ${newAccess}`;
-      return api(originalRequest);
-    } catch {
-      // Refresh failed — session truly expired
-      _refreshQueue = [];
-      _clearAuth();
-      return Promise.reject(error);
-    } finally {
-      _isRefreshing = false;
-    }
+    originalRequest.headers.Authorization = `Bearer ${newAccess}`;
+    return api(originalRequest);
   },
 );
 

@@ -348,3 +348,47 @@
   for a non-leader employee at verification time) — confirmed instead by
   direct diff against the already-verified `send-now` check, since both
   endpoints now call the identical extracted `_resolve_report_group()`.
+
+## BUG FOUND & FIXED: chat messages stuck in "sending" forever (2026-08-01)
+
+User sent two messages in a group that stayed on the clock/"sending" icon
+indefinitely. Confirmed via direct DB query that neither message ever
+persisted — the WebSocket send genuinely never reached the server, this
+wasn't a UI-only glitch.
+
+**Root cause:** `useChatSocket`'s reconnect logic (`hooks/useChat.ts`) read
+`localStorage.getItem("access_token")` fresh on every `connect()` call, but
+had no way to get a *new* token if the stored one had expired — access
+tokens live only 15 minutes (`access_token_expire_minutes: int = 15` in
+`backend/app/config.py`), well within a normal chat session length. When the
+server rejects an expired/invalid token it closes with code `4001`
+(`backend/app/routers/chat.py`'s `chat_ws` handler), and the old client code
+explicitly gave up on that code (`if (evt.code === 4001) return;` — no
+retry). REST calls self-heal because axios's response interceptor refreshes
+on 401, but nothing analogous existed for the WebSocket — once its reconnect
+attempt hit an expired token, the whole chat channel was silently and
+permanently dead until a full page reload, with zero visible error.
+
+**Fix:**
+- `lib/axios.ts`: extracted the interceptor's refresh logic into an exported,
+  single-flight `refreshAccessToken()` function (concurrent callers share one
+  in-flight refresh — important because the backend rotates the refresh
+  token on every use, so two independent refresh calls racing on the same
+  stored refresh_token would have the second one fail). The REST interceptor
+  now just calls this function instead of duplicating the logic inline.
+- `hooks/useChat.ts`: `useChatSocket`'s `ws.onclose` now calls
+  `refreshAccessToken()` on a `4001` close and, if it succeeds, immediately
+  calls `connect()` again with the new token — instead of giving up. A
+  genuinely expired session (refresh also fails) still redirects to
+  `/login` via the existing `_clearAuth()` path, so there's no infinite loop.
+
+**Verified live, not just by code review:** logged into a real running
+instance, captured the actual `wsRef` from the mounted `useChatSocket` hook
+via its React fiber, corrupted the stored access token to garbage (keeping
+the refresh token valid), and force-closed the live socket with code `4001`
+— exactly reproducing what the server sends on an expired token. Confirmed:
+a brand-new WebSocket connection opened automatically carrying a genuinely
+different, valid token (proving `refreshAccessToken()` ran and
+`connect()` retried), and a message sent immediately afterward was found
+persisted in the real `messages` collection — the full recovery path works
+end-to-end, not just "the socket reconnects."

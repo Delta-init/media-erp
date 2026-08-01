@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import api from "@/lib/axios";
+import api, { refreshAccessToken } from "@/lib/axios";
 import type {
   ChatAttachment,
   ChatGroup,
@@ -351,12 +351,26 @@ export function useChatSocket(currentUserId: string | null) {
     };
 
     ws.onclose = (evt) => {
-      // 4001 = auth rejected by server — don't retry with same bad token
-      if (evt.code === 4001) return;
-      if (!unmountedRef.current) {
-        // Auto-reconnect after 3 s
-        retryTimer.current = setTimeout(connect, 3000);
+      if (unmountedRef.current) return;
+
+      // 4001 = the access token was rejected (most commonly: it expired
+      // while the chat page was open — access tokens live 15 min, well
+      // within a normal chat session). Retrying with the same stored token
+      // would just get rejected again forever, silently leaving every future
+      // send stuck in "sending" with no visible error. Refresh first — the
+      // refresh call is single-flight-guarded in lib/axios.ts, so it's safe
+      // even if a REST call is refreshing concurrently — then reconnect with
+      // the new token. If refresh genuinely fails (session truly expired),
+      // it redirects to /login on its own; don't loop.
+      if (evt.code === 4001) {
+        refreshAccessToken().then((newToken) => {
+          if (newToken && !unmountedRef.current) connect();
+        });
+        return;
       }
+
+      // Auto-reconnect after 3 s
+      retryTimer.current = setTimeout(connect, 3000);
     };
 
     ws.onerror = () => ws.close();
